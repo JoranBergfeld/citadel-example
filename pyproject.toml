@@ -1,0 +1,40 @@
+[build-system]
+requires = ["uv_build==0.12.21"]
+build-backend = "uv_build"
+
+[project]
+name = "citadel-sample"
+version = "0.1.0"
+description = "Governed cross-team collaboration sample"
+requires-python = "==3.12.15"
+dependencies = [
+    "agent-framework-core==1.21.0",
+    "agent-framework-openai==1.16.0",
+    "agent-framework-a2a==1.0.0b261002",
+    "a2a-sdk[fastapi]==1.2.1",
+    "mcp==1.30.0",
+    "openai==3.23.0",
+    "fastapi==0.141.1",
+    "starlette==1.7.0",
+    "uvicorn==0.54.0",
+    "pydantic==2.13.5",
+    "anyio==4.15.1",
+    "sse-starlette==3.5.0",
+    "httpx==0.28.1",
+    "httpx2==2.13.1",
+    "azure-identity==1.26.0",
+    "azure-core==1.41.0",
+    "azure-storage-blob==12.31.0",
+    "aiohttp==3.14.3",
+    "azure-keyvault-secrets==4.11.3",
+]
+
+[dependency-groups]
+build = ["uv_build==0.12.21"]
+
+[tool.uv]
+required-version = "==0.12.21"
+environments = ["sys_platform == 'linux' and platform_machine == 'x86_64'"]
+
+[tool.uv.build-backend]
+module-name = "citadel"

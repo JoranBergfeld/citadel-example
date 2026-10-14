@@ -1,0 +1,9 @@
+**
+!Dockerfile
+!requirements.lock
+!src/
+!src/citadel/
+!src/citadel/__init__.py
+!tests/
+!tests/stack/
+!tests/stack/*.py

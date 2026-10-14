@@ -1,5 +1,6 @@
 .worktrees/
 .venv/
+.venv-azure-cli/
 __pycache__/
 *.py[cod]
 .pytest_cache/

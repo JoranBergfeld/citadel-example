@@ -1,0 +1,2 @@
+# Provisioning tool only; never install into the application's environment.
+azure-cli==2.91.0
