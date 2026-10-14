@@ -39,9 +39,59 @@ docker run --rm --network none citadel-stack-smoke
 
 The Dockerfile fixes the Linux amd64 child digest and installs only hashed
 wheels. It copies only the package bootstrap and stack tests, runs nonroot,
-and is **not** any of the five agent/tool applications. Docker was unavailable
-in the verification WSL environment; its build/run and final image digest
-remain unverified. No daemon configuration was changed.
+and is **not** any of the five agent/tool applications.
+
+### Optional offline dependency installation
+
+When the host can reach PyPI over verified HTTPS but the container cannot,
+prefetch the **locked target wheels**, not packages from an existing environment.
+Choose a wheelhouse directory outside the checkout. The platform flags below
+cover this lock's wheels on the pinned Bookworm/glibc Linux amd64 image:
+
+```sh
+export WHEELHOUSE=/absolute/path/outside/checkout/wheelhouse
+mkdir -p "$WHEELHOUSE"
+python3 -m pip download \
+  --index-url https://pypi.org/simple \
+  --require-hashes --only-binary=:all: \
+  --python-version 3.12.15 --implementation cp --abi cp312 --abi abi3 \
+  --platform manylinux_2_36_x86_64 \
+  --platform manylinux_2_34_x86_64 \
+  --platform manylinux_2_28_x86_64 \
+  --platform manylinux_2_17_x86_64 \
+  --platform manylinux2014_x86_64 \
+  --dest "$WHEELHOUSE" --requirement requirements.lock
+
+docker build --network=none --platform linux/amd64 \
+  --build-context "wheelhouse=$WHEELHOUSE" --build-arg OFFLINE=true \
+  -t citadel-stack-smoke .
+docker run --rm --network none --read-only \
+  --cap-drop ALL --security-opt no-new-privileges citadel-stack-smoke
+```
+
+This is the same Dockerfile and exact lock. BuildKit supplies the named context
+as a read-only mount; wheels are not copied into the resulting image. Offline
+installation uses `--no-index`, `--find-links=/wheelhouse`, `--require-hashes`
+and wheel-only installation. The build's `--network=none` also prevents a
+network fallback during installation. The immutable base image must still be
+available to Docker; this is offline dependency installation, not an air-gapped
+base-image acquisition procedure.
+
+With no named context, the `wheelhouse` stage is empty. The default
+`OFFLINE=false` retains the original online install; `OFFLINE=true` without
+the necessary wheels fails rather than accessing an index. Other argument
+values fail explicitly.
+
+Verification used this path to download all 74 exact runtime wheels on the
+host, build with installation networking disabled, and run all six existing
+stack tests in the image. The image's declared UID/GID is `65532:65532`.
+A deliberately corrupted wheel was rejected by its lock hash. No TLS checks,
+package pins, daemon configuration or network policy were changed. Direct
+container HTTPS to the wheel provider still failed in that environment; the
+offline path does not claim that network fault was repaired.
+
+Record the local image ID and config digest after building. They are not
+evidence of a pushed registry image or of the five application-image builds.
 
 ## What the tests prove
 
