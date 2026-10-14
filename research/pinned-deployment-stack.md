@@ -19,6 +19,46 @@ The established remote convention is `research/*.md`, evidenced by the [previous
 
 ## 1. Package, source and container matrix
 
+### Follow-up: current agreed limits and request-lifecycle incompatibility
+
+The coordinator subsequently supplied these **agreed limits**, which supersede the earlier numerical recommendations in section 7:
+
+| Scope | Agreed cap |
+| --- | --- |
+| Overall logical run | 15 minutes / 900 seconds |
+| Agent executions | 42 total: Planner + 20 Assessor/Reviewer pairs + Briefing Author |
+| Model attempts | 128/run and 8/agent execution |
+| Model tokens | 16k input + 2k output/call; 1 million combined input/output tokens/run |
+| Model timeout | 60 seconds/call |
+| Safe read timeout | 30 seconds/attempt |
+| A2A request timeout | 180 seconds/request |
+| Safe tool/status attempts | 512/run, including at most two retries per safe logical read |
+
+Keep the supplied `16k`/`2k` notation until configuration explicitly chooses decimal versus binary units; do not silently treat the earlier 16,384/2,048 proposal as agreed.
+
+**Verified lifecycle matrix:**
+
+| Boundary | Primary evidence | Consequence |
+| --- | --- | --- |
+| ACA HTTP ingress | [Ingress overview](https://learn.microsoft.com/en-us/azure/container-apps/ingress-overview): “Request time out is 240 seconds.” | A 900-second synchronous Planner request is unsupported by this documented limit. |
+| APIM forwarding | [forward-request](https://learn.microsoft.com/en-us/azure/api-management/forward-request-policy): `timeout` waits for **response headers**; values above 240 seconds may not be honored because idle connections can be dropped. | It is not a total application-operation timer. `timeout=900` is not a solution. |
+| Agreed A2A request cap | 180 seconds, supplied by coordinator | Applies to the initial Planner request too unless explicitly exempted; it is already stricter than ACA's 240 seconds. |
+| A2A 1.0 blocking request | [SendMessageConfiguration](https://a2a-protocol.org/v1.0.0/specification/): `returnImmediately=false` or unset waits for a terminal or interrupted task state. | Cannot return a still-working task merely to evade the timeout while retaining default blocking semantics. Do not fabricate `INPUT_REQUIRED` to yield. |
+| A2A 1.0 nonblocking request | Same specification: `returnImmediately=true` returns after creating a task; caller subsequently polls Get Task, subscribes, or uses push. | Protocol-supported request/operation separation, but continuing processing after the response is a lifecycle choice. It does not establish compliance with #6's “no background delegation,” durability, or restart fencing. |
+| Streaming | [APIM SSE guidance](https://learn.microsoft.com/en-us/azure/api-management/how-to-server-sent-events) requires unbuffered delivery and idle keepalive. A2A says `returnImmediately` does not affect streaming operations. | Heartbeats address idle behavior, not proof of a 900-second ACA request or compliance with the agreed 180-second request maximum. |
+
+**Faithful strict-request/reply interpretation:** keep the 900-second logical deadline as an outer ceiling, not a promise that a request may occupy 900 seconds. For each request, use an absolute deadline no later than `min(run deadline, parent request deadline, request start + 180 seconds)`. Reserve response/cleanup time inside that limit (for example five seconds); individual model/read timeouts are `min(60 or 30 seconds, remaining work time)`. Nested Assessor and Reviewer calls do not restart the ancestor's clock. Enforce total request time in application code/client cancellation, not only APIM's header timer or an HTTP client's per-read inactivity timeout.
+
+Under that strict interpretation, the root Planner's processing must finish, fail or be fenced from further commits before its request budget expires; it cannot use the rest of the 15 minutes for continuing agent work after returning without a separately approved lifecycle. The outer run deadline can still bound status reconciliation/CLI handling after an ambiguous failure. Status reads report durable state; they must not implicitly resume the Planner or consume a new agent execution.
+
+On timeout/disconnect, do not assume the remote operation was canceled or that a missing status record means it never ran. Preserve #10's indeterminate/reconciliation contract; only established `failed_no_commit` with late execution fenced permits explicit retry. The platform timeout itself is not evidence of rollback.
+
+**Known unresolved incompatibility:** a Planner operation that actually needs 15 minutes, a universal 180-second A2A request cap, and strictly request-bound execution cannot all hold simultaneously in one root invocation. Standard nonblocking A2A can separate request and task lifetimes without requiring a broker, but the human/parent must explicitly permit the post-response execution mechanism and reconcile it with #6 before adoption. No such permission is inferred here. No source-backed, already-approved continuation mechanism was established.
+
+The count/token/time limits are intersecting ceilings, not simultaneous entitlements. Eight model attempts for each of 42 executions would be 336, so the 128 global cap wins. If `k` means decimal, 128 calls at 18,000 tokens total would be 2.304 million tokens, so the 1-million run cap can stop the run much earlier. Twenty sequential candidate invocations at their individual maximum likewise cannot be promised inside 900 seconds, much less one 180-second root request.
+
+The earlier documentary read-count envelope is still useful: 121 Reference Data reads + 23 findings reads = 144 logical reads; three attempts each use 432 of the 512 safe tool/status attempts, leaving at most 80 attempts for additional counted status/discovery/reconciliation traffic. Count attempts, not just successes; hidden SDK retries must not bypass any guard. Actual model input sizes, service latency and fixture viability remain untested.
+
 ### Strongest available documentary baseline
 
 The immutable [Microsoft Agent Framework `python-1.21.0` lock](https://github.com/microsoft/agent-framework/blob/91ab44faa4824a30247d00c341f3498ba46b1ca3/python/uv.lock) contains the following versions together. Its workspace Python constraint is `>=3.11,<3.15`. The release was published 2026-10-08. This is **upstream lock co-occurrence**, stronger than intersecting dependency ranges but weaker than running this application's dependencies or gateway flow. The workspace uses editable Framework packages, includes unrelated integrations/dev dependencies, and is not a minimal deployable application lock.
@@ -205,9 +245,9 @@ APIM call overage, registry builds/excess storage, certificate renewal, extra lo
 
 **Pricing confidence:** high for the quoted public meter values and shown arithmetic; medium for mapping the intended resource mix; low for the actual bill until workload, discounts, allowances, retention and teardown duration are known.
 
-## 7. Proposed numeric runtime limits: 20-candidate envelope
+## 7. Earlier proposed numeric runtime limits: superseded by agreed-limits follow-up
 
-These are **recommendations for #7**, not previously approved limits, measured latency, implementation, or a financial spending ceiling. Stop after three complete released candidates or after the fixed first-20 pool is exhausted. The maximum-count analysis deliberately allows all 20 candidates to reach both Assessor and Reviewer, including releasable insufficient findings.
+**Historical proposals only:** the agreed-limits follow-up in section 1 supersedes the numbers below, including 50 minutes, 64 model calls and 1.2 million tokens. Retained to distinguish the research proposal from later human choices. These were recommendations for #7, not measured latency, implementation, or a financial spending ceiling. Stop after three complete released candidates or after the fixed first-20 pool is exhausted. The maximum-count analysis deliberately allows all 20 candidates to reach both Assessor and Reviewer, including releasable insufficient findings.
 
 ### Hard counts and payloads
 
