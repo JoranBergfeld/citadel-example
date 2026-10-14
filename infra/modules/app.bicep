@@ -38,6 +38,7 @@ var baseEnvironment = [
   { name: 'CITADEL_BLOB_API_VERSION', value: '2026-10-06' }
   { name: 'CITADEL_VAULT_API_VERSION', value: '2025-07-01' }
   { name: 'CITADEL_MODEL_DEPLOYMENT', value: modelDeployment }
+  { name: 'CITADEL_MODEL_TOKENS_PER_MINUTE', value: string(application.?modelTokensPerMinute ?? 0) }
   { name: 'CITADEL_LIMITS', value: string(loadJsonContent('../limits.json')) }
   { name: 'APPLICATIONINSIGHTS_CONNECTION_STRING', secretRef: 'insights-connection' }
   { name: 'APPLICATIONINSIGHTS_AUTHENTICATION_STRING', value: 'Authorization=AAD;ClientId=${identity.properties.clientId}' }

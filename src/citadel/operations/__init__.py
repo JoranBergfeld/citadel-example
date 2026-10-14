@@ -140,10 +140,32 @@ class Operations:
         record["lease_until"] = min(record["deadline"], self.clock() + lease_seconds)
         await self.ledger.commit(document, etag, deadline=min(old_expiry, record["lease_until"]))
 
-    async def complete(self, ownership, *, product=None):
+    async def complete(self, ownership, *, product=None, finding=None, receipt=None, rejection=None):
         document, etag = await self.ledger.read()
         record = self._owned(document, ownership)
         self._resolved(record)
+        if receipt is not None:
+            budget = document["budgets"].get(record["operation_id"])
+            if (budget is None or budget["run_id"] != record["run_id"] or not budget["closed"]
+                    or receipt != budget.get("receipt")):
+                raise OperationError("conflict", "Receipt must close this execution's durable budget")
+        if finding is not None:
+            if (self.workload not in ("evidence-assessor", "release-reviewer")
+                    or receipt is None or product is not None):
+                raise OperationError("forbidden", "Collaboration completion requires a closed review budget")
+            if (not isinstance(finding, dict) or finding.keys() != {"artifact_id", "version", "sha256"}
+                    or type(finding["version"]) is not int or finding["version"] < 1
+                    or not isinstance(finding["sha256"], str)
+                    or not re.fullmatch("[a-f0-9]{64}", finding["sha256"])):
+                raise OperationError("invalid_input", "Only an exact public finding reference is permitted")
+            identity(finding["artifact_id"])
+            record["result"] = {"kind": "collaboration", "finding": deepcopy(finding)}
+        if rejection is not None:
+            if (self.workload not in ("evidence-assessor", "release-reviewer")
+                    or rejection != "draft_evidence_mismatch" or receipt is None
+                    or finding is not None or product is not None):
+                raise OperationError("forbidden", "Only a closed review may return an explicit rejection")
+            record["result"] = {"kind": "rejected", "reason": rejection}
         if product is not None:
             if self.workload not in ("candidate-planner", "briefing-author"):
                 raise OperationError("forbidden", "Only planning workloads publish planning work products")
@@ -154,7 +176,21 @@ class Operations:
                 "kind": "work-product", "artifact_id": sha256(ownership.key),
                 "version": 1, "sha256": sha256(product),
             }
+        if receipt is not None:
+            if record["result"] is None:
+                raise OperationError("invalid_input", "A receipt alone is not a completed result")
+            record["result"]["receipt"] = deepcopy(receipt)
         record["state"] = "succeeded"
+        await self.ledger.commit(document, etag, deadline=min(record["deadline"], record["lease_until"]))
+        return self._status(record)
+
+    async def mark_incomplete(self, ownership, code):
+        """Fence local execution without asserting that downstream effects did not commit."""
+        identity(code)
+        document, etag = await self.ledger.read()
+        record = self._owned(document, ownership)
+        record.update(state="indeterminate", generation=record["generation"] + 1,
+                      result={"kind": "incomplete", "code": code})
         await self.ledger.commit(document, etag, deadline=min(record["deadline"], record["lease_until"]))
         return self._status(record)
 

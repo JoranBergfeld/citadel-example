@@ -1,4 +1,4 @@
-# Local stack smoke baseline, not one of the five deployed applications.
+# One locked image; workload-specific command/config selects each application.
 FROM scratch AS wheelhouse
 
 FROM --platform=linux/amd64 docker.io/library/python:3.12.15-slim-bookworm@sha256:2ed6491b93cd49272ee6de2b5a38440c3448360322c089fc23e370722d74179d
@@ -17,7 +17,9 @@ RUN --mount=type=bind,from=wheelhouse,target=/wheelhouse,ro \
       *) echo "OFFLINE must be true or false" >&2; exit 2 ;; \
     esac
 
-COPY src/citadel/__init__.py ./citadel/__init__.py
+COPY src/citadel ./citadel
 COPY tests/stack ./tests/stack
+COPY tests/runtime ./tests/runtime
+RUN mkdir -p /app/.runtime-reference /app/.build && chown 65532:65532 /app/.runtime-reference /app/.build
 USER 65532:65532
 CMD ["python", "-m", "unittest", "discover", "-s", "tests/stack", "-v"]
