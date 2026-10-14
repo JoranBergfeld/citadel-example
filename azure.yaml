@@ -1,0 +1,47 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/Azure/azure-dev/azure-dev-cli_1.35.1/schemas/v1.0/azure.yaml.json
+name: citadel-sample
+infra:
+  provider: bicep
+  path: infra
+  module: main
+workflows:
+  up:
+    steps:
+      - azd: hooks run predeploy
+hooks:
+  prepackage:
+    shell: sh
+    run: |
+      exec .venv/bin/python -m citadel.operator check --state-dir "${CITADEL_STATE_DIR:?Set private CITADEL_STATE_DIR}"
+  predeploy:
+    shell: sh
+    run: |
+      if [ "${CITADEL_CONFIRM_PAID:-}" != yes ]; then
+        printf '%s\n' 'Blocked: explicitly set CITADEL_CONFIRM_PAID=yes after reviewing preflight.'
+        exit 2
+      fi
+      set --
+      if [ -n "${CITADEL_WHEELHOUSE:-}" ]; then
+        set -- --wheelhouse "$CITADEL_WHEELHOUSE"
+      fi
+      exec .venv/bin/python -m citadel.operator deploy --state-dir "${CITADEL_STATE_DIR:?Set private CITADEL_STATE_DIR}" --confirm-paid "$@"
+  preprovision:
+    shell: sh
+    run: |
+      printf '%s\n' 'Blocked: use azd up; staged operator deployment owns secure parameters and inventory.'
+      exit 2
+  preinfracreate:
+    shell: sh
+    run: |
+      printf '%s\n' 'Blocked: use azd up; direct provision bypasses lifecycle gates.'
+      exit 2
+  predown:
+    shell: sh
+    run: |
+      printf '%s\n' 'Blocked: use python -m citadel.operator teardown with exact deployment confirmation.'
+      exit 2
+  preinfradelete:
+    shell: sh
+    run: |
+      printf '%s\n' 'Blocked: use inventory-scoped manual operator teardown.'
+      exit 2
