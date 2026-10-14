@@ -1,0 +1,23 @@
+{
+  "concurrent_runs": 1,
+  "workflow_seconds": 900,
+  "candidates": 20,
+  "agent_executions": 42,
+  "model_attempts_run": 128,
+  "model_attempts_execution": 8,
+  "input_tokens_attempt": 16000,
+  "output_tokens_attempt": 2000,
+  "tokens_run": 1000000,
+  "model_concurrency": 1,
+  "model_requests_minute": 12,
+  "model_tokens_minute_target": 120000,
+  "model_timeout_seconds": 60,
+  "safe_read_timeout_seconds": 30,
+  "a2a_http_timeout_seconds": 180,
+  "read_attempts_run": 512,
+  "safe_read_retries": 2,
+  "acceptance_seconds": 10,
+  "poll_seconds": 15,
+  "evidence_collection_seconds": 600,
+  "cost_warning_hours": 24
+}
