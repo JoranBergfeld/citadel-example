@@ -1,8 +1,8 @@
-"""Per-task read envelopes without a process-wide counter or mutable shared allowance."""
+"""Durably admitted physical reads and ETag-backed request-local snapshots."""
 
-import time
 from contextlib import contextmanager
 from contextvars import ContextVar
+from copy import deepcopy
 
 from citadel.operations import OperationError
 from citadel.operations.blob import AzureBlobLedger
@@ -10,20 +10,20 @@ from citadel.operations.limits import ReadAllowance
 
 
 reads = ContextVar("citadel_prepaid_reads", default=None)
+snapshots = ContextVar("citadel_read_snapshots", default=None)
+read_deadline = ContextVar("citadel_read_deadline", default=None)
 
 
 @contextmanager
-def read_scope(allowance):
-    token = reads.set(allowance)
+def read_scope(pool, *, deadline, cache=None):
+    tokens = (reads.set(pool), snapshots.set({} if cache is None else cache),
+              read_deadline.set(deadline))
     try:
         yield
     finally:
-        reads.reset(token)
-
-
-def control_reads(count, *, clock=time.time):
-    """Fixed-purpose admission/status only; never used by workflow execution."""
-    return read_scope(ReadAllowance(count, clock() + 10, clock))
+        reads.reset(tokens[0])
+        snapshots.reset(tokens[1])
+        read_deadline.reset(tokens[2])
 
 
 class ScopedLedger:
@@ -31,15 +31,32 @@ class ScopedLedger:
         self.ledger = ledger
 
     async def read(self):
-        allowance = reads.get()
-        if allowance is None:
-            raise OperationError("exhausted", "No admitted read envelope")
+        pool, cache = reads.get(), snapshots.get()
+        if pool is None or cache is None:
+            raise OperationError("exhausted", "No durably admitted read scope")
+        if self in cache:
+            return deepcopy(cache[self])
+        deadline = await pool.admit()
         if isinstance(self.ledger, AzureBlobLedger):
             reader = AzureBlobLedger(self.ledger.client, clock=self.ledger.clock,
-                                     read_allowance=allowance)
-            return await reader.read()
-        allowance.take()
-        return await self.ledger.read()
+                                     read_allowance=ReadAllowance(1, deadline, self.ledger.clock))
+            result = await reader.read()
+        else:
+            result = await self.ledger.read()
+        cache[self] = deepcopy(result)
+        return result
 
     async def commit(self, document, etag, *, deadline):
-        return await self.ledger.commit(document, etag, deadline=deadline)
+        cache = snapshots.get()
+        try:
+            committed_etag = await self.ledger.commit(document, etag, deadline=deadline)
+        except BaseException:
+            if cache is not None:
+                cache.pop(self, None)
+            raise
+        if cache is not None:
+            if committed_etag is None:
+                cache.pop(self, None)
+            else:
+                cache[self] = (deepcopy(document), committed_etag)
+        return committed_etag

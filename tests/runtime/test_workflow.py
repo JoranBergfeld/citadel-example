@@ -16,6 +16,7 @@ from citadel.runtime.model import GovernedModel
 from citadel.runtime.network import GatewayPeers
 from citadel.runtime.reference import reference_application
 from test_reference import reference, signed, trust
+from test_read_tickets import CountingLedger
 
 
 class FixtureGateway(httpx.AsyncBaseTransport):
@@ -23,11 +24,14 @@ class FixtureGateway(httpx.AsyncBaseTransport):
     def __init__(self):
         self.apps, self.exchanges = {}, []
         self.corrupt_brief = False
+        self.read_attempts = 0
 
     async def handle_async_request(self, request):
         target, path = request.url.path.lstrip("/").split("/", 1)
         caller = request.headers.get("Ocp-Apim-Subscription-Key", "")
         self.exchanges.append((caller, target, "/" + path, request.content))
+        if not (path == "a2a" and json.loads(request.content).get("method") == "SendMessage"):
+            self.read_attempts += 1
         request.url = request.url.copy_with(path="/" + path)
         request.headers.update(signed(request.content, target, "/" + path, caller, request.method))
         response = await httpx.ASGITransport(app=self.apps[target]).handle_async_request(request)
@@ -74,7 +78,8 @@ class WorkflowTests(unittest.IsolatedAsyncioTestCase):
                 "usage": {"prompt_tokens": 100, "completion_tokens": 20, "total_tokens": 120},
             })
 
-        draft_ledger, finding_ledger = MemoryLedger(clock=lambda: now[0]), MemoryLedger(clock=lambda: now[0])
+        draft_ledger, finding_ledger = CountingLedger(clock=lambda: now[0]), CountingLedger(clock=lambda: now[0])
+        ledgers = [draft_ledger, finding_ledger]
         async with AsyncExitStack() as stack:
             await stack.enter_async_context(mcp.app.router.lifespan_context(mcp.app))
             for role in ("candidate-planner", "evidence-assessor", "release-reviewer", "briefing-author"):
@@ -85,8 +90,10 @@ class WorkflowTests(unittest.IsolatedAsyncioTestCase):
                 stack.push_async_callback(model.close)
                 peers = GatewayPeers(role, "https://gateway.test", role, http_client=http,
                                      clock=lambda: now[0], sleep=poll_sleep)
+                ledger = CountingLedger(clock=lambda: now[0])
+                ledgers.append(ledger)
                 runtime = Runtime(
-                    role, MemoryLedger(clock=lambda: now[0]), model=model, peers=peers,
+                    role, ledger, model=model, peers=peers,
                     gateway_url="https://gateway.test", clock=lambda: now[0],
                     artifacts=draft_ledger if role == "evidence-assessor" else finding_ledger,
                     drafts=draft_ledger,
@@ -104,9 +111,10 @@ class WorkflowTests(unittest.IsolatedAsyncioTestCase):
                 async with asyncio.timeout(12):
                     while True:
                         state = await client.get("https://gateway.test/candidate-planner/operations/run1")
+                        self.assertEqual(state.status_code, 200, state.text)
                         if state.json()["state"] not in ("pending", "running"):
                             break
-                        await asyncio.sleep(.02)
+                        await poll_sleep(15)
                 self.assertEqual(state.json()["state"], expected_state, state.text)
                 if expected_state != "succeeded":
                     return state.json(), models, gateway.exchanges
@@ -119,12 +127,16 @@ class WorkflowTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIsNone(repeated.continuation_token)
                 self.assertEqual(json.loads(repeated.text), output)
                 self.assertNotIn("private_notes", json.dumps(output))
+                self.assertLessEqual(gateway.read_attempts + sum(item.read_attempts for item in ledgers), 512)
+                self.last_read_count = gateway.read_attempts + sum(item.read_attempts for item in ledgers)
                 self.assertEqual(output["provenance"], data.provenance)
                 self.assertTrue(set(CAVEATS).issubset(output["caveats"]))
                 if output.get("brief"):
                     ref = output["brief"]["citations"][0]
                     url = f"https://gateway.test/release-reviewer/findings/{ref['artifact_id']}/versions/{ref['version']}"
-                    allowed = await client.get(url, headers={"Ocp-Apim-Subscription-Key": "briefing-author"})
+                    allowed = await client.get(url, headers={
+                        "Ocp-Apim-Subscription-Key": "briefing-author",
+                        "x-citadel-read-pool": output["brief"]["read_scopes"][0]["operation_id"]})
                     self.assertEqual(allowed.status_code, 200)
                     denied = await client.get("https://gateway.test/release-reviewer/operations/run1",
                         headers={"Ocp-Apim-Subscription-Key": "briefing-author"})
@@ -159,10 +171,10 @@ class WorkflowTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("brief", output)
         self.assertNotIn("briefing-author", {role for role, _ in models})
 
-    async def test_distributed_read_budget_exhaustion_is_explicit_partial_not_a_brief(self):
-        output, models, exchanges = await self.run_case(
-            "no-alternative", count=20, expected_state="indeterminate")
-        self.assertEqual(output["result"], {"kind": "incomplete", "code": "exhausted"})
+    async def test_entire_twenty_member_pool_is_assessed_without_a_fabricated_brief(self):
+        output, models, exchanges = await self.run_case("no-alternative", count=20)
+        self.assertEqual(output["status"], "bounded_pool_exhausted")
+        self.assertEqual(len(output["assessed"]), 20)
         self.assertLess(len(models), 128)
         self.assertNotIn("briefing-author", {role for role, _ in models})
         self.assertLessEqual(sum(
@@ -178,6 +190,18 @@ class WorkflowTests(unittest.IsolatedAsyncioTestCase):
 @unittest.skipUnless(os.environ.get("CITADEL_EVIDENCE_DATA"), "Approved retained dataset not selected")
 class PinnedWorkflowTests(unittest.IsolatedAsyncioTestCase):
     run_case = WorkflowTests.run_case
+
+    async def test_actual_twenty_member_no_alternative_pool_completes_within_all_run_limits(self):
+        base = ReferenceData.from_directory(os.environ["CITADEL_EVIDENCE_DATA"])
+        output, models, exchanges = await self.run_case("no-alternative", data_source=base)
+        self.assertEqual(output["status"], "bounded_pool_exhausted")
+        self.assertEqual(output["pool_count"], 20)
+        self.assertEqual(len(output["assessed"]), 20)
+        self.assertEqual(output["selected_identifiers"], [])
+        self.assertNotIn("brief", output)
+        self.assertEqual(len(models), 41)
+        self.assertLessEqual(sum(json.loads(body).get("method") == "SendMessage"
+                                 for _, _, path, body in exchanges if path == "/a2a"), 42)
 
     async def test_real_pinned_data_comparison_and_replacement_use_exact_released_versions(self):
         base = ReferenceData.from_directory(os.environ["CITADEL_EVIDENCE_DATA"])

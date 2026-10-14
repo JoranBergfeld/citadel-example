@@ -11,6 +11,7 @@ from agent_framework_a2a import A2AAgent
 from google.protobuf.json_format import ParseDict
 from mcp import ClientSession
 from mcp.client.streamable_http import streamable_http_client
+from mcp.types import CallToolResult, CallToolRequest, CallToolRequestParams, ClientRequest, RequestParams
 
 from citadel.evidence import EvidenceError
 from citadel.evidence.manifests import sha256
@@ -31,6 +32,7 @@ class GatewayPeers:
         self.owns_http = http_client is None
         self.http = http_client or httpx.AsyncClient(follow_redirects=False, timeout=30)
         self.http.event_hooks.setdefault("request", []).insert(0, self._admit)
+        self.cards = {}
 
     async def _admit(self, request):
         admission = _exchange.get()
@@ -49,12 +51,7 @@ class GatewayPeers:
             allowance = reads.get()
             if allowance is None:
                 raise OperationError("exhausted", "Safe read requires prepaid admission")
-            allowance.take()
-            # Deterministic status/finding hosts perform one storage read too.
-            if path.startswith(("operations/", "findings/")) or path == "a2a":
-                allowance.take()
-            if path == "a2a":
-                allowance.take()
+            await allowance.admit()
         request.headers["Ocp-Apim-Subscription-Key"] = self.key
 
     async def exchange(self, target, deadline, callback, *, invoke=False):
@@ -79,7 +76,12 @@ class GatewayPeers:
                         raise OperationError("unsupported_version", "Unexpected MCP protocol version")
 
                     async def call(name, arguments):
-                        response = await session.call_tool(name, arguments, meta={"citadel-fixture": fixture})
+                        # Fixed evidence contracts have no remote output schemas.
+                        # The public typed request avoids call_tool's redundant tools/list.
+                        response = await session.send_request(ClientRequest(CallToolRequest(
+                            params=CallToolRequestParams(name=name, arguments=arguments,
+                                _meta=RequestParams.Meta(**{"citadel-fixture": fixture})))),
+                            CallToolResult)
                         payload = json.loads(response.content[0].text)
                         if response.isError:
                             raise EvidenceError(payload.get("error", "temporary_unavailability"), "Reference read rejected")
@@ -93,13 +95,14 @@ class GatewayPeers:
                                               await call("list_runways", {"ident": ident}))
         return await self.exchange("reference-data", deadline, read)
 
-    async def finding(self, reference, deadline):
+    async def finding(self, reference, deadline, *, read_scope):
         if self.workload not in ("candidate-planner", "briefing-author"):
             raise OperationError("forbidden", "Workload has no deterministic finding-read capability")
 
         async def read():
             response = await self.http.get(
-                f"{self.gateway}/release-reviewer/findings/{reference['artifact_id']}/versions/{reference['version']}")
+                f"{self.gateway}/release-reviewer/findings/{reference['artifact_id']}/versions/{reference['version']}",
+                headers={"x-citadel-read-pool": read_scope["operation_id"]})
             response.raise_for_status()
             finding = response.json()
             if sha256(finding) != reference["sha256"]:
@@ -113,6 +116,7 @@ class GatewayPeers:
         parent_id = payload["operation_id"]
         from uuid import uuid4
         operation_id = uuid4().hex
+        await reads.get().delegate(allowance["reads"])
         grant = await runtime.accounting.delegate(parent_id, operation_id, child, allowance)
         child_input = {
             "operation_id": operation_id, "run_id": payload["run_id"], "fixture": payload["fixture"],
@@ -132,7 +136,9 @@ class GatewayPeers:
                 raise OperationError("forbidden", "Agent card advertises an unapproved follow-up")
             return card
 
-        card = await self.exchange(child, grant["deadline"], discover)
+        if child not in self.cards:
+            self.cards[child] = await self.exchange(child, grant["deadline"], discover)
+        card = self.cards[child]
         async with A2AAgent(agent_card=card, http_client=self.http) as agent:
             continuation = None
             try:

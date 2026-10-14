@@ -22,15 +22,18 @@ from starlette.responses import JSONResponse
 from citadel.evidence import CAVEATS, EvidenceError
 from citadel.evidence.manifests import sha256
 from citadel.operations import DraftReader, OperationError, Operations, identity
-from citadel.operations.limits import Accounting, ReadAllowance
+from citadel.operations.limits import Accounting
 from citadel.gateway import GatewayTrust
+from citadel.gateway.trust import INVOCATION_CALLERS
 from .model import INSTRUCTIONS
-from .state import ScopedLedger, control_reads, read_scope
+from .state import ScopedLedger, read_scope, snapshots
+from .tickets import CAPACITY, TicketPool
 
 
 class Runtime:
     def __init__(self, workload, ledger, *, model, peers, gateway_url,
-                 artifacts=None, drafts=None, tokens_per_minute=120000, clock=time.time):
+                 artifacts=None, drafts=None, tokens_per_minute=120000, clock=time.time,
+                 ticket_store=None):
         self.workload, self.model, self.peers, self.clock = workload, model, peers, clock
         self.ledger = ScopedLedger(ledger)
         self.ops = Operations(self.ledger, workload=workload, clock=clock)
@@ -42,6 +45,10 @@ class Runtime:
         self.draft_reader = DraftReader(ScopedLedger(drafts)) if drafts is not None else None
         self.tasks = set()
         self.renew_at = {}
+        self.events = {}
+        self.ticket_store = ticket_store or getattr(ledger, "ticket_store", None)
+        if self.ticket_store is None:
+            raise ValueError("Durable read-ticket storage is required")
         self.gateway_url = gateway_url.rstrip("/")
         self.card = AgentCard(
             name=workload, description=INSTRUCTIONS[workload], version="1.0.0",
@@ -52,7 +59,13 @@ class Runtime:
             default_input_modes=["text/plain"], default_output_modes=["text/plain"],
         )
 
-    async def accept(self, caller, payload):
+    def pool(self, caller, operation_id):
+        return TicketPool(self.ticket_store, f"{identity(caller)}/invoke/{identity(operation_id)}",
+                          CAPACITY[self.workload], clock=self.clock)
+
+    async def accept(self, caller, payload, *, recover=False):
+        if caller not in INVOCATION_CALLERS[self.workload]:
+            raise OperationError("forbidden", "Caller cannot invoke this workload")
         if not isinstance(payload, dict):
             raise OperationError("invalid_input", "Expected a bounded operation object")
         operation_id, run_id = identity(payload.get("operation_id")), identity(payload.get("run_id"))
@@ -63,40 +76,50 @@ class Runtime:
                 raise OperationError("invalid_input", "Root run requires exact identity and fixture")
         elif "grant" not in payload or payload["grant"]["grant_id"] != operation_id:
             raise OperationError("invalid_input", "Child operation must be its authenticated grant")
+        elif payload["grant"]["allowance"]["reads"] != CAPACITY[self.workload]:
+            raise OperationError("invalid_input", "Child read grant does not match its finite pool")
         async with asyncio.timeout(10):
-            with control_reads(3, clock=self.clock):
+            pool = self.pool(caller, operation_id)
+            if recover:
+                await self.ticket_store.require_pool(pool.scope)
+                fresh = False
+            else:
+                fresh = await self.ticket_store.open_pool(
+                    pool.scope, exclusive=self.workload == "candidate-planner")
+            with read_scope(pool, deadline=self.clock() + 10):
                 current = await self.ops.status(caller, "invoke", operation_id)
                 if current["state"] != "missing":
-                    return await self.ops.accept(caller, "invoke", operation_id, payload,
-                                                 run_id=run_id, deadline=current["deadline"])
+                    bound = await self.ops.accept(caller, "invoke", operation_id, payload,
+                                                  run_id=run_id, deadline=current["deadline"])
+                    if recover:
+                        return await self.ops.fence(caller, "invoke", operation_id)
+                    if bound["state"] == "succeeded" and self.workload == "candidate-planner":
+                        await self.ticket_store.release_run(pool.scope)
+                    return bound
+                if not fresh:
+                    raise OperationError("indeterminate", "Existing admission has no reconciled operation state")
                 if self.workload == "candidate-planner":
                     budget = await self.accounting.start_run(run_id)
                     deadline = budget["deadline"]
-                    reservation = 96
                 else:
                     grant = payload["grant"]
                     if grant["run_id"] != run_id:
                         raise OperationError("invalid_input", "Run differs from inherited grant")
                     await self.accounting.adopt(grant, authenticated_issuer=caller)
                     deadline = grant["deadline"]
-                    reservation = 40 if self.workload == "evidence-assessor" else grant["allowance"]["reads"]
-                allowance = await self.accounting.reserve_reads(operation_id, reservation)
-            for _ in range(3):
-                allowance.take()
-            allowance.take()
-            failure_allowance = ReadAllowance(1, deadline, self.clock)
-            with read_scope(allowance):
-                accepted = await self.ops.accept(caller, "invoke", operation_id, payload,
-                                                 run_id=run_id, deadline=deadline)
-                ownership = await self.ops.claim(caller, "invoke", operation_id,
-                                                 worker=uuid4().hex, lease_seconds=180)
-                self.renew_at[ownership.key] = self.clock() + 90
-                task = asyncio.create_task(self._execute(caller, payload, ownership, deadline, failure_allowance))
-                self.tasks.add(task)
-                task.add_done_callback(self.tasks.discard)
+                with read_scope(pool, deadline=deadline, cache=snapshots.get()):
+                    accepted = await self.ops.accept(caller, "invoke", operation_id, payload,
+                                                     run_id=run_id, deadline=deadline)
+                    ownership = await self.ops.claim(caller, "invoke", operation_id,
+                                                     worker=uuid4().hex, lease_seconds=180)
+                    self.renew_at[ownership.key] = self.clock() + 90
+                    self.events[operation_id] = asyncio.Event()
+                    task = asyncio.create_task(self._execute(caller, payload, ownership, deadline))
+                    self.tasks.add(task)
+                    task.add_done_callback(self.tasks.discard)
             return accepted
 
-    async def _execute(self, caller, payload, ownership, deadline, failure_allowance):
+    async def _execute(self, caller, payload, ownership, deadline):
         try:
             async with asyncio.timeout(max(0, deadline - self.clock())):
                 await self.accounting.start_agent(payload["operation_id"], payload["operation_id"])
@@ -115,7 +138,10 @@ class Runtime:
                 await self.renew_if_needed(ownership)
                 receipt = await self.accounting.close(payload["operation_id"])
                 await self.ops.complete(ownership, product=product, finding=finding,
-                                        rejection=rejection, receipt=receipt)
+                                        rejection=rejection, receipt=receipt,
+                                        read_scope=result.get("read_scope") if product is None else None)
+                if self.workload == "candidate-planner":
+                    await self.ticket_store.release_run(self.pool(caller, payload["operation_id"]).scope)
         except asyncio.CancelledError:
             raise
         except Exception as exc:
@@ -123,13 +149,15 @@ class Runtime:
             logging.getLogger(__name__).warning("execution_incomplete workload=%s code=%s",
                                                 self.workload, code)
             try:
-                with read_scope(failure_allowance):
-                    await self.ops.mark_incomplete(ownership, code)
+                await self.ops.mark_incomplete(ownership, code)
             except OperationError:
                 # Expired/fenced/unavailable state remains incomplete, never success.
                 pass
         finally:
             self.renew_at.pop(ownership.key, None)
+            event = self.events.pop(payload["operation_id"], None)
+            if event is not None:
+                event.set()
 
     async def renew_if_needed(self, ownership):
         if self.clock() >= self.renew_at.get(ownership.key, 0):
@@ -143,24 +171,27 @@ class Runtime:
     async def _plan(self, payload, owner, deadline):
         commentary = await self._explain(payload, {"fixture": payload["fixture"], "target": 3, "pool_limit": 20})
         pool = await self.peers.reference(payload["fixture"], deadline)
-        selected, assessed, references = [], [], []
+        selected, assessed, references, read_scopes = [], [], [], []
         for airport in pool["airports"]:
             ident = airport["ident"]["parsed"]
             await self.renew_if_needed(owner)
             await self.accounting.candidate(payload["operation_id"], ident)
             result = await self.peers.child(self, owner, payload, "evidence-assessor", {"airport_ident": ident},
-                {"agents": 2, "models": 2, "tokens": 36000, "reads": 72})
+                {"agents": 2, "models": 2, "tokens": 36000, "reads": 20})
             if result["kind"] == "rejected":
                 assessed.append({"airport_ident": ident, "classification": "release_rejected"})
                 continue
             ref = result["finding"]
-            finding = await self.peers.finding(ref, deadline)
+            if result["read_scope"]["run_id"] != payload["run_id"]:
+                raise OperationError("conflict", "Finding read pool differs from admitted run")
+            finding = await self.peers.finding(ref, deadline, read_scope=result["read_scope"])
             if finding["airport_ident"] != ident or finding["provenance"] != pool["provenance"]:
                 raise OperationError("conflict", "Finding does not belong to this candidate/source/fixture")
             assessed.append(finding)
             if finding["classification"] == "complete":
                 selected.append(ident)
                 references.append(ref)
+                read_scopes.append(result["read_scope"])
             if len(selected) == 3:
                 break
         product = {
@@ -170,7 +201,8 @@ class Runtime:
         }
         if len(selected) == 3:
             product["brief"] = await self.peers.child(self, owner, payload, "briefing-author",
-                {"findings": references}, {"agents": 1, "models": 1, "tokens": 18000, "reads": 24})
+                {"findings": references, "read_scopes": read_scopes},
+                {"agents": 1, "models": 1, "tokens": 18000, "reads": 16})
         return product
 
     async def _assess(self, payload, owner, deadline):
@@ -195,7 +227,7 @@ class Runtime:
         await self.ops.reconcile_external(owner, operation_id, status)
         ref = {key: status["result"][key] for key in ("artifact_id", "version", "sha256")}
         return await self.peers.child(self, owner, payload, "release-reviewer", {"draft": ref},
-                                      {"agents": 1, "models": 1, "tokens": 18000, "reads": 32})
+                                      {"agents": 1, "models": 1, "tokens": 18000, "reads": 11})
 
     async def _review(self, payload, owner, deadline):
         ref = payload["draft"]
@@ -219,7 +251,10 @@ class Runtime:
                                                       worker=uuid4().hex, lease_seconds=180)
         status = await self.artifact_ops.release(release_owner, ref, drafts=self.draft_reader, reference=reference)
         await self.ops.reconcile_external(owner, operation_id, status)
-        return {"finding": {key: status["result"][key] for key in ("artifact_id", "version", "sha256")}}
+        await self.ticket_store.bind_finding(self.pool("evidence-assessor", payload["operation_id"]).scope,
+                                            status["result"]["artifact_id"], status["result"]["version"])
+        return {"finding": {key: status["result"][key] for key in ("artifact_id", "version", "sha256")},
+                "read_scope": {"run_id": payload["run_id"], "operation_id": payload["operation_id"]}}
 
     @staticmethod
     def _summary(ident, assessment):
@@ -234,7 +269,11 @@ class Runtime:
         if (not isinstance(refs, list) or len(refs) != 3
                 or len({ref["artifact_id"] for ref in refs}) != 3):
             raise OperationError("invalid_input", "Brief requires three distinct exact released findings")
-        findings = [await self.peers.finding(ref, deadline) for ref in refs]
+        scopes = payload["read_scopes"]
+        if len(scopes) != len(refs) or any(scope["run_id"] != payload["run_id"] for scope in scopes):
+            raise OperationError("invalid_input", "Finding reads require this run's funded reviewer pools")
+        findings = [await self.peers.finding(ref, deadline, read_scope=scope)
+                    for ref, scope in zip(refs, scopes)]
         provenance = findings[0]["provenance"]
         if any(item["classification"] != "complete" or item["provenance"] != provenance
                or item["provenance"]["fixture"]["id"] != payload["fixture"] for item in findings):
@@ -242,17 +281,38 @@ class Runtime:
         narrative = await self._explain(payload, [self._summary(item["airport_ident"], item) for item in findings])
         return {
             "status": "complete", "fictional": True, "narrative": narrative, "citations": refs,
+            "read_scopes": scopes,
             "findings": findings, "provenance": provenance,
             "caveats": list(dict.fromkeys(caveat for item in findings for caveat in item["caveats"])),
         }
 
-    async def status(self, caller, operation_id):
+    async def _observe(self, caller, operation_id, *, product=False, incoming=True):
         async with asyncio.timeout(10):
-            with control_reads(1, clock=self.clock):
-                return await self.ops.status(caller, "invoke", identity(operation_id))
+            request_end = time.monotonic() + 10
+            pool = self.pool(caller, operation_id)
+            await self.ticket_store.require_pool(pool.scope)
+            with read_scope(pool, deadline=self.clock() + 10):
+                if incoming and caller == "operator":
+                    await pool.admit()
+            event = self.events.get(operation_id)
+            if event is not None:
+                try:
+                    await asyncio.wait_for(event.wait(), 1)
+                except TimeoutError:
+                    pass
+            with read_scope(pool, deadline=self.clock() + max(0, request_end - time.monotonic())):
+                status = await self.ops.status(caller, "invoke", operation_id)
+                result = status["result"]
+                if product and status["state"] == "succeeded" and self.workload in (
+                        "candidate-planner", "briefing-author"):
+                    result = await self.ops.completed_result(caller, "invoke", operation_id)
+                return status, result
 
-    async def task_status(self, caller, operation_id):
-        status = await self.status(caller, operation_id)
+    async def status(self, caller, operation_id):
+        return (await self._observe(caller, operation_id))[0]
+
+    async def task_status(self, caller, operation_id, *, incoming=True):
+        status, result = await self._observe(caller, operation_id, product=True, incoming=incoming)
         if status["state"] == "missing":
             raise TaskNotFoundError()
         state = {
@@ -264,10 +324,6 @@ class Runtime:
         }[status["state"]]
         artifacts = []
         if status["state"] == "succeeded":
-            result = status["result"]
-            if self.workload in ("candidate-planner", "briefing-author"):
-                with control_reads(1, clock=self.clock):
-                    result = await self.ops.completed_result(caller, "invoke", operation_id)
             artifacts = [Artifact(artifact_id=operation_id, parts=[Part(text=json.dumps(result))])]
         return Task(id=operation_id, context_id=status["run_id"], status=TaskStatus(state=state),
                     artifacts=artifacts)
@@ -298,9 +354,12 @@ class DurableHandler(RequestHandler):
                 if len(parts) != 1 or not parts[0].text:
                     raise OperationError("invalid_input", "One structured text message is required")
                 payload = json.loads(parts[0].text)
-                status = await self.runtime.accept(context.state["caller"], payload)
+                status = await self.runtime.accept(
+                    context.state["caller"], payload,
+                    recover=MessageToDict(params.metadata).get("citadel_recovery") is True)
                 if status["state"] != "pending":
-                    return await self.runtime.task_status(context.state["caller"], status["operation_id"])
+                    return await self.runtime.task_status(context.state["caller"], status["operation_id"],
+                                                          incoming=False)
                 return Task(id=status["operation_id"], context_id=status["run_id"],
                             status=TaskStatus(state=TaskState.TASK_STATE_SUBMITTED))
         except (ValueError, KeyError, TypeError, OperationError, TimeoutError) as exc:
@@ -310,7 +369,12 @@ class DurableHandler(RequestHandler):
                            parts=[Part(text=json.dumps({"error": code, "complete": False}))])
 
     async def on_get_task(self, params, context):
-        return await self.runtime.task_status(context.state["caller"], params.id)
+        try:
+            return await self.runtime.task_status(context.state["caller"], params.id)
+        except OperationError as exc:
+            raise InvalidParamsError(exc.code) from None
+        except TimeoutError:
+            raise InvalidParamsError("indeterminate") from None
 
     async def unsupported(self, *args, **kwargs):
         raise UnsupportedOperationError()
@@ -340,17 +404,26 @@ def agent_application(runtime, trust):
         try:
             return await runtime.status(request.scope["citadel.caller"], operation_id)
         except OperationError as exc:
-            return JSONResponse({"error": exc.code}, status_code=409)
+            return JSONResponse({"error": exc.code}, status_code=429 if exc.code == "exhausted" else 409)
+        except TimeoutError:
+            return JSONResponse({"error": "unavailable"}, status_code=504)
 
     if runtime.workload == "release-reviewer":
         @app.get("/findings/{finding_id}/versions/{version}")
-        async def finding(finding_id: str, version: str):
+        async def finding(finding_id: str, version: str, request: Request):
             try:
-                if not version.isdecimal():
-                    raise OperationError("invalid_input", "Exact numeric finding version required")
-                with control_reads(1, clock=runtime.clock):
-                    return await runtime.artifact_ops.get_finding(finding_id, int(version))
+                async with asyncio.timeout(30):
+                    if not version.isdecimal():
+                        raise OperationError("invalid_input", "Exact numeric finding version required")
+                    pool = runtime.pool("evidence-assessor", identity(request.headers.get("x-citadel-read-pool")))
+                    await runtime.ticket_store.require_pool(pool.scope)
+                    await runtime.ticket_store.require_finding(pool.scope, finding_id, int(version))
+                    with read_scope(pool, deadline=runtime.clock() + 10):
+                        return await runtime.artifact_ops.get_finding(finding_id, int(version))
             except OperationError as exc:
-                return JSONResponse({"error": exc.code}, status_code=404 if exc.code == "not_found" else 409)
+                return JSONResponse({"error": exc.code}, status_code=404 if exc.code == "not_found"
+                                    else 429 if exc.code == "exhausted" else 409)
+            except TimeoutError:
+                return JSONResponse({"error": "unavailable"}, status_code=504)
 
     return GatewayTrust(app, trust)

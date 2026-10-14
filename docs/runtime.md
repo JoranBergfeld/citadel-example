@@ -81,6 +81,14 @@ The lifecycle must prepare/upload that bundle and preinitialize six
 initialization API. Runtime never creates missing state as evidence that work
 did not happen.
 
+Also preinitialize `planner-operations/active-run-slot.json` with `{}`. Its
+infinite, run-specific Blob lease prevents concurrent new root admissions
+without reading another run's ledger. Runtime releases it only after definite
+root completion; crashes/ambiguity never trigger automatic replay or release.
+Missing admission storage fails closed. Runtime creates immutable ticket/pool
+objects only inside its already allocated operations container; no new identity,
+container, permission, or HTTP proxy is needed.
+
 Only explicit `ManagedIdentityCredential(client_id=...)` is used. Secret
 acquisition reads the allocated subscription secret with the assigned identity,
 zero automatic retries and a total timeout. There is no operator/developer
@@ -113,6 +121,11 @@ signed request context before any router, MCP handler or application logic.
 Status maps the validated gateway `status` action back to the original
 `invoke` ownership key. Reviewer-hosted exact finding GETs are independently
 authorized; they neither invoke the Reviewer nor grant status/draft access.
+Finding reads carry `x-citadel-read-pool: <review-operation-id>`. A write-only
+lease check verifies the durable binding of that funded pool to the exact
+finding/version before any data GET. A locator is not caller authentication;
+GatewayTrust still independently authorizes the caller and action. Exact
+finding references/citations retain their original three-field schema.
 OpenAPI/docs endpoints, task listing, cancellation, push callbacks and arbitrary
 tools are not exposed.
 
@@ -154,8 +167,8 @@ The durable accounting baton transfers parent → child → authenticated closed
 receipt. Parents cannot model/delegate while a child is unresolved. All real
 workflow ledger reads and outgoing protocol read requests consume precharged
 tickets; hidden Blob and model retry attempts are blocked at dispatch. Terminal
-result `GetTask` conservatively charges its HTTP request plus both storage
-reads. No process-global model/read counter is used.
+result `GetTask` charges its HTTP request plus one storage read, using one
+storage snapshot. No process-global model/read counter is used.
 
 All existing ceilings still intersect: 900-second inherited deadline,
 20 candidates, 42 executions, 128/8 model attempts, 16000/2000 tokens per
@@ -167,25 +180,41 @@ Model/A2A/read total deadlines are 60/180/30 seconds. Late/ambiguous model
 responses never free model admission. Current networking does not automatically
 retry failed reads; zero is within the maximum two automatic read retries.
 
-Admission and owner-status/finding handlers use bounded fixed-purpose
-control reads, including after restart. During collaboration, the calling
-agent prepays both the protocol read and its downstream storage read.
-External operator status/recovery probes are control-plane operations, not
-unlimited agent-work allowances; the downstream operator lifecycle must bound
-its polling and report those attempts. This is **not** proof that arbitrary
-credential holders cannot generate unlimited control-plane requests.
+Read admission is a finite durable ticket tree, not a process-local counter.
+Before each physical GET or outgoing protocol read, a conditional
+`If-None-Match: *` Blob PUT consumes a unique marker. Only a confirmed new
+marker permits dispatch. Ambiguous creates burn capacity without authorizing a
+read. Cursor hints may disappear or race: storage conditional creation remains
+the authority. Marker/descriptor checks use bounded writes and never recursively
+read a metering ledger. SDK retries are disabled.
 
-Read reservations are intentionally conservative and unrecoverable after a
-crash: Planner reserves 96, each assessment reserves 72 split into Assessor's
-40 and Reviewer's 32, and Author reserves 24. One already charged ticket is
-withheld for recording incomplete execution. No unused child quota is refunded.
-Consequently, a run cannot admit more than five assessment pairs with these
-reservations. The actual approved normal and missing-width replacement cases
-fit (three and five candidates). The actual twenty-member no-alternative case
-reaches **explicit read-budget partial failure**, not a fabricated exhausted-pool
-success. A smaller exhausted pool is tested. Completing the full twenty-member
-demonstration needs a more economical prepaid-read/storage design or an approved
-contract decision; do not raise the 512 ceiling or claim full scenario acceptance.
+Planner owns 512 tickets. Delegating an assessment irreversibly consumes 20
+parent tickets and gives the Assessor exactly 20; 11 of those are similarly
+delegated to its Reviewer. Author receives 16. There are no refunds, including
+after authenticated closure. Thus disjoint descendant allowances plus the
+parent's admitted reads cannot exceed 512. Closed pools retain only their
+original finite remainder for status/exact finding reads, never a fresh quota.
+
+External operator status/GetTask consumes its HTTP ticket and its actual
+backend storage ticket. Admission retries and explicit recovery consume their
+actual storage reads from that same caller-owned pool, including after restart.
+Unknown pools fail before a ledger GET; exhausted operator status returns 429.
+Agent HTTP reads are metered at `GatewayPeers`' physical request hook; their
+backends independently meter actual storage GETs. No caller identity or
+unverified request-body claim can select an unbounded control-read mode.
+
+An execution/request-local snapshot avoids repeated reads of unchanged ledgers.
+It advances only from a successful conditional write's returned ETag. Any
+conflict/lost response invalidates it before a newly paid reconciliation GET.
+Every commit still uses the existing storage lease, fencing and ETag checks.
+Status may wait up to one second for a local completion event before one
+durable read, within its ten-second handler bound; restart has no event to
+wait for. Neither cached snapshots nor events establish durable authority.
+Verified gateway agent cards are cached; MCP calls use the SDK's public typed
+`send_request` to avoid redundant `tools/list` output-schema discovery for the
+fixed evidence contracts. The actual twenty-member no-alternative fixture now
+completes `bounded_pool_exhausted`, with all twenty assessments and 41 model
+executions, under unchanged ceilings.
 
 Restart never schedules persisted pending/running work. Identical submissions
 return existing status; changed inputs conflict. Timeout, unavailable
@@ -195,6 +224,10 @@ external effects stay incomplete; missing state is not proof of non-execution.
 If no storage deadline/ticket remains, durable running state remains incomplete.
 Existing explicit operations fencing/reconciliation/retry APIs are retained;
 this host adds no privileged HTTP recovery endpoint.
+The existing owner-bound `SendMessage` accepts metadata
+`{"citadel_recovery": true}` to invoke explicit fencing of that same
+input-bound operation. It never schedules persisted work and cannot recover a
+different caller's operation or escape exhausted tickets.
 
 ## Validation and cloud gates
 

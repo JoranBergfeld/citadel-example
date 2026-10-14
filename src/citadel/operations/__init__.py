@@ -140,7 +140,8 @@ class Operations:
         record["lease_until"] = min(record["deadline"], self.clock() + lease_seconds)
         await self.ledger.commit(document, etag, deadline=min(old_expiry, record["lease_until"]))
 
-    async def complete(self, ownership, *, product=None, finding=None, receipt=None, rejection=None):
+    async def complete(self, ownership, *, product=None, finding=None, receipt=None, rejection=None,
+                       read_scope=None):
         document, etag = await self.ledger.read()
         record = self._owned(document, ownership)
         self._resolved(record)
@@ -160,6 +161,17 @@ class Operations:
                 raise OperationError("invalid_input", "Only an exact public finding reference is permitted")
             identity(finding["artifact_id"])
             record["result"] = {"kind": "collaboration", "finding": deepcopy(finding)}
+        if read_scope is not None:
+            if (finding is None or not isinstance(read_scope, dict)
+                    or read_scope.keys() != {"run_id", "operation_id"}
+                    or read_scope["run_id"] != record["run_id"]):
+                raise OperationError("invalid_input", "Finding read pool must belong to this run")
+            pool_id = identity(read_scope["operation_id"])
+            if ((self.workload == "release-reviewer" and pool_id != record["operation_id"])
+                    or (self.workload == "evidence-assessor"
+                        and record["external"].get(pool_id, {}).get("state") != "succeeded")):
+                raise OperationError("conflict", "Finding pool is not a completed admitted review")
+            record["result"]["read_scope"] = deepcopy(read_scope)
         if rejection is not None:
             if (self.workload not in ("evidence-assessor", "release-reviewer")
                     or rejection != "draft_evidence_mismatch" or receipt is None

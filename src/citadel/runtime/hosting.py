@@ -6,12 +6,14 @@ from contextlib import AsyncExitStack, asynccontextmanager
 
 from azure.identity.aio import ManagedIdentityCredential
 from azure.keyvault.secrets.aio import SecretClient
+from azure.storage.blob.aio import ContainerClient
 from citadel.operations.blob import managed_ledger
 
 from .agents import Runtime, agent_application
 from .configuration import Configuration
 from .model import GovernedModel
 from .network import GatewayPeers
+from .tickets import AzureTicketStore
 
 
 @asynccontextmanager
@@ -35,6 +37,10 @@ async def application(config):
                 raise ValueError("Allocated subscription credential is absent")
             ledger = await stack.enter_async_context(managed_ledger(
                 account_url=config.blob, container=config.operations_container, client_id=config.client_id))
+            ticket_container = await stack.enter_async_context(ContainerClient(
+                config.blob, config.operations_container, credential=credential,
+                api_version="2026-10-06", retry_total=0, retry_connect=0, retry_read=0,
+                retry_status=0, connection_timeout=5, read_timeout=30))
             artifacts = drafts = None
             if config.target in ("evidence-assessor", "release-reviewer"):
                 artifacts = await stack.enter_async_context(managed_ledger(
@@ -48,7 +54,8 @@ async def application(config):
             stack.push_async_callback(model.close)
             stack.push_async_callback(peers.close)
             runtime = Runtime(config.target, ledger, model=model, peers=peers, gateway_url=config.gateway,
-                              artifacts=artifacts, drafts=drafts, tokens_per_minute=config.tokens_per_minute)
+                              artifacts=artifacts, drafts=drafts, tokens_per_minute=config.tokens_per_minute,
+                              ticket_store=AzureTicketStore(ticket_container))
             stack.push_async_callback(runtime.shutdown)
             app = agent_application(runtime, config.trust)
         await stack.enter_async_context(app.app.router.lifespan_context(app.app))

@@ -30,7 +30,7 @@ class ReviewProtocolTests(unittest.IsolatedAsyncioTestCase):
         assessor = Accounting(MemoryLedger(), workload="evidence-assessor")
         await assessor.adopt(assessor_grant, authenticated_issuer="candidate-planner")
         grant = await assessor.delegate("assess1", "review1", "release-reviewer",
-            {"agents": 1, "models": 1, "tokens": 18000, "reads": 32})
+            {"agents": 1, "models": 1, "tokens": 18000, "reads": 11})
         drafts, findings = MemoryLedger(), MemoryLedger()
         writer = Operations(drafts, workload="evidence-assessor")
         draft = {"schema_version": 1, "artifact_id": "draft1", "version": 1,
@@ -87,5 +87,7 @@ class ReviewProtocolTests(unittest.IsolatedAsyncioTestCase):
                 self.assertNotIn("Never released", result.text)
                 missing = await client.get(
                     f"https://gateway.test/release-reviewer/findings/{sha256({'draft_id': 'draft1'})}/versions/1",
-                    headers={"Ocp-Apim-Subscription-Key": "briefing-author"})
-                self.assertEqual(missing.status_code, 404)
+                    headers={"Ocp-Apim-Subscription-Key": "briefing-author",
+                             "x-citadel-read-pool": "review1"})
+                self.assertEqual(missing.status_code, 409)
+                self.assertEqual(missing.json()["error"], "missing")

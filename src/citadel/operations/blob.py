@@ -140,10 +140,11 @@ class AzureBlobLedger:
                 # Never renew: an arbitrarily delayed write loses its server-side lease.
                 if server_date is None or server_date + 16 >= deadline or self.clock() >= deadline:
                     raise OperationError("deadline", "Storage lease cannot fit the inherited deadline")
-                await self.client.upload_blob(
+                committed = await self.client.upload_blob(
                     content, overwrite=True, etag=etag, match_condition=MatchConditions.IfNotModified,
                     lease=lease, max_concurrency=1, timeout=15,
                 )
+                return committed.get("etag") if committed else None
         except (AzureError, TimeoutError) as exc:
             raise _error(exc, writing=True) from None
         finally:

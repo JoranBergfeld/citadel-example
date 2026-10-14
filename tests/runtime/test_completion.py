@@ -24,6 +24,12 @@ class CollaborationCompletionTests(unittest.IsolatedAsyncioTestCase):
         receipt = await accounting.close("child1")
         with self.assertRaises(OperationError):
             await ops.complete(owner, finding=finding | {"private_notes": "secret"}, receipt=receipt)
+        for scope in ({"run_id": "different", "operation_id": "review1"},
+                      {"run_id": "run1", "operation_id": "child1"},
+                      {"run_id": "run1", "operation_id": "unadmitted"},
+                      {"run_id": "run1", "operation_id": "review1", "private_notes": "secret"}):
+            with self.assertRaises(OperationError):
+                await ops.complete(owner, finding=finding, receipt=receipt, read_scope=scope)
         ledger.lose_response = True
         with self.assertRaises(OperationError):
             await ops.complete(owner, finding=finding, receipt=receipt)
