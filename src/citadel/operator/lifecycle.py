@@ -327,7 +327,7 @@ class Lifecycle:
                 else:
                     value = json.loads(current)
                     if name == "ledger-v1.json" and (
-                            value.get("schema_version") != 1 or
+                            type(value.get("schema_version")) is not int or value["schema_version"] != 1 or
                             not all(isinstance(value.get(k), dict) for k in empty_ledger() if k != "schema_version")):
                         raise Blocked("existing_ledger_invalid")
                     if name == "active-run-slot.json" and value != {}:
@@ -533,8 +533,16 @@ class Lifecycle:
         raise Blocked("api_center_plan_read_contract_unresolved")
 
     def collect(self):
-        self.inventory()
         deadline = time.monotonic() + 600
+        previous = getattr(self.native, "deadline", None)
+        self.native.deadline = min(previous, deadline) if previous is not None else deadline
+        try:
+            return self.collect_with_deadline(self.native.deadline)
+        finally:
+            self.native.deadline = previous
+
+    def collect_with_deadline(self, deadline):
+        self.inventory()
         telemetry = []
         workspaces = [r for r in self.value["inventory"] if "/Microsoft.OperationalInsights/workspaces/" in r
                       and "/tables/" not in r]

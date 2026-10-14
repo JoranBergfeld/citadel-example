@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import time
 from uuid import uuid4
 
 from .state import Blocked, ROOT, private, write_private
@@ -25,6 +26,7 @@ class Native:
     def __init__(self, config, directory, *, process=subprocess.run):
         self.config, self.directory, self.process = config, Path(directory).absolute(), process
         self.tools = config["tools"]
+        self.deadline = None
 
     def verify_plan_read_contract(self):
         # Approved service GET (2024-03-01) exposes provisioningState only.
@@ -41,6 +43,10 @@ class Native:
             path.unlink(missing_ok=True)
 
     def run(self, args, *, data=None, timeout=120, env=None):
+        if self.deadline is not None:
+            timeout = min(timeout, self.deadline - time.monotonic())
+            if timeout <= 0:
+                raise Blocked("evidence_collection_deadline")
         environment = os.environ.copy()
         environment.update({"AZURE_CORE_COLLECT_TELEMETRY": "false",
                             "AZURE_CORE_ONLY_SHOW_ERRORS": "true",

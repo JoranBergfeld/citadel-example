@@ -1,9 +1,11 @@
 import copy
 from contextlib import contextmanager
+from datetime import datetime, timedelta, timezone
 import json
 import os
 from pathlib import Path
 import unittest
+from unittest.mock import patch
 
 from citadel.evidence.preparation import prepare_bundle
 from citadel.operator.native import Native
@@ -329,3 +331,23 @@ class DeploymentTests(test_cli.CliCase):
         self.fixture.runtime = incomplete
         code, report = self.deploy()
         self.assertEqual((code, report["code"]), (2, "api_center_identity_or_gateway_metadata_mismatch"))
+
+    def test_repair_does_not_accept_boolean_ledger_schema_version(self):
+        self.assert_deployed_blocked_on_plan()
+        key = next(k for k in self.fixture.blobs if k[2] == "ledger-v1.json")
+        ledger = json.loads(self.fixture.blobs[key])
+        ledger["schema_version"] = True
+        altered = json.dumps(ledger).encode()
+        self.fixture.blobs[key] = altered
+        code, report = self.deploy()
+        self.assertEqual((code, report["code"]), (2, "existing_ledger_invalid"))
+        self.assertEqual(self.fixture.blobs[key], altered)
+
+    def test_generated_certificate_survives_small_clock_regression_with_exact_90_days(self):
+        with patch("citadel.operator.rotation.datetime") as clock:
+            clock.now.side_effect = lambda zone: datetime.now(zone) + timedelta(seconds=2)
+            self.assert_deployed_blocked_on_plan()
+        credentials = json.loads((self.state / "credentials.json").read_text())
+        metadata = credentials["gatewayCertificates"][0]
+        self.assertEqual(datetime.fromisoformat(metadata["not_after"]) -
+                         datetime.fromisoformat(metadata["not_before"]), timedelta(days=90))

@@ -123,6 +123,9 @@ passwordless self-signed certificate, generated with **exactly 90 × 86400 secon
 validity. It is private operator recovery material; cloud persistence is only in
 allocated vault secrets. Never copy it to telemetry/evidence/Git.
 Applications always use the five allocated workload MIs, never the operator credential.
+Generation backdates the start by 30 seconds to tolerate small clock regressions;
+the end is start plus exactly 90 days. Validation is not relaxed and no grace
+period is added to the signed interval.
 
 ## Preflight, deploy, repair
 

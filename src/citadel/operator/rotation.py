@@ -18,7 +18,9 @@ def certificate(deployment_id):
     from cryptography.hazmat.primitives.serialization import pkcs12
     key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     subject = x509.Name([x509.NameAttribute(x509.oid.NameOID.COMMON_NAME, "citadel-" + deployment_id)])
-    start = datetime.now(timezone.utc).replace(microsecond=0)
+    # Backdate within the existing 30-second trust clock tolerance; the signed
+    # interval is still exactly 90 days, never 90 days plus a grace period.
+    start = (datetime.now(timezone.utc) - timedelta(seconds=30)).replace(microsecond=0)
     cert = (x509.CertificateBuilder().subject_name(subject).issuer_name(subject)
             .public_key(key.public_key()).serial_number(x509.random_serial_number())
             .not_valid_before(start).not_valid_after(start + timedelta(days=90))

@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 import shutil
 import subprocess
+import time
 import unittest
 from uuid import uuid4
 
@@ -56,3 +57,13 @@ class NativeTests(unittest.TestCase):
         native.az("version")
         self.assertEqual(calls[0]["env"]["AZURE_CONFIG_DIR"], str((self.directory / "azure").absolute()))
         self.assertEqual(calls[0]["umask"], 0o077)
+
+    def test_collection_deadline_bounds_each_native_child_including_inventory(self):
+        calls = []
+        def process(args, **kwargs):
+            calls.append(kwargs)
+            return subprocess.CompletedProcess(args, 0, b"{}", b"")
+        native = Native({"tools": {"azurePython": "/locked/azure/bin/python"}}, self.directory, process=process)
+        native.deadline = time.monotonic() + 1
+        native.az("version", timeout=120)
+        self.assertLessEqual(calls[0]["timeout"], 1)
