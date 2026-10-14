@@ -1,4 +1,5 @@
 import base64
+import copy
 import unittest
 from datetime import datetime, timedelta, timezone
 
@@ -17,6 +18,19 @@ class InputTests(unittest.TestCase):
             validate_deployment_inputs({
                 "deploymentId": "demo1",
                 "applications": {"reference-data": {"image": "registry.azurecr.io/reference:latest", "command": [], "args": []}},
+            })
+
+    def test_entrypoints_are_string_arrays_not_shell_strings(self):
+        with self.assertRaisesRegex(ValueError, "command"):
+            validate_deployment_inputs({
+                "deploymentId": "demo1",
+                "applications": {
+                    "reference-data": {
+                        "image": f"registry.azurecr.io/reference@sha256:{'a' * 64}",
+                        "command": "uvicorn actual:app",
+                        "args": [],
+                    },
+                },
             })
 
     def test_certificate_import_requires_real_matching_ninety_day_private_key_material(self):
@@ -41,6 +55,32 @@ class InputTests(unittest.TestCase):
             validate_gateway_certificate(pfx, [dict(metadata[0], sha256="b" * 64)])
         with self.assertRaisesRegex(ValueError, "certificate"):
             validate_gateway_certificate("not-a-certificate", metadata)
+        targets = ["reference-data", "evidence-assessor", "release-reviewer", "candidate-planner", "briefing-author"]
+        callers = ["operator"] + targets[1:]
+        parameters = {
+            "deploymentId": "demo1",
+            "applications": {target: {
+                "image": f"registry.azurecr.io/{target}@sha256:{'a' * 64}",
+                "command": ["python", "-m", "actual_entrypoint"], "args": [],
+            } for target in targets},
+            "gatewayCertificates": metadata,
+            "gatewayCertificatePfx": pfx,
+            "contextKeys": {target: {"activeId": "current", "keys": {"current": f"context-{target}".ljust(64, "_")}} for target in targets},
+            "callerKeys": {caller: {
+                "primary": f"caller-{caller}-primary".ljust(64, "_"),
+                "secondary": f"caller-{caller}-secondary".ljust(64, "_"),
+            } for caller in callers},
+            "modelCapacity": 120,
+        }
+        self.assertIsNone(validate_deployment_inputs(parameters))
+        shared = copy.deepcopy(parameters)
+        shared["contextKeys"]["reference-data"] = shared["contextKeys"]["evidence-assessor"]
+        with self.assertRaisesRegex(ValueError, "isolated"):
+            validate_deployment_inputs(shared)
+        duplicate = copy.deepcopy(parameters)
+        duplicate["callerKeys"]["operator"]["primary"] = duplicate["callerKeys"]["candidate-planner"]["primary"]
+        with self.assertRaisesRegex(ValueError, "distinct"):
+            validate_deployment_inputs(duplicate)
 
 
 if __name__ == "__main__":

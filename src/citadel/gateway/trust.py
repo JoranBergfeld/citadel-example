@@ -19,6 +19,7 @@ INVOCATION_CALLERS = {
 FINDING_CALLERS = frozenset({"candidate-planner", "briefing-author"})
 TOKEN = re.compile(r"[A-Za-z0-9_-]{1,128}\Z")
 PIN = re.compile(r"[a-f0-9]{64}\Z")
+XFCC_FIELD = re.compile(r'([A-Za-z]+)=(?:"((?:[^"\\\r\n]|\\.)*)"|([^;,"\r\n]*))(?:;|$)')
 
 
 @dataclass(frozen=True)
@@ -80,12 +81,18 @@ class GatewayTrust:
                 headers[name] = value.decode("ascii")
             certificate = headers["x-forwarded-client-cert"]
             # One ingress-generated Envoy entry; no appended client-supplied chain.
-            if "," in certificate or "\r" in certificate or "\n" in certificate:
-                raise ValueError("Ambiguous forwarded certificate")
-            matches = re.findall(r"(?:^|;)Hash=([a-fA-F0-9]{64})(?=;|$)", certificate)
-            if len(matches) != 1:
+            fingerprints = []
+            position = 0
+            while position < len(certificate):
+                field = XFCC_FIELD.match(certificate, position)
+                if field is None:
+                    raise ValueError("Ambiguous forwarded certificate")
+                if field[1] == "Hash":
+                    fingerprints.append((field[2] if field[2] is not None else field[3]).lower())
+                position = field.end()
+            if len(fingerprints) != 1 or not PIN.fullmatch(fingerprints[0]):
                 raise ValueError("Missing or ambiguous certificate fingerprint")
-            start, end = self.configuration.certificates[matches[0].lower()]
+            start, end = self.configuration.certificates[fingerprints[0]]
             if not start <= datetime.now(timezone.utc) < end:
                 raise ValueError("Certificate outside validity")
             caller = headers["x-citadel-caller"]

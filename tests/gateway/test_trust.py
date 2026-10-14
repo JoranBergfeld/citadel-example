@@ -82,6 +82,12 @@ class TrustTests(unittest.IsolatedAsyncioTestCase):
         response = await self.client.post("/a2a", content=body, headers=forged)
         self.assertEqual(response.status_code, 403)
 
+    async def test_single_ingress_certificate_with_quoted_subject_commas_is_valid(self):
+        body = b'{"jsonrpc":"2.0","method":"SendMessage"}'
+        valid = headers(body)
+        valid["x-forwarded-client-cert"] = f'Hash={PIN};Subject="CN=gateway,O=Citadel";'
+        self.assertEqual((await self.client.post("/a2a", content=body, headers=valid)).status_code, 200)
+
     async def test_route_matrix_separates_invocation_status_and_findings(self):
         expected = {
             "candidate-planner": {"operator"},

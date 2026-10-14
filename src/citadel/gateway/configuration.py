@@ -56,10 +56,10 @@ def validate_deployment_inputs(parameters: dict) -> None:
     for app in applications.values():
         if not re.fullmatch(r"[a-z0-9]+\.azurecr\.io/[a-z0-9/_.-]+@sha256:[a-f0-9]{64}", app.get("image", "")):
             raise ValueError("Applications require an immutable ACR sha256 digest")
-        if not app.get("command") or not isinstance(app.get("args"), list):
+        if not isinstance(app.get("command"), list) or not app["command"] or not isinstance(app.get("args"), list):
             raise ValueError("Actual application command and args arrays are required")
-        if any(not isinstance(value, str) or not value for value in app["command"]):
-            raise ValueError("Application command must contain nonempty strings")
+        if any(not isinstance(value, str) or not value for value in app["command"] + app["args"]):
+            raise ValueError("Application command and args must contain nonempty strings")
     if parameters.get("deployRuntime", True) and set(applications) != set(INVOCATION_CALLERS):
         raise ValueError("Exactly five named applications are required")
     certificates = parameters.get("gatewayCertificates", [])
