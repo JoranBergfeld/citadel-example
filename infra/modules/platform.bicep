@@ -230,6 +230,7 @@ output workspaceId string = workspace.id
 output environmentId string = environment.id
 output insightsName string = insights.name
 output registryName string = registry.name
+output centerName string = center.name
 output apimName string = apim.name
 output vaultName string = vault.name
 output gatewayUrl string = apim.properties.gatewayUrl

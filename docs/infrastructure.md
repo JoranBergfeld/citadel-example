@@ -227,15 +227,40 @@ Required diagnostic categories and effective table names/retention are live
 gates. Some tables must first materialize through ingestion before their
 retention update can succeed; reconcile rather than omit them.
 
-**API Center representation remains blocked pending explicit decision.**
-Only the stable service/default-workspace foundation is declared at this stage;
-an empty workspace is explicitly **not** successful capability inventory.
-The pinned `2024-03-01` API schema requires an API `kind` from a set without
-A2A/MCP. No fake kind, `sku: Free`, native-import claim, or REST relabeling is
-present. Stable environment entities and custom string/object metadata provide
-a possible honest workload inventory, but choosing that representation is not
-silently treated as approval. Do not deploy or accept this bundle while this
-gate is unresolved; lifecycle must also verify the actual Free plan.
+**Approved API Center representation:** the human accepted environment-based
+workload inventory plus the genuine released-findings REST capability
+([canonical clarification](https://github.com/JoranBergfeld/citadel-example/issues/7#issuecomment-6176175396)).
+`infra/modules/inventory.bicep` uses only stable `2024-03-01` resources:
+
+- Five **testing environment** records represent the actual four agent apps
+  and Reference Data MCP app, with server type `Azure compute service`.
+- Seven required, flat string metadata properties per environment identify
+  the real workload ARM ID (`workload`), `protocol`, `protocol-version`, `team`,
+  `gateway-address`, `identity-kind`, and actual `identity-resource-id`.
+  A2A remains A2A `1.0.0` using JSON-RPC 2.0; MCP remains MCP `2025-11-25`
+  using Streamable HTTP. Identities are ordinary user-assigned managed
+  identities, explicitly **not Entra Agent IDs**.
+- This is **workload/environment inventory, not native A2A/MCP API
+  registration or import validation**. No JSON-RPC transport is labeled REST.
+- Separately, one genuine `kind: rest` API records released-findings reads.
+  Its gateway deployment references API Center-scoped environment ID
+  `/workspaces/default/environments/release-reviewer`, the actual host.
+  The advertised base URL is APIM's `/release-reviewer`; the documented
+  capability is GET `/findings/{findingId}/versions/{version}`. It confers
+  neither Reviewer invocation nor release/private-draft access. No imported
+  definition or verified operational `state` is fabricated.
+
+Inventory is configured only with real runtime applications and gateway routes.
+Foundation-only output states `not_configured`; an empty workspace never
+constitutes an inventory pass. All environment, schema, REST API and deployment
+IDs are retained in `inventory.capabilities`.
+
+The Free plan's published limits permit 20 environments and 10 metadata
+properties per entity; this representation uses five and seven respectively.
+The exact stable API's metadata/provider acceptance, actual Free plan and
+effective inventory completeness remain operator-owned **live gates**.
+There is no invented `sku: Free` field, paid-plan substitution, API upgrade,
+native-import claim or local claim that the provider accepted these records.
 
 ## Local versus live validation
 

@@ -137,6 +137,22 @@ module gateway 'modules/gateway.bicep' = if (deployRuntime) {
   }
 }
 
+module capabilityInventory 'modules/inventory.bicep' = if (deployRuntime) {
+  name: 'inventory-${deploymentId}'
+  scope: resourceGroup(groups.platform)
+  params: {
+    centerName: platform.outputs.centerName
+    gatewayUrl: platform.outputs.gatewayUrl
+    workloads: [for (workload, i) in workloads: {
+      name: workload.name
+      team: workload.team
+      appResourceId: apps[i]!.outputs.inventory.app
+      identityResourceId: apps[i]!.outputs.inventory.identity
+    }]
+  }
+  dependsOn: [gateway]
+}
+
 output teamInventory array = [for (team, i) in ['reference', 'evidence', 'planning']: {
   resources: teams[i].outputs.inventory
   assignments: teams[i].outputs.roleInventory
@@ -149,6 +165,7 @@ output inventory object = {
   platform: platform.outputs.inventory
   gateway: deployRuntime ? gateway!.outputs.inventory : { state: 'not_configured' }
   gatewayApis: deployRuntime ? gateway!.outputs.apiInventory : []
-  inventoryGate: 'API Center protocol representation blocked pending explicit decision; Free plan must be verified live.'
+  capabilities: deployRuntime ? capabilityInventory!.outputs.inventory : { state: 'not_configured' }
+  inventoryGate: 'Approved workload-environment representation; actual Free plan, metadata/provider acceptance and completeness require live verification.'
 }
 output gatewayUrl string = platform.outputs.gatewayUrl

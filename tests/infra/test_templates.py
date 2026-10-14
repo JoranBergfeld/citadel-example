@@ -1,6 +1,7 @@
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import unittest
 
@@ -144,6 +145,65 @@ class TemplateTests(unittest.TestCase):
         self.assertNotIn("sku", centers[0])
         self.assertNotIn("sku", centers[0].get("properties", {}))
         self.assertEqual([r for r in platform["resources"] if r["type"].endswith("/apis")], [])
+
+    def test_approved_inventory_declares_five_real_workloads_with_seven_flat_strings(self):
+        inventory = self.module("inventory-")
+        schemas = next(r for r in inventory["resources"] if r["type"] == "Microsoft.ApiCenter/services/metadataSchemas")
+        self.assertEqual(schemas["apiVersion"], "2024-03-01")
+        self.assertEqual(json.loads(schemas["properties"]["schema"]), {"type": "string"})
+        self.assertEqual(schemas["properties"]["assignedTo"], [{"entity": "environment", "required": True}])
+        expected = {"workload", "protocol", "protocol-version", "team", "gateway-address", "identity-kind", "identity-resource-id"}
+        self.assertEqual(set(inventory["variables"]["metadataNames"]), expected)
+        environment = next(r for r in inventory["resources"] if r["type"] == "Microsoft.ApiCenter/services/workspaces/environments")
+        properties = environment["properties"]
+        self.assertEqual(environment["apiVersion"], "2024-03-01")
+        self.assertEqual(properties["kind"], "testing")
+        self.assertEqual(properties["server"]["type"], "Azure compute service")
+        self.assertEqual(set(properties["customProperties"]), expected)
+        self.assertTrue(all(isinstance(v, str) for v in properties["customProperties"].values()))
+        self.assertIn("not native A2A/MCP", properties["description"])
+        self.assertEqual(properties["customProperties"]["identity-kind"], "Azure user-assigned managed identity; not Entra Agent ID")
+        module = next(r for r in self.template["resources"] if r["type"] == "Microsoft.Resources/deployments" and r["name"].startswith("[format('inventory-"))
+        self.assertEqual(module["condition"], "[parameters('deployRuntime')]")
+        workloads = self.template["variables"]["workloads"]
+        if isinstance(workloads, str):
+            referenced = re.fullmatch(r"\[variables\('([^']+)'\)\]", workloads).group(1)
+            workloads = self.template["variables"][referenced]
+        self.assertEqual({w["name"] for w in workloads}, {
+            "reference-data", "evidence-assessor", "release-reviewer", "candidate-planner", "briefing-author",
+        })
+        binding = module["properties"]["parameters"]["workloads"]["copy"][0]
+        self.assertEqual(binding["count"], "[length(variables('workloads'))]")
+        self.assertIn(".outputs.inventory.value.app", binding["input"])
+        self.assertIn(".outputs.inventory.value.identity", binding["input"])
+        self.assertEqual(environment["copy"]["count"], "[length(parameters('workloads'))]")
+        expected_protocols = {name: {"name": "A2A", "version": "1.0.0", "path": "/a2a"} for name in {
+            "evidence-assessor", "release-reviewer", "candidate-planner", "briefing-author",
+        }}
+        expected_protocols["reference-data"] = {"name": "MCP", "version": "2025-11-25", "path": "/mcp"}
+        self.assertEqual(inventory["variables"]["protocols"], expected_protocols)
+        self.assertEqual(inventory["variables"]["teamNames"], {
+            "reference": "Reference Data", "evidence": "Evidence Review", "planning": "Exercise Planning",
+        })
+
+    def test_only_genuine_rest_finding_capability_is_registered_against_reviewer_environment(self):
+        inventory = self.module("inventory-")
+        apis = [r for r in inventory["resources"] if r["type"] == "Microsoft.ApiCenter/services/workspaces/apis"]
+        self.assertEqual(len(apis), 1)
+        self.assertEqual(apis[0]["apiVersion"], "2024-03-01")
+        self.assertEqual(apis[0]["properties"]["kind"], "rest")
+        self.assertEqual(apis[0]["properties"]["title"], "Released findings")
+        self.assertIn("GET /findings/{findingId}/versions/{version}", apis[0]["properties"]["description"])
+        self.assertIn("not agent invocation", apis[0]["properties"]["description"])
+        deployments = [r for r in inventory["resources"] if r["type"] == "Microsoft.ApiCenter/services/workspaces/apis/deployments"]
+        self.assertEqual(len(deployments), 1)
+        deployment = deployments[0]
+        self.assertEqual(deployment["apiVersion"], "2024-03-01")
+        self.assertEqual(deployment["properties"]["environmentId"], "/workspaces/default/environments/release-reviewer")
+        self.assertEqual(deployment["properties"]["server"]["runtimeUri"], ["[format('{0}/release-reviewer', parameters('gatewayUrl'))]"])
+        self.assertNotIn("state", deployment["properties"], "Declaration must not claim verified operational status")
+        self.assertNotIn("definitionId", deployment["properties"], "No invented imported definition")
+        self.assertTrue(deployment["dependsOn"], "Association waits for real workload environments")
 
 
 if __name__ == "__main__":
