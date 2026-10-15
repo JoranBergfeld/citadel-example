@@ -32,13 +32,17 @@ def validate_request(request, *, enabled, workload, client_id):
         keys.add("origin")
     if isinstance(request, dict) and request.get("mode") == "gateway-matrix" and "routes" in request:
         keys.add("routes")
+    if isinstance(request, dict) and request.get("mode") == "release-faults":
+        keys.add("release")
     if (enabled is not True or not isinstance(request, dict)
             or request.keys() != keys
             or type(request["schema_version"]) is not int or request["schema_version"] != 1
             or request["workload"] != workload
             or workload not in AGENTS or str(UUID(request["client_id"])) != str(UUID(client_id))
-            or request["mode"] not in ("gateway-matrix", "operation-faults", "storage-boundaries", "origin-boundary")
+            or request["mode"] not in ("gateway-matrix", "operation-faults", "release-faults",
+                                      "storage-boundaries", "origin-boundary")
             or request["mode"] == "operation-faults" and workload not in ("candidate-planner", "briefing-author")
+            or request["mode"] == "release-faults" and workload != "release-reviewer"
             or type(request["deadline"]) not in (float, int) or not math.isfinite(request["deadline"])
             or not time.time() < request["deadline"] <= time.time() + 900):
         raise ValueError("Disabled, unallocated or malformed fixed-purpose probe")
@@ -48,6 +52,9 @@ def validate_request(request, *, enabled, workload, client_id):
     if "routes" in request:
         from .route_context import validate_route_context
         validate_route_context(request["routes"])
+    if "release" in request:
+        from .release_probes import validate_source
+        validate_source(request["release"])
     if request["mode"] == "storage-boundaries":
         from .storage_probes import validate_storage_manifest
         validate_storage_manifest(request["storage"])
@@ -73,9 +80,11 @@ class ProbeLedger:
 async def publish_operation(container, *, run_id, workload, principal_id, check_id, actual, started, deadline):
     identity(run_id)
     operation = identity(actual["operation_id"])
-    if workload not in ("candidate-planner", "briefing-author") or check_id not in {
+    from .release_probes import RELEASE_CHECKS
+    if not (workload == "release-reviewer" and check_id in RELEASE_CHECKS) and (
+            workload not in ("candidate-planner", "briefing-author") or check_id not in {
             "fault.dropped-committed-write", "fault.pending-incomplete", "fault.fenced-explicit-retry",
-            "fault.safe-read-recovery", "fault.safe-read-exhaustion", "fault.deadline-no-late-effect"}:
+            "fault.safe-read-recovery", "fault.safe-read-exhaustion", "fault.deadline-no-late-effect"}):
         raise ValueError("Only fixed durable-operation observations may be published")
     blob = container.get_blob_client(f"acceptance/{run_id}/observations/{operation}.json")
     row = {"check_id": check_id, "probe_id": check_id, "run_id": run_id, "operation_id": operation,
@@ -106,6 +115,86 @@ async def publish_operation(container, *, run_id, workload, principal_id, check_
     return row
 
 
+async def run_release_faults(config, request, credential, pool, container):
+    from citadel.operations import DraftReader
+    from citadel.operations.blob import AzureBlobLedger
+    from citadel.runtime.network import GatewayPeers
+    from .release_probes import ReleaseProbes, RELEASE_CHECKS
+    deadline, run_id = request["deadline"], request["run_id"]
+    options = dict(credential=credential, api_version="2026-10-06", retry_total=0,
+                   retry_connect=0, retry_read=0, retry_status=0, connection_timeout=5, read_timeout=30)
+    results, state, reference_reads = [], "complete", []
+
+    async def sent(request):
+        request.extensions["citadel_probe_started"] = time.time()
+
+    async def received(response):
+        from .telemetry import gateway_request_id
+        request = response.request
+        if request.method != "POST":
+            return
+        payload = json.loads(request.content)
+        method = (payload.get("params", {}).get("name")
+                  if payload.get("method") == "tools/call" else payload.get("method"))
+        if method not in ("initialize", "lookup_airport", "list_runways"):
+            return
+        if len(reference_reads) >= 3:
+            raise OperationError("exhausted", "Unexpected repeated Reference Data control")
+        reference_reads.append({"method": method, "run_id": run_id, "operation_id": run_id,
+            "request_id": gateway_request_id(response.headers), "status_code": int(response.status_code),
+            "target": hashlib.sha256(str(request.url).encode()).hexdigest(),
+            "started": request.extensions["citadel_probe_started"],
+            "finished": time.time()})
+    try:
+        with read_scope(pool, deadline=deadline), correlate(run_id, run_id, config.target):
+            async with ContainerClient(config.blob, "drafts", **options) as drafts:
+                reader = DraftReader(ProbeLedger(
+                    AzureBlobLedger(drafts.get_blob_client("ledger-v1.json"), control_plane=True), pool, deadline))
+                ref = request["release"]["draft"]
+                draft = await reader.get_draft(ref["artifact_id"], ref["version"], ref["sha256"])
+                if draft["run_id"] != request["release"]["run_id"]:
+                    raise ValueError("Observed draft belongs to another source run")
+                async with SecretClient(config.vault, credential, api_version="2025-07-01",
+                        retry_total=0, connection_timeout=5, read_timeout=30) as vault:
+                    async with asyncio.timeout(max(0, min(30, deadline - time.time()))):
+                        secret = await vault.get_secret(config.subscription_secret)
+                if not secret.value:
+                    raise ValueError("Allocated reviewer subscription is missing")
+                async with httpx.AsyncClient(timeout=30, follow_redirects=False, trust_env=False,
+                        event_hooks={"request": [sent], "response": [received]}) as client:
+                    peers = GatewayPeers(config.target, config.gateway, secret.value, http_client=client)
+                    reference = await peers.reference(
+                        draft["provenance"]["fixture"]["id"], deadline, ident=draft["airport_ident"])
+                async with ContainerClient(config.blob, "findings", **options) as findings:
+                    for check in sorted(RELEASE_CHECKS):
+                        operation, started = uuid4().hex, time.time()
+                        with correlate(run_id, operation, config.target):
+                            ledger = AzureBlobLedger(findings.get_blob_client(
+                                f"acceptance/{run_id}/releases/{operation}.json"), control_plane=True)
+                            if time.time() >= deadline:
+                                raise OperationError("deadline", "Late release initialization refused")
+                            await ledger.initialize()
+                            probe = ReleaseProbes(ProbeLedger(ledger, pool, deadline),
+                                drafts=reader, reference=reference, workload=config.target, enabled=True,
+                                source_run=request["release"]["run_id"], deadline=deadline)
+                            if check == "fault.dropped-committed-release":
+                                actual = await probe.committed_response_loss(ref, operation_id=operation)
+                            else:
+                                actual = await probe.concurrent_release(ref, operation_id=operation,
+                                    distinct_operations=check == "fault.concurrent-different-operation-release")
+                            actual["reference_reads"] = reference_reads
+                            results.append(await publish_operation(container, run_id=run_id,
+                                workload=config.target, principal_id=os.environ["AZURE_PRINCIPAL_ID"],
+                                check_id=check, actual=actual, started=started, deadline=deadline))
+    except (OperationError, ValueError, TimeoutError):
+        state = "blocked"
+    async with asyncio.timeout(max(0, min(30, deadline - time.time()))):
+        await container.get_blob_client(f"acceptance/{run_id}/observations.json").upload_blob(
+            canonical_bytes({"schema_version": 1, "run_id": run_id, "state": state,
+                             "observations": results}), overwrite=False, timeout=5)
+    return results
+
+
 async def run_gateway_matrix(config, request):
     """No supplied credentials, identity substitution, developer fallback or raw URL."""
     validate_request(request, enabled=os.environ.get("CITADEL_ACCEPTANCE_ENABLED") == "true",
@@ -122,6 +211,8 @@ async def run_gateway_matrix(config, request):
             if not await store.open_pool(scope, exclusive=config.target == "candidate-planner"):
                 raise ValueError("Existing probe admission cannot be replayed")
             pool = TicketPool(store, scope, 512)
+            if request["mode"] == "release-faults":
+                return await run_release_faults(config, request, credential, pool, container)
             if request["mode"] == "storage-boundaries":
                 from .storage_probes import StorageProbe
                 from .coverage import CONTAINERS, STORAGE

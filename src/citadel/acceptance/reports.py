@@ -31,6 +31,8 @@ completed missing_operation_id operation_state input_hash missing_state budget_s
 business_sha256 steps
 route_context context_reads control_reference finding read_scope artifact_id operations result_sha256 task_sha256
 finding_controls observation_kind read_operation_id ticket_reads
+release_source draft draft_sha256 projection_sha256 reference_reads
+input_hashes run_ids deadlines result_hashes simultaneous_commits conditional_conflicts
 runtime_identities subscription_bindings credential_sha256
 name region sku version_upgrade_option verification a2a a2a_binding mcp mcp_transport
 model_path blob_data_api key_vault_data_api

@@ -58,6 +58,26 @@ class BlobProvider:
 
 
 class StorageControlTests(unittest.TestCase):
+    def test_release_source_selects_an_observed_comparison_finding_without_exporting_the_payload(self):
+        from citadel.evidence.manifests import sha256
+        provider, admissions = BlobProvider(), []
+        finding = {"artifact_id": "finding", "version": 1, "run_id": "comparison",
+            "operation_id": "original-review", "draft": {"artifact_id": "draft", "version": 1, "sha256": "a" * 64},
+            "reviewer": "release-reviewer", "private_notes": "NOT EXPORTED"}
+        provider.objects["findings", "ledger-v1.json"] = json.dumps(
+            {"schema_version": 1, "findings": {"finding": {"1": finding}}}).encode()
+        control = StorageControls(provider, account="https://allocated.blob.core.windows.net",
+                                  suite_id="suite1", admit=lambda: admissions.append(1))
+        observed = control.release_source(["comparison"])
+        self.assertEqual(observed["release_source"], {"run_id": "comparison", "draft": finding["draft"]})
+        self.assertEqual(observed["projection_sha256"], sha256(
+            {key: value for key, value in finding.items() if key != "operation_id"}))
+        self.assertEqual(len(admissions), 1)
+        self.assertNotIn("NOT EXPORTED", str(observed))
+        self.assertEqual(provider.requests, [("GET", "findings", "ledger-v1.json")])
+        with self.assertRaises(OperationError):
+            control.release_source(["unrelated"])
+
     def test_route_context_observes_existing_ledgers_without_exporting_products_or_funding_new_pools(self):
         from tests.acceptance.test_route_context import ledgers
         provider = BlobProvider()

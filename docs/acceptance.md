@@ -106,6 +106,26 @@ requires its four independently verified, actually executed storage denials.
   altered state, unobserved source or incomplete driver cannot become pass.
   Root accounting accepts an optional **shorter** inherited probe deadline;
   omission retains 900 seconds and no argument can increase that ceiling.
+- `release-faults` runs only as the actual Release Reviewer in its existing image
+  and identity. The controller derives an exact draft reference from a genuine
+  completed comparison finding. The worker reads that immutable source through
+  the reviewer's read-only draft authority and retrieves its reference evidence
+  over real MCP/APIM using only the allocated reviewer subscription.
+  Three fixed drivers execute real conditional release writes in separate
+  same-container disposable ledgers: response loss after committed release,
+  simultaneous same-operation release, and simultaneous different-operation
+  release. The race barrier delays dispatch; it never supplies provider results.
+  Both participants settle before a failed race can be reported. Normal drafts,
+  findings, permissions and operation budgets are not modified.
+- Release evidence binds actual Blob publication receipts, a digest-bound reviewer
+  application record, three real MCP response IDs with gateway/backend identity
+  and allocated-subscription correlations, independent final-state reads and
+  before/after business-ledger snapshots. Oracles verify exact input/deadline/run
+  bindings, one immutable finding, matching released projection and definitive
+  conditional conflicts. Sanitized exports are independently re-evaluated.
+  Missing layers or source bindings block; changed business state fails.
+  These three drivers do **not** establish version-conflict, new-version or actual
+  process-restart proof. Those requirements remain blocked pending their drivers.
 - Writable workloads persist one-shot admission and finite 512-ticket read pools
   in their existing operations container. Candidate Planner also acquires its
   existing active-run slot. Failed probe admissions/results are retained; repair

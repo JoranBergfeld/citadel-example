@@ -29,6 +29,43 @@ def evaluate_check(check, report):
                 check["check_id"].startswith("route.operator.")
                 and observation.get("run_id") == report.get("run_id"))):
         return blocked
+    from .release_probes import RELEASE_CHECKS, validate_source
+    if check["check_id"] in RELEASE_CHECKS:
+        from citadel.operations import OperationError
+        from .release_oracle import evaluate_release
+        source = actual.get("source")
+        if not isinstance(source, dict) or not isinstance(source.get("observation"), dict):
+            return blocked
+        try:
+            context = validate_source(source.get("release_source"))
+        except (OperationError, ValueError, TypeError):
+            return blocked
+        comparison = report.get("scenarios", {}).get("comparison", {})
+        snapshot_rows = [control, source["observation"]]
+        snapshots = {}
+        for side in ("before", "after"):
+            rows = actual.get(side)
+            if (not isinstance(rows, list) or len(rows) != 2
+                    or any(not isinstance(row, dict) or not isinstance(row.get("container"), str) for row in rows)
+                    or {row["container"] for row in rows} != {"drafts", "findings"}):
+                return blocked
+            snapshots[side] = {row["container"]: row for row in rows}
+            snapshot_rows.extend(rows)
+        observer = control.get("runtime_identity")
+        nested = observation.get("actual")
+        if (not isinstance(comparison, dict) or context["run_id"] != comparison.get("operation_id")
+                or context["run_id"] not in operations or not isinstance(nested, dict)
+                or not isinstance(nested.get("operation_ids", []), list)
+                or any(identifier not in operations for identifier in nested.get("operation_ids", []))
+                or any(row.get("suite_id") != report["run_id"] or row.get("caller") != "operator"
+                       or row.get("action") != "read" or row.get("operation_id") not in operations
+                       for row in snapshot_rows)
+                or control.get("container") != "findings"
+                or not hash_value(observer) or observer in identities.values()):
+            return blocked
+        return evaluate_release(observation, control, source, snapshots, records,
+            runtime_identity=identities["release-reviewer"], reference_identity=identities["reference-data"],
+            observer_identity=observer, subscription=report.get("subscription_bindings", {}).get("release-reviewer"))
     if check["check_id"].startswith("fault."):
         from .operation_oracle import evaluate_operation
         if (control.get("suite_id") != report.get("run_id")

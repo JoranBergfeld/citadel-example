@@ -22,7 +22,8 @@ class RevisionProbe:
         self.lifecycle, self.sleep, self.clock = lifecycle, sleep, clock
         self.admit = admit
 
-    def execute(self, app, workload, run_id, *, mode="gateway-matrix", storage=None, routes=None, deadline=None):
+    def execute(self, app, workload, run_id, *, mode="gateway-matrix", storage=None, routes=None,
+                release=None, deadline=None):
         identity(run_id)
         if workload not in AGENTS:
             raise ValueError("Only an allocated, durably admitted workload probe is supported")
@@ -50,6 +51,8 @@ class RevisionProbe:
             request["storage"] = storage
         if routes is not None:
             request["routes"] = routes
+        if release is not None:
+            request["release"] = release
         if mode == "origin-boundary":
             request["origin"] = endpoint(
                 "https://" + deployed["properties"]["configuration"]["ingress"]["fqdn"],

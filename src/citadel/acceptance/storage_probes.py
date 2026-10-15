@@ -220,6 +220,45 @@ class StorageControls:
             records[container] = record
         return records
 
+    def release_source(self, run_ids):
+        from .release_probes import validate_source
+        if not isinstance(run_ids, list) or not 0 < len(run_ids) <= 4:
+            raise ValueError("Bounded completed scenario runs required")
+        for run_id in run_ids:
+            identity(run_id)
+        record, content = self._read("findings", "ledger-v1.json")
+        try:
+            document = json.loads(content)
+            if document["schema_version"] != 1 or not isinstance(document["findings"], dict):
+                raise ValueError()
+            for versions in document["findings"].values():
+                if not isinstance(versions, dict):
+                    raise ValueError()
+                for finding in versions.values():
+                    if not isinstance(finding, dict):
+                        raise ValueError()
+                    if finding.get("run_id") in run_ids and finding.get("reviewer") == "release-reviewer":
+                        source = validate_source({"run_id": finding["run_id"], "draft": finding["draft"]})
+                        return {"release_source": source, "observation": record,
+                            "projection_sha256": sha256({
+                                key: value for key, value in finding.items() if key != "operation_id"})}
+        except (KeyError, TypeError, ValueError, UnicodeError):
+            raise OperationError("data_integrity", "Observed release source is malformed") from None
+        raise OperationError("missing", "A genuine released comparison draft is required")
+
+    def release_state(self, run_id, operation_id):
+        record, content = self._read("findings",
+            f"acceptance/{identity(run_id)}/releases/{identity(operation_id)}.json")
+        try:
+            document = json.loads(content)
+            if (not isinstance(document, dict) or document.get("schema_version") != 1
+                    or any(not isinstance(document.get(key), dict)
+                           for key in ("operations", "drafts", "findings", "budgets", "runs"))):
+                raise ValueError()
+        except (ValueError, UnicodeError):
+            raise OperationError("data_integrity", "Isolated release state is malformed") from None
+        return record, document
+
     def route_context(self, run_ids):
         from .route_context import build_route_context
         if not isinstance(run_ids, list) or not 0 < len(run_ids) <= 4:
