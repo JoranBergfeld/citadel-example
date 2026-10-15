@@ -74,6 +74,54 @@ def owner_route_proof(capability):
 
 
 class RouteOracleTests(unittest.TestCase):
+    def test_invocation_denials_use_actual_workflow_acceptance_and_completed_input_binding(self):
+        args, context, reads = owner_route_proof("status")
+        observed, control, snapshots, evidence, identities, subscriptions = args
+        for row in (observed, control):
+            row["check_id"] = row["check_id"].removesuffix("status") + "invoke"
+            row.pop("control_reference")
+        control.update(observation_kind="workflow", run_id="real-run", started=80, finished=81,
+            actual="accepted_invocation", accepted_operation_id="assess2", sha256="8" * 64,
+            business_state="TASK_STATE_SUBMITTED")
+        evidence[0].update(method="POST")
+        evidence[1].update(observed, facts={"probe_id": observed["check_id"], "sha256": sha256(observed)})
+        evidence[2].update(observed=80.5, method="POST")
+        evidence[3].update(control, observed=80.5, method="invocation.observed",
+            facts={"probe_id": control["check_id"], "sha256": sha256(control)})
+        evidence.append(evidence[4] | control | {"observed": 80.5, "method": "SendMessage", "facts": {}})
+        evidence[4].update(control, observed=80.5, method="SendMessage", operation_id="assess2", facts={
+            "accepted_operation_id": "assess2", "input_hash": context["operations"]["evidence-assessor"]["input_hash"]})
+        def check(row=observed, records=evidence, observers=reads):
+            return evaluate_route(row, control, snapshots, records, identities=identities,
+                subscriptions=subscriptions, observer_identity="f" * 64,
+                route_context=context, context_observations=observers)
+        self.assertEqual(check()["status"], "pass")
+        self.assertEqual(check(row=control)["status"], "pass")
+        self.assertEqual(check(observers=reads[:-1])["status"], "blocked")
+        for facts in ({"accepted_operation_id": "unrelated"}, {"input_hash": "9" * 64}):
+            changed = copy.deepcopy(evidence)
+            changed[4]["facts"].update(facts)
+            self.assertEqual(check(records=changed)["status"], "blocked")
+        for layer in ("application", "gateway", "storage"):
+            self.assertEqual(check(records=[row for row in evidence if row["source"] != layer])["status"], "blocked")
+        from citadel.acceptance.proof_gate import evaluate_check
+        from citadel.acceptance.reports import sanitize
+        report = {"run_id": "suite1", "runtime_identities": identities, "subscription_bindings": subscriptions,
+            "scenarios": {"comparison": {"operation_id": "real-run"}}, "evidence": evidence,
+            "operation_ids": list({"real-run", observed["run_id"], observed["operation_id"], control["operation_id"],
+                *[row["operation_id"] for row in context["operations"].values()],
+                *[row["read_scope"]["operation_id"] for row in context["finding_controls"].values()],
+                *[row["operation_id"] for row in reads]})}
+        exported = {"check_id": observed["check_id"], "expected": "deny", "status": "pass", "actual": {
+            "observation": observed, "control": control, "route_context": context, "context_reads": reads,
+            **{side: list(rows.values()) for side, rows in snapshots.items()}}}
+        self.assertEqual(evaluate_check(sanitize(exported), sanitize(report))["status"], "pass")
+        self.assertEqual(evaluate_check(sanitize(exported), sanitize(report | {
+            "operation_ids": [name for name in report["operation_ids"] if name != "context-0"]
+        }))["status"], "blocked")
+        snapshots["after"]["findings"]["sha256"] = "9" * 64
+        self.assertEqual(check()["status"], "fail")
+
     def test_workflow_status_is_a_real_control_without_refilling_exhausted_operation_tickets(self):
         args, context, reads = owner_route_proof("status")
         observed, control, snapshots, evidence, identities, subscriptions = args

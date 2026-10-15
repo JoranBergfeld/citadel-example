@@ -105,6 +105,28 @@ class OwnerRouteRuntimeTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual({row["check_id"] for row in controls}, {
                 "route.candidate-planner.evidence-assessor.status",
                 "route.evidence-assessor.release-reviewer.status"})
+            from citadel.acceptance.workflow_routes import invocation_controls
+            invocations = invocation_controls([row | {"source": "application"} for row in records],
+                                               context, operator=planner.invocation_receipt)
+            self.assertEqual({row["check_id"] for row in invocations}, {
+                "route.operator.candidate-planner.invoke",
+                "route.candidate-planner.evidence-assessor.invoke",
+                "route.evidence-assessor.release-reviewer.invoke",
+                "route.candidate-planner.briefing-author.invoke"})
+            self.assertTrue(all(row["accepted_operation_id"] ==
+                context["operations"][row["check_id"].split(".")[2]]["operation_id"] for row in invocations))
+            for row in invocations:
+                reference = context["operations"][row["check_id"].split(".")[2]]
+                self.assertTrue(any(record["method"] == "SendMessage"
+                    and record.get("facts", {}).get("accepted_operation_id") == row["accepted_operation_id"]
+                    and record["facts"].get("input_hash") == reference["input_hash"]
+                    and record.get("operation_id") == row["accepted_operation_id"]
+                    and all(record.get(key) == row[key] for key in ("run_id", "caller"))
+                    for record in records), row)
+            for row in controls:
+                self.assertTrue(any(record["method"] == "status"
+                    and all(record.get(key) == row[key] for key in ("run_id", "operation_id", "caller"))
+                    for record in records), row)
             self.assertNotEqual(context["operations"]["release-reviewer"]["operation_id"],
                                 context["read_scope"]["operation_id"])
             lifecycle = SimpleNamespace(value={"outputs": {"gatewayUrl": "https://gateway.test"}},

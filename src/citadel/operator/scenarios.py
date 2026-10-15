@@ -42,7 +42,9 @@ class PlannerClient:
     def __init__(self, gateway, key, *, http):
         self.gateway, self.key, self.http = endpoint(gateway), key, http
         self.mode, self.sent = None, False
+        self.invoking, self.invocation_receipt = False, None
         http.event_hooks.setdefault("request", []).insert(0, self.guard)
+        http.event_hooks.setdefault("response", []).append(self.received)
         self.card = AgentCard(
             name="candidate-planner", description="Configured gateway interface; not live discovery proof",
             version="1.0.0", supported_interfaces=[AgentInterface(
@@ -54,10 +56,24 @@ class PlannerClient:
         if self.sent or self.mode is None or str(request.url) != self.mode:
             raise Blocked("hidden_retry_or_gateway_redirect")
         self.sent = True
+        self.started = time.time()
         request.headers["Ocp-Apim-Subscription-Key"] = self.key
+        from citadel.acceptance.telemetry import correlation_headers
+        request.headers.update(correlation_headers())
+
+    async def received(self, response):
+        if not self.invoking:
+            return
+        await response.aread()
+        from citadel.acceptance.workflow_routes import observe_invocation
+        self.invocation_receipt = observe_invocation(response, caller="operator", target="candidate-planner",
+            run_id=response.request.headers.get("x-citadel-run-id"),
+            operation_id=response.request.headers.get("x-citadel-operation-id"),
+            started=self.started, finished=time.time())
 
     async def exchange(self, path, deadline, callback, *, invocation=False):
         self.mode, self.sent = self.gateway + path, False
+        self.invoking = invocation
         try:
             async with asyncio.timeout(max(0, min(180 if invocation else 30, deadline - time.time()))):
                 return await callback()
@@ -65,13 +81,17 @@ class PlannerClient:
             raise Blocked("invocation_ambiguous_reconcile_only" if invocation else "status_unavailable") from None
         finally:
             self.mode = None
+            self.invoking = False
 
     async def invoke(self, run_id, fixture, deadline):
-        async with A2AAgent(agent_card=self.card, http_client=self.http) as agent:
-            result = await self.exchange("/candidate-planner/a2a", deadline,
-                lambda: agent.run(json.dumps({"operation_id": run_id, "run_id": run_id, "fixture": fixture}),
-                                  background=True), invocation=True)
-            return result.continuation_token
+        from citadel.acceptance.telemetry import correlate
+        self.invocation_receipt = None
+        with correlate(run_id, run_id, "operator"):
+            async with A2AAgent(agent_card=self.card, http_client=self.http) as agent:
+                result = await self.exchange("/candidate-planner/a2a", deadline,
+                    lambda: agent.run(json.dumps({"operation_id": run_id, "run_id": run_id, "fixture": fixture}),
+                                      background=True), invocation=True)
+                return result.continuation_token
 
     async def status(self, run_id, deadline):
         async def request():
@@ -137,6 +157,8 @@ def scenario_command(lifecycle, args):
             if invoke:
                 try:
                     await client.invoke(args.run_id, existing["fixture"], existing["deadline"])
+                    if client.invocation_receipt is not None:
+                        existing["invocation_receipt"] = client.invocation_receipt
                     existing["state"] = "accepted"
                     lifecycle.state.save()
                 except Blocked as exc:

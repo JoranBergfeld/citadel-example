@@ -33,6 +33,7 @@ class GatewayPeers:
         self.owns_http = http_client is None
         self.http = http_client or httpx.AsyncClient(follow_redirects=False, timeout=30)
         self.http.event_hooks.setdefault("request", []).insert(0, self._admit)
+        self.http.event_hooks.setdefault("response", []).append(self._received)
         self.cards = {}
 
     async def _admit(self, request):
@@ -48,6 +49,7 @@ class GatewayPeers:
             if admission["sent"] or path != "a2a":
                 raise OperationError("forbidden", "Hidden A2A invocation retry blocked")
             admission["sent"] = True
+            admission["started"] = time.time()
         else:
             allowance = reads.get()
             if allowance is None:
@@ -55,6 +57,17 @@ class GatewayPeers:
             await allowance.admit()
         request.headers["Ocp-Apim-Subscription-Key"] = self.key
         request.headers.update(correlation_headers())
+
+    async def _received(self, response):
+        admission = _exchange.get()
+        if admission is None or not admission["invoke"]:
+            return
+        await response.aread()
+        from citadel.acceptance.workflow_routes import observe_invocation
+        observe_invocation(response, caller=self.workload, target=admission["target"],
+            run_id=response.request.headers.get("x-citadel-run-id"),
+            operation_id=response.request.headers.get("x-citadel-operation-id"),
+            started=admission["started"], finished=time.time())
 
     async def exchange(self, target, deadline, callback, *, invoke=False):
         timeout = 180 if invoke else 30
@@ -193,5 +206,6 @@ class GatewayPeers:
 
     async def close(self):
         self.http.event_hooks["request"].remove(self._admit)
+        self.http.event_hooks["response"].remove(self._received)
         if self.owns_http:
             await self.http.aclose()

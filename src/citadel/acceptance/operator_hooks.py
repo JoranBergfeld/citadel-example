@@ -121,6 +121,14 @@ class Harness:
                         break
                 report["finished"] = time.time()
                 self.save(report)
+                if scenario == "comparison" and scenario in report["scenarios"]:
+                    from .origin_harness import BoundaryAcceptance
+                    for observed in BoundaryAcceptance(self.lifecycle).execute(report):
+                        if observed.get("check_id") in required_checks():
+                            self._replace(report, {"check_id": observed["check_id"], "status": "blocked",
+                                "reason": "working_control_and_no_effect_proof_required", "actual": observed})
+                    report["finished"] = time.time()
+                    self.save(report)
             if all(run["state"] in ("succeeded", "failed_no_commit")
                    for run in self.lifecycle.value["runs"].values()):
                 from .storage_harness import StorageAcceptance
@@ -139,14 +147,6 @@ class Harness:
                 report["finished"] = time.time()
                 self.save(report)
                 ReleaseAcceptance(self.lifecycle).execute(report, mode="immutable-versions")
-                report["finished"] = time.time()
-                self.save(report)
-                from .origin_harness import BoundaryAcceptance
-                for observed in BoundaryAcceptance(self.lifecycle).execute(report):
-                    if observed.get("check_id") in required_checks():
-                        self._replace(report, {"check_id": observed["check_id"], "status": "blocked",
-                            "reason": "working_control_and_no_effect_proof_required",
-                            "actual": observed})
                 report["finished"] = time.time()
                 self.save(report)
         except (Blocked, ValueError, TimeoutError):

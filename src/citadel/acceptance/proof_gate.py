@@ -159,12 +159,14 @@ def evaluate_check(check, report):
             return blocked
         correlated = [row for row in records if not (
             row.get("source") == "application" and row.get("request_id") == control.get("request_id")
-            and (row.get("operation_id") != control.get("operation_id")
-                 or row.get("run_id") != control.get("run_id")))]
+            and (row.get("run_id") != control.get("run_id")
+                 or row.get("operation_id") != control.get("operation_id") and not (
+                     control.get("check_id", "").endswith(".invoke")
+                     and row.get("operation_id") == control.get("accepted_operation_id"))))]
         if route:
             from .route_oracle import evaluate_route
             context, reads = actual.get("route_context"), actual.get("context_reads")
-            if check["check_id"].split(".")[-1] in ("status", "task", "findings"):
+            if check["check_id"].split(".")[-1] in ("status", "task", "findings", "invoke"):
                 from .route_context import validate_route_context
                 try:
                     validate_route_context(context)

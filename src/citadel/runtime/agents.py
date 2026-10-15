@@ -121,6 +121,10 @@ class Runtime:
             return accepted
 
     async def _execute(self, caller, payload, ownership, deadline):
+        with correlate(payload["run_id"], payload["operation_id"], self.workload):
+            await self._run(caller, payload, ownership, deadline)
+
+    async def _run(self, caller, payload, ownership, deadline):
         try:
             async with asyncio.timeout(max(0, deadline - self.clock())):
                 await self.accounting.start_agent(payload["operation_id"], payload["operation_id"])
@@ -361,7 +365,8 @@ class DurableHandler(RequestHandler):
                         context.state["caller"], payload,
                         recover=MessageToDict(params.metadata).get("citadel_recovery") is True)
                     emit("SendMessage", request_id=context.state["request_id"], status_code=200,
-                         facts={"business_state": status["state"], "deadline": status["deadline"]})
+                         facts={"business_state": status["state"], "deadline": status["deadline"],
+                                "input_hash": status["input_hash"], "accepted_operation_id": status["operation_id"]})
                 if status["state"] != "pending":
                     return await self.runtime.task_status(context.state["caller"], status["operation_id"],
                                                           incoming=False)

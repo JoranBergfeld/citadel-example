@@ -51,8 +51,20 @@ requires its four independently verified, actually executed storage denials.
   snapshots real draft/finding ledgers around each worker and the operator control.
   A denial needs the gateway's explicit `route_denied` response metadata and
   explicit no-backend-dispatch evidence, not just HTTP 403. Null/unknown backend
-  fields remain blocked. These gates cover all 85 caller/read-capability obligations;
-  invocation and model obligations still need their complete independent proofs.
+  fields remain blocked. These gates cover all 85 caller/read-capability obligations.
+  Model-route obligations still need their complete independent proofs.
+- Invocation controls come from actual successful normal-workflow `SendMessage`
+  responses, not additional probe invocations or manufactured accepted tasks.
+  The actual SDK response must contain the matching protocol task/run identity.
+  Caller-side receipts, APIM subscription/target/service ID, backend acceptance
+  input hash and independently read completed operation must agree. Caller-parent
+  correlation and accepted-child execution identity are checked separately.
+  The operator persists only its own receipt in private run state; agent receipts
+  use the unsampled assigned-MI exporter. Four permitted invocation edges and
+  sixteen actually executed forbidden-invocation probes are independently evaluated,
+  including gateway no-dispatch and unchanged business state for denials.
+  Missing source reads, unrelated child/input bindings or malformed task envelopes
+  cannot pass. Sanitized proofs preserve the same checks without input or task prose.
 - Owner controls derive bounded IDs and hashes from five actual ledgers in the
   completed comparison. They never export private products, invent completed tasks,
   seed findings or create/refill operation pools. Exact final ticket-marker reads
@@ -79,6 +91,11 @@ requires its four independently verified, actually executed storage denials.
   owner/finding reads and real MCP tools. Existing pool identities/capacities and
   business products remain unchanged; consumed tickets are not returned.
   No live Azure execution is implied.
+- The full hook runs the origin/read/invocation boundary phase immediately after
+  the genuine comparison, before the other scenarios or slower fault phases.
+  It inherits that comparison's remaining absolute deadline instead of allocating
+  a new 900-second window to old controls. Expired controls block before provider
+  or credential access; original operation read pools are never refreshed.
 - Fixed APIM authorization branches return only a nonpayload denial code and
   the actual gateway `context.RequestId`. Normal outbound policy removes any
   backend-supplied denial marker and replaces the response correlation ID.
@@ -250,7 +267,7 @@ attempt breaks the pair. Local mode, missing checks or skipped checks cannot pas
 The required set is the shipped catalogue, not a report's self-declared subset.
 All four scenario products and application/gateway/storage evidence are mandatory;
 malformed identities, hashes or review records block before human confirmation.
-Report gates re-run independent storage/origin/read-route/durable-fault oracles using the fingerprinted
+Report gates re-run independent storage/origin/read/invocation/durable-fault oracles using the fingerprinted
 workload identities and allocated-subscription hashes. Generic all-pass labels,
 even with application/gateway/storage rows, cannot certify acceptance. Check
 families without a registered independent oracle remain blocked. Human narrative
@@ -329,11 +346,12 @@ complete per-check correlations remain unverified locally.
    changed and no cloud delivery is inferred from local SDK wire tests.
 2. Execute/verify the implemented storage/origin providers and read-only
    Reference Data execution; observe the implemented pre-application ingress evidence path,
-   and complete direct-model probes, all route
-   capabilities and credential/certificate/context rotation proof.
-3. Complete all remaining deployed accounting/time boundaries,
-   release-response loss, cross-operation release uniqueness, incompatible version
-   updates, draft/hash/immutable-version checks and actual process-restart probes.
+   and complete direct-model probes, model-route controls and
+   credential/certificate/context rotation proof.
+3. Complete remaining deployed accounting/time boundaries and actual
+   process-restart probes. Implemented release-response-loss, concurrent release,
+   version-conflict, exact-hash and immutable-version providers still require
+   their actual deployed proof; local execution does not supply it.
 4. Connect validated independent service correlations/no-effect proofs to each
    required check. The partial harness intentionally cannot produce a complete
    pass merely because its available probes ran.

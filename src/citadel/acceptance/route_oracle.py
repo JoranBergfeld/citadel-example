@@ -1,4 +1,4 @@
-"""Independent read-route authorization proofs, never HTTP-status-only approval."""
+"""Independent route authorization proofs, never HTTP-status-only approval."""
 
 import math
 import re
@@ -11,6 +11,7 @@ from .storage_probes import _correlated
 
 READ_CAPABILITIES = {"discovery", "initialize", "search_airports", "lookup_airport", "list_runways",
                      "status", "task", "findings"}
+ROUTE_CAPABILITIES = READ_CAPABILITIES | {"invoke"}
 
 
 def evaluate_route(observation, control, snapshots, evidence, *, identities, subscriptions, observer_identity,
@@ -30,14 +31,14 @@ def evaluate_route(observation, control, snapshots, evidence, *, identities, sub
         parts = row["check_id"].split(".")
         return (len(parts) == 4 and parts[0] == "route" and row["check_id"] in required_checks()
             and parts[1] == row.get("caller") and parts[2] in identities
-            and parts[3] in READ_CAPABILITIES and hash_value(row.get("target"))
+            and parts[3] in ROUTE_CAPABILITIES and hash_value(row.get("target"))
             and hash_value(subscriptions.get(parts[1]))
             and all(isinstance(row.get(key), str) and re.fullmatch("[A-Za-z0-9_.:-]{1,128}", row[key])
                     for key in ("run_id", "operation_id", "request_id"))
             and type(row.get("status_code")) is int and 100 <= row["status_code"] <= 599
             and all(type(row.get(key)) in (int, float) and math.isfinite(row[key])
                     for key in ("started", "finished"))
-            and 0 <= row["finished"] - row["started"] <= 30)
+            and 0 <= row["finished"] - row["started"] <= (180 if parts[3] == "invoke" else 30))
 
     def matches(record, source, **fields):
         return any(row.get("source") == source and row.get("request_id") == record["request_id"]
@@ -59,7 +60,8 @@ def evaluate_route(observation, control, snapshots, evidence, *, identities, sub
             and item["facts"].get("sha256") == sha256(row)
             and item["facts"].get("probe_id") == row["check_id"]
             and matches(row, "application",
-                method="status.observed" if row.get("observation_kind") == "workflow" else "probe",
+                method=("invocation.observed" if row["check_id"].endswith(".invoke") else "status.observed")
+                       if row.get("observation_kind") == "workflow" else "probe",
                 runtime_identity=identities.get(row["caller"]),
                 caller=row["caller"], run_id=row["run_id"], operation_id=row["operation_id"],
                 target=row["target"], facts=item["facts"]) for item in evidence)
@@ -67,8 +69,9 @@ def evaluate_route(observation, control, snapshots, evidence, *, identities, sub
     def positive(row):
         _, caller, target, capability = row["check_id"].split(".")
         actual = {"discovery": "gateway_card", "initialize": "mcp_initialized", "status": "owned_status",
-                  "task": "owned_task", "findings": "exact_finding"}.get(capability, "reference_data")
-        method = {"task": "GetTask", "findings": "findings-read"}.get(capability, capability)
+                  "task": "owned_task", "findings": "exact_finding",
+                  "invoke": "accepted_invocation"}.get(capability, "reference_data")
+        method = {"task": "GetTask", "findings": "findings-read", "invoke": "SendMessage"}.get(capability, capability)
         bound_hash = None
         if capability in ("status", "task", "findings"):
             if not context_bound(row):
@@ -77,6 +80,18 @@ def evaluate_route(observation, control, snapshots, evidence, *, identities, sub
             bound_hash = (finding_control(route_context, caller)["finding"]["sha256"] if capability == "findings" else
                           route_context["operations"][target][
                               "result_sha256" if capability == "status" else "task_sha256"])
+        if capability == "invoke":
+            if not context_bound(row) or row.get("business_state") not in (
+                    "TASK_STATE_SUBMITTED", "TASK_STATE_WORKING", "TASK_STATE_COMPLETED"):
+                return False
+            reference = route_context["operations"][target]
+            if not any(isinstance(item.get("facts"), dict)
+                    and item["facts"].get("accepted_operation_id") == reference["operation_id"]
+                    and item["facts"].get("input_hash") == reference["input_hash"]
+                    and matches(row, "application", runtime_identity=identities[target], method=method,
+                        caller=caller, run_id=row["run_id"], operation_id=reference["operation_id"],
+                        facts=item["facts"]) for item in evidence):
+                return False
         return (required_checks()[row["check_id"]] == "allow" and row["status_code"] == 200
             and row.get("status") != "blocked" and row.get("actual") == actual
             and (capability in ("discovery", "initialize") or hash_value(row.get("sha256")))
@@ -103,14 +118,20 @@ def evaluate_route(observation, control, snapshots, evidence, *, identities, sub
             if (item.get("action") != "read" or item.get("status_code") not in (200, 206)
                     or not hash_value(item.get("sha256")) or not _correlated(item, evidence, observer_identity)
                     or not workflow and item["finished"] > row["started"]
+                    or row["check_id"].endswith(".invoke") and item["started"] < row["finished"]
                     or abs(row["finished"] - item["started"]) > 900
                     or item.get("suite_id") != snapshots["before"].get("findings", {}).get("suite_id")):
                 return False
         _, caller, target, capability = row["check_id"].split(".")
         if row.get("observation_kind") == "workflow" and (
-                capability != "status" or target not in ("evidence-assessor", "release-reviewer")
+                capability not in ("status", "invoke")
+                or capability == "status" and target not in ("evidence-assessor", "release-reviewer")
                 or row["run_id"] != route_context["read_scope"]["run_id"]):
             return False
+        if capability == "invoke":
+            reference = route_context["operations"][target]
+            return (row.get("observation_kind") == "workflow" and row.get("run_id") == reference["run_id"]
+                    and row.get("accepted_operation_id") == reference["operation_id"])
         from .route_context import finding_control
         reference = (finding_control(route_context, caller)
                      if capability == "findings" else route_context["operations"][target])

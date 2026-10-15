@@ -102,11 +102,17 @@ class BoundaryAcceptance:
     def execute(self, report):
         if "boundary_phase" in report:
             raise Blocked("boundary_probe_intent_requires_reconciliation")
+        comparison = report.get("scenarios", {}).get("comparison", {}).get("operation_id")
+        original = self.lifecycle.value.get("runs", {}).get(comparison, {})
+        deadline = original.get("deadline")
+        if (original.get("state") != "succeeded" or type(deadline) not in (float, int)
+                or not math.isfinite(deadline) or not time.time() < deadline <= time.time() + 900):
+            raise Blocked("unexpired_completed_comparison_controls_required")
         accounts = [rid for rid in self.lifecycle.value["inventory"]
                     if "/providers/Microsoft.Storage/storageAccounts/" in rid and "/blobServices/" not in rid]
         if len(accounts) != 1:
             raise Blocked("exact_storage_account_required")
-        phase = {"state": "dispatching", "deadline": time.time() + 900, "read_attempts": 0,
+        phase = {"state": "dispatching", "deadline": deadline, "read_attempts": 0,
                  "snapshots": {}, "origins": [], "gateway": [], "identities": {}}
         report["boundary_phase"] = phase
         self.lifecycle.state.save()
@@ -129,9 +135,8 @@ class BoundaryAcceptance:
         controls = StorageControls(self.lifecycle.native, account=account, suite_id=report["run_id"], admit=admit)
         native = self.lifecycle.native
         previous = getattr(native, "deadline", None)
-        native.deadline = min(previous or float("inf"), time.monotonic() + 900)
+        native.deadline = min(previous or float("inf"), time.monotonic() + max(0, deadline - time.time()))
         try:
-            comparison = report.get("scenarios", {}).get("comparison", {}).get("operation_id")
             identity(comparison)
             observed_context = controls.route_context([comparison])
             phase["route_context"] = observed_context["context"]
@@ -236,19 +241,22 @@ class BoundaryAcceptance:
                                 "before": list(pair.get("before", {}).values()),
                                 "after": list(pair.get("after", {}).values())}
             output.append(result)
-        from .route_oracle import READ_CAPABILITIES, evaluate_route
+        from .route_oracle import ROUTE_CAPABILITIES, evaluate_route
         credential_hashes = {rid.rsplit("/", 1)[-1]: hashlib.sha256(rid.lower().encode()).hexdigest()
                              for rid in subscriptions}
         gateway_rows = list(phase.get("gateway", []))
         if phase.get("route_context"):
-            from .workflow_routes import status_controls
-            for row in status_controls(evidence, phase["route_context"]):
+            from .workflow_routes import invocation_controls, status_controls
+            comparison = report.get("scenarios", {}).get("comparison", {}).get("operation_id")
+            operator = self.lifecycle.value.get("runs", {}).get(comparison, {}).get("invocation_receipt")
+            for row in [*status_controls(evidence, phase["route_context"]),
+                        *invocation_controls(evidence, phase["route_context"], operator=operator)]:
                 gateway_rows.append(row)
                 for operation in (row["run_id"], row["operation_id"]):
                     if operation not in report["operation_ids"]:
                         report["operation_ids"].append(operation)
         for row in gateway_rows:
-            if row.get("check_id", "").split(".")[-1] not in READ_CAPABILITIES:
+            if row.get("check_id", "").split(".")[-1] not in ROUTE_CAPABILITIES:
                 continue
             pair = snapshots.get(row.get("run_id"), {})
             if row.get("observation_kind") == "workflow":
@@ -263,7 +271,7 @@ class BoundaryAcceptance:
                 "reason": "route_service_control_or_no_effect_proof_missing"}, {})
             result["actual"] = {"observation": row, "control": control,
                 "before": list(pair.get("before", {}).values()), "after": list(pair.get("after", {}).values())}
-            if row.get("check_id", "").split(".")[-1] in ("status", "task", "findings"):
+            if row.get("check_id", "").split(".")[-1] in ("status", "task", "findings", "invoke"):
                 result["actual"].update(route_context=phase.get("route_context"),
                                         context_reads=phase.get("context_reads"))
             output.append(result)

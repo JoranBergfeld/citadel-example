@@ -53,7 +53,9 @@ class OriginHarnessTests(unittest.IsolatedAsyncioTestCase):
                 documents[actor] | {"schema_version": 1}).encode()
         report = {"run_id": "suite1", "operation_ids": ["real-run"],
                   "scenarios": {"comparison": {"operation_id": "real-run"}}}
+        inherited = time.time() + 120
         lifecycle = SimpleNamespace(native=native, value={
+            "runs": {"real-run": {"state": "succeeded", "deadline": inherited}},
             "inventory": ["/subscriptions/s/resourceGroups/g/providers/Microsoft.Storage/storageAccounts/allocated"],
             "outputs": {"appInventory": [], "gatewayUrl": "https://gateway.example"}},
             state=SimpleNamespace(save=lambda: saves.append(len(native.requests))),
@@ -74,8 +76,15 @@ class OriginHarnessTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("review2", report["operation_ids"])
         self.assertEqual(len(set(report["operation_ids"])), len(report["operation_ids"]))
         self.assertEqual(report["boundary_phase"]["state"], "observed")
+        self.assertEqual(report["boundary_phase"]["deadline"], inherited)
         self.assertTrue(all(row["status_code"] == 403 for row in rows))
         self.assertTrue(all(method == "GET" for method, _, _ in native.requests))
+        before = len(native.requests)
+        lifecycle.value["runs"]["real-run"]["deadline"] = time.time() - 1
+        with self.assertRaises(Blocked):
+            BoundaryAcceptance(lifecycle).execute({"run_id": "late", "operation_ids": ["real-run"],
+                "scenarios": {"comparison": {"operation_id": "real-run"}}})
+        self.assertEqual(len(native.requests), before)
 
     async def test_operator_matrix_reads_only_own_key_and_actual_owner_task_without_workload_impersonation(self):
         from citadel.acceptance.origin_harness import operator_routes
