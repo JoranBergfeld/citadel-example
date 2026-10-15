@@ -36,6 +36,17 @@ class CollectionTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     normalize_tables(response)
 
+    def test_wire_encoded_dynamic_facts_are_parsed_without_treating_unknown_metadata_as_false(self):
+        columns = [{"name": key} for key in
+                   ("source", "request_id", "status_code", "runtime_identity", "observed", "facts")]
+        response = {"tables": [{"columns": columns,
+            "rows": [["gateway", "real-id", 403, "", 100.0, '{"backend_dispatched":false}']]}]}
+        self.assertIs(normalize_tables(response)[0]["facts"]["backend_dispatched"], False)
+        for malformed in ("[]", "not-json", '{"backend_dispatched":false,"excess":"' + "x" * 4096 + '"}'):
+            response["tables"][0]["rows"][0][-1] = malformed
+            with self.subTest(malformed=malformed[:10]), self.assertRaises(ValueError):
+                normalize_tables(response)
+
     def test_actual_retention_and_unsampled_settings_required(self):
         workspace = {"retentionInDays": 30, "workspaceCapping": {"dailyQuotaGb": -1}}
         tables = [{"name": name, "properties": {"plan": "Analytics", "retentionInDays": 30,
@@ -112,3 +123,13 @@ class CollectionTests(unittest.TestCase):
                 ("source", "request_id", "status_code", "runtime_identity", "observed", "credential_sha256")],
             "rows": [["gateway", "actual-id", 200, "", 100.0, "a" * 64]]}]}
         self.assertEqual(Collector(provider, started=100, finished=101).poll()[0]["credential_sha256"], "a" * 64)
+
+    def test_gateway_query_preserves_destination_hash_and_explicit_backend_dispatch_metadata(self):
+        query = query_for_window(100, 101)
+        self.assertIn('target=hash_sha256(extract(@"^[^?]+",0,tostring(Url)))', query)
+        for column in ("BackendUrl", "BackendMethod", "BackendResponseCode", "BackendTime"):
+            self.assertIn(column, query)
+        self.assertIn("'backend_dispatched'", query)
+        self.assertIn("bool(null)", query)
+        self.assertNotIn("RequestBody", query)
+        self.assertNotIn("RequestHeaders", query)

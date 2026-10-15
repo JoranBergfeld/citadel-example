@@ -17,6 +17,108 @@ from tests.runtime.test_storage import FixtureCredential
 
 
 class WorkerExecutionTests(unittest.IsolatedAsyncioTestCase):
+    async def test_gateway_worker_uses_allocated_secret_and_publishes_digest_bound_wire_observations(self):
+        from citadel.acceptance.telemetry import configure
+        from citadel.evidence.manifests import sha256
+        runtime_tests = str(Path(__file__).resolve().parents[1] / "runtime")
+        sys.path.insert(0, runtime_tests)
+        try:
+            from test_ticket_storage import TicketWire
+        finally:
+            sys.path.remove(runtime_tests)
+        wire, requests, records, secret_names, identities, options_seen = TicketWire(clock=time.time), [], [], [], [], []
+        wire.blobs["/planner-operations/active-run-slot.json"] = b"{}"
+        wire.etags["/planner-operations/active-run-slot.json"] = 1
+
+        class Credential(FixtureCredential):
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                pass
+
+        class Vault:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                pass
+
+            async def get_secret(self, name):
+                secret_names.append(name)
+                return SimpleNamespace(value="fixture-allocated-candidate-key")
+
+        async def http(request):
+            requests.append(request)
+            self.assertEqual(request.headers["Ocp-Apim-Subscription-Key"], "fixture-allocated-candidate-key")
+            headers = {"apim-request-id": f"{len(requests):032x}"}
+            if request.url.path.endswith("agent-card.json") and request.url.path.split("/")[1] in (
+                    "evidence-assessor", "briefing-author"):
+                return httpx.Response(200, headers=headers, json={"supportedInterfaces": [{
+                    "url": "https://gateway.example/" + request.url.path.split("/")[1] + "/a2a",
+                    "protocolBinding": "JSONRPC", "protocolVersion": "1.0"}]})
+            if request.url.path == "/reference-data/mcp":
+                payload = json.loads(request.content)
+                if payload["method"] == "initialize":
+                    result = {"protocolVersion": "2025-11-25"}
+                else:
+                    tool = payload["params"]["name"]
+                    content = {"provenance": {"fixture": {"id": "base-source"}}}
+                    if tool == "search_airports":
+                        content["airports"] = [{"ident": {"parsed": "EBAM"}}]
+                    elif tool == "lookup_airport":
+                        content["airport"] = {"ident": {"parsed": "EBAM"}}
+                    else:
+                        content["runways"] = [{"airport_ident": {"parsed": "EBAM"}}]
+                    result = {"structuredContent": content}
+                return httpx.Response(200, headers=headers, json={"jsonrpc": "2.0", "result": result})
+            return httpx.Response(403, headers=headers | {"x-citadel-denial": "route_denied"})
+
+        client_type = httpx.AsyncClient
+
+        def client(**options):
+            options_seen.append(options)
+            return client_type(transport=httpx.MockTransport(http), **options)
+
+        def credential(**options):
+            identities.append(options)
+            return Credential()
+
+        config = SimpleNamespace(target="candidate-planner",
+            client_id="11111111-1111-1111-1111-111111111111",
+            blob="https://allocated.blob.core.windows.net", operations_container="planner-operations",
+            vault="https://allocated.vault.azure.net", subscription_secret="caller-candidate-planner",
+            gateway="https://gateway.example")
+        request = {"schema_version": 1, "mode": "gateway-matrix", "workload": config.target,
+            "client_id": config.client_id, "run_id": "gateway-worker", "deadline": time.time() + 120}
+        with (patch.dict(os.environ, {"CITADEL_ACCEPTANCE_ENABLED": "true"}),
+              patch("citadel.acceptance.worker.ManagedIdentityCredential", credential),
+              patch("citadel.acceptance.worker.ContainerClient",
+                    lambda *args, **kw: ContainerClient(*args, transport=wire, **kw)),
+              patch("citadel.acceptance.worker.SecretClient", lambda *args, **kw: Vault()),
+              patch("citadel.acceptance.monitor.MonitorExporter",
+                    lambda *args, **kw: SimpleNamespace(emit=records.append)),
+              patch("citadel.acceptance.telemetry._exporter", None),
+              patch("httpx.AsyncClient", client), redirect_stdout(io.StringIO())):
+            configure(config.target, config.client_id, client_id=config.client_id, connection_string="fixture")
+            observations = await run_gateway_matrix(config, request)
+        self.assertEqual(identities, [{"client_id": config.client_id}])
+        self.assertEqual(secret_names, ["caller-candidate-planner"])
+        self.assertEqual(len(requests), 10)
+        self.assertTrue(all(options.get("trust_env") is False for options in options_seen))
+        self.assertEqual(len(observations), 10)
+        self.assertNotIn("/planner-operations/active-run-slot.json", wire.leases)
+        self.assertLessEqual(len([key for key in wire.blobs if "/read-tickets/" in key]), 512)
+        for row in observations:
+            corresponding = [record for record in records if record["method"] == "probe"
+                and record["operation_id"] == row["operation_id"]]
+            self.assertEqual(len(corresponding), 1)
+            self.assertEqual(corresponding[0]["facts"]["sha256"], sha256(row))
+            self.assertEqual(corresponding[0]["facts"]["probe_id"], row["check_id"])
+            self.assertEqual(corresponding[0]["target"], row["target"])
+            self.assertEqual(corresponding[0]["request_id"], row["request_id"])
+        self.assertNotIn("fixture-allocated-candidate-key", json.dumps(records))
+
     async def test_all_fault_drivers_execute_real_blob_sdk_and_restore_admission_only_after_results(self):
         from citadel.acceptance.operation_harness import bind_operation_result
         runtime_tests = str(Path(__file__).resolve().parents[1] / "runtime")

@@ -35,6 +35,23 @@ def storage_proof():
 
 
 class ProofGateTests(unittest.TestCase):
+    def test_route_proof_survives_sanitization_and_rejects_substituted_authority(self):
+        from tests.acceptance.test_route_oracle import route_proof
+        observed, control, snapshots, records, identities, subscriptions = route_proof()
+        check = {"check_id": observed["check_id"], "expected": "deny", "status": "pass",
+            "actual": {"observation": observed, "control": control,
+                      **{side: list(rows.values()) for side, rows in snapshots.items()}}}
+        report = {"run_id": "suite1", "runtime_identities": identities,
+            "subscription_bindings": subscriptions, "evidence": records,
+            "operation_ids": ["denied-run", "denied-op", "control-run", "control-op"]}
+        self.assertEqual(evaluate_check(sanitize(check), sanitize(report))["status"], "pass")
+        altered = copy.deepcopy(report)
+        altered["subscription_bindings"]["briefing-author"] = "9" * 64
+        self.assertEqual(evaluate_check(check, altered)["status"], "blocked")
+        altered = copy.deepcopy(check)
+        altered["actual"]["before"][0]["suite_id"] = "another-suite"
+        self.assertEqual(evaluate_check(altered, report)["status"], "blocked")
+
     def test_origin_report_requires_the_allocated_subscription_not_a_caller_label(self):
         observed, control, snapshots, records = test_origin_oracle.OriginOracleTests().fixture()
         control.update(operation_id="controlop", run_id="controlrun")

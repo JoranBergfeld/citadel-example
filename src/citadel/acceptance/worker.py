@@ -224,7 +224,7 @@ async def run_gateway_matrix(config, request):
             if not secret.value:
                 raise ValueError("Allocated subscription is missing")
             results = []
-            async with httpx.AsyncClient(timeout=30, follow_redirects=False) as client:
+            async with httpx.AsyncClient(timeout=30, follow_redirects=False, trust_env=False) as client:
                 probe = GatewayProbe(config.target, config.gateway, secret.value, client=client,
                     enabled=True, run_id=request["run_id"], deadline=request["deadline"], admit=pool.admit)
                 with read_scope(pool, deadline=request["deadline"]), correlate(

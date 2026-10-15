@@ -11,6 +11,25 @@ from citadel.operations import OperationError
 
 
 class OriginHarnessTests(unittest.IsolatedAsyncioTestCase):
+    def test_collected_gateway_controls_are_evaluated_individually_with_observer_evidence(self):
+        from tests.acceptance.test_route_oracle import route_proof
+        observed, control, snapshots, records, identities, _ = route_proof()
+        subscriptions = [
+            "/subscriptions/s/resourceGroups/g/providers/Microsoft.ApiManagement/service/a/subscriptions/" + caller
+            for caller in ("candidate-planner", "briefing-author")]
+        for row in records:
+            if row["source"] == "gateway":
+                resource = next(value for value in subscriptions if value.endswith("/" + row["caller"]))
+                row["credential_sha256"] = hashlib.sha256(resource.lower().encode()).hexdigest()
+        lifecycle = SimpleNamespace(value={"outputs": {"inventory": {"gateway": {"subscriptions": subscriptions}}}})
+        report = {"run_id": "suite1", "boundary_phase": {
+            "origins": [], "gateway": [observed, control], "identities": identities,
+            "snapshots": {observed["run_id"]: snapshots, control["run_id"]: snapshots}}}
+        evaluated = BoundaryAcceptance(lifecycle).evaluate(report, records)
+        self.assertEqual({row["check_id"]: row["status"] for row in evaluated},
+                         {observed["check_id"]: "pass", control["check_id"]: "pass"})
+        self.assertTrue(all("before" in row["actual"] and "after" in row["actual"] for row in evaluated))
+
     async def test_expired_operator_control_refuses_even_private_credential_access(self):
         lifecycle = SimpleNamespace(credentials=lambda: self.fail("Expired control accessed credentials"))
         with self.assertRaises(OperationError):

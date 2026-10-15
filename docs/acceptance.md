@@ -41,6 +41,25 @@ requires its four independently verified, actually executed storage denials.
   using explicit `ManagedIdentityCredential`; no operator fallback.
 - `gateway-matrix` runs four-agent discovery/forbidden-invocation, MCP
   initialization and all three reference-tool probes.
+- Discovery and MCP read observations now have individual deterministic oracles,
+  rather than remaining raw catalogue entries. Each binds an exact allocated
+  subscription, actual destination hash, actual service ID, measured window and
+  digest-bound workload probe trace. Allowed controls also require the destination
+  application's actual method/identity trace. The boundary driver independently
+  snapshots real draft/finding ledgers around each worker and the operator control.
+  A denial needs the gateway's explicit `route_denied` response metadata and
+  explicit no-backend-dispatch evidence, not just HTTP 403. Null/unknown backend
+  fields remain blocked. These gates cover the existing 33 discovery/MCP read
+  observations; remaining invocation/status/task/finding/model obligations are
+  still blocked until their own complete proofs exist.
+- Fixed APIM authorization branches return only a nonpayload denial code and
+  the actual gateway `context.RequestId`. Normal outbound policy removes any
+  backend-supplied denial marker and replaces the response correlation ID.
+  Authorization conditions, caller graph, request bodies, log-header settings
+  and privileges are unchanged. MCP working controls require a shaped real
+  Reference Data response; an empty JSON-RPC success envelope is not a control.
+  Gateway workers disable ambient HTTP proxy settings and fetch only their
+  assigned subscription secret through their explicit MI.
 - The full suite dispatches `operation-faults` under Candidate Planner's actual
   identity against an isolated real Blob ledger. Six fixed drivers cover committed
   response loss/identical-input reuse; pending/running/indeterminate/missing and
@@ -157,7 +176,7 @@ attempt breaks the pair. Local mode, missing checks or skipped checks cannot pas
 The required set is the shipped catalogue, not a report's self-declared subset.
 All four scenario products and application/gateway/storage evidence are mandatory;
 malformed identities, hashes or review records block before human confirmation.
-Report gates re-run independent storage/origin/durable-fault oracles using the fingerprinted
+Report gates re-run independent storage/origin/read-route/durable-fault oracles using the fingerprinted
 workload identities and allocated-subscription hashes. Generic all-pass labels,
 even with application/gateway/storage rows, cannot certify acceptance. Check
 families without a registered independent oracle remain blocked. Human narrative
@@ -193,6 +212,10 @@ hyphens in both collected records and client observations, matching the signed
 backend context's `context.RequestId.ToString("N")`. No new ID is generated;
 missing response IDs stay missing, and model-provider IDs do not substitute for
 gateway IDs.
+The APIM query hashes `Url` and derives bounded dispatch metadata from
+`BackendUrl`, `BackendMethod`, `BackendResponseCode` and `BackendTime`. It exports
+no raw URL, headers or body. Explicit zero/empty no-backend fields are required;
+missing values are not interpreted as zero.
 
 Managed-environment diagnostics also enable the documented
 [`ContainerAppHTTPLogs` category](https://learn.microsoft.com/en-us/azure/azure-monitor/reference/supported-logs/microsoft-app-managedenvironments-logs)

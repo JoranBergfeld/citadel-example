@@ -56,6 +56,7 @@ async def operator_discovery(lifecycle, *, run_id, deadline, admit, client):
               "run_id": identity(run_id), "operation_id": operation, "started": time.time()}
     admit()
     path = "/candidate-planner/.well-known/agent-card.json"
+    result["target"] = hashlib.sha256((planner.gateway + path).encode()).hexdigest()
     response = await planner.exchange(path, deadline, lambda: client.get(planner.gateway + path, headers={
         "x-citadel-run-id": run_id, "x-citadel-operation-id": operation}))
     result.update(finished=time.time(), status_code=response.status_code,
@@ -134,6 +135,7 @@ class BoundaryAcceptance:
                     continue
                 gateway_run = uuid4().hex
                 report["operation_ids"].append(gateway_run)
+                phase["snapshots"][gateway_run] = {"before": controls.products()}
                 self.lifecycle.state.save()
                 result = driver.execute(app, actor, gateway_run, deadline=phase["deadline"])
                 rows = result["observations"]
@@ -143,14 +145,18 @@ class BoundaryAcceptance:
                 if len(set(operations)) != len(operations):
                     raise Blocked("gateway_worker_duplicate_operation")
                 phase["gateway"].extend(retain(rows, operations))
+                phase["snapshots"][gateway_run]["after"] = controls.products()
                 self.lifecycle.state.save()
 
+            phase["snapshots"][report["run_id"]] = {"before": controls.products()}
+            self.lifecycle.state.save()
             async def operator():
                 async with httpx.AsyncClient(follow_redirects=False, trust_env=False, timeout=30) as client:
                     return await operator_discovery(self.lifecycle, run_id=report["run_id"],
                         deadline=phase["deadline"], admit=admit, client=client)
             control = asyncio.run(operator())
             phase["gateway"].extend(retain([control], [control["operation_id"]]))
+            phase["snapshots"][report["run_id"]]["after"] = controls.products()
             phase["state"] = "observed"
         except (AzureError, OperationError, ValueError, TimeoutError, Blocked):
             phase["state"] = "blocked"
@@ -162,7 +168,7 @@ class BoundaryAcceptance:
 
     def evaluate(self, report, evidence):
         phase = report.get("boundary_phase", {})
-        if not phase.get("origins"):
+        if not phase.get("origins") and not phase.get("gateway"):
             return []
         snapshots = phase.get("snapshots", {})
         observer_rows = [row for pair in snapshots.values() for side in ("before", "after")
@@ -192,5 +198,22 @@ class BoundaryAcceptance:
             result["actual"] = {"observation": row, "control": control,
                                 "before": list(pair.get("before", {}).values()),
                                 "after": list(pair.get("after", {}).values())}
+            output.append(result)
+        from .route_oracle import READ_CAPABILITIES, evaluate_route
+        credential_hashes = {rid.rsplit("/", 1)[-1]: hashlib.sha256(rid.lower().encode()).hexdigest()
+                             for rid in subscriptions}
+        for row in phase.get("gateway", []):
+            if row.get("check_id", "").split(".")[-1] not in READ_CAPABILITIES:
+                continue
+            pair = snapshots.get(row.get("run_id"), {})
+            evaluations = [(evaluate_route(row, control, pair, evidence, identities=phase["identities"],
+                subscriptions=credential_hashes, observer_identity=observer), control)
+                for control in phase.get("gateway", [])]
+            selected = next((item for item in evaluations if item[0]["status"] == "pass"),
+                next((item for item in evaluations if item[0]["status"] == "fail"), None))
+            result, control = selected or ({"check_id": row.get("check_id"), "status": "blocked",
+                "reason": "route_service_control_or_no_effect_proof_missing"}, {})
+            result["actual"] = {"observation": row, "control": control,
+                "before": list(pair.get("before", {}).values()), "after": list(pair.get("after", {}).values())}
             output.append(result)
         return output

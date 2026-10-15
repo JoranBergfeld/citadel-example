@@ -25,7 +25,9 @@ def evaluate_check(check, report):
             or not isinstance(operations, list)
             or observation.get("check_id") != check["check_id"]
             or observation.get("operation_id") not in operations
-            or observation.get("run_id") not in operations):
+            or observation.get("run_id") not in operations and not (
+                check["check_id"].startswith("route.operator.")
+                and observation.get("run_id") == report.get("run_id"))):
         return blocked
     if check["check_id"].startswith("fault."):
         from .operation_oracle import evaluate_operation
@@ -51,10 +53,11 @@ def evaluate_check(check, report):
         identities = identities | {"operator": before["runtime_identity"]}
         return evaluate_storage(observation, control, {"before": before, "after": after},
                                 records, identities)
-    if check["check_id"].startswith("origin."):
+    if check["check_id"].startswith(("origin.", "route.")):
+        route = check["check_id"].startswith("route.")
         actor, caller = observation.get("caller"), control.get("caller")
         bindings = report.get("subscription_bindings")
-        if (not isinstance(actor, str) or actor not in identities
+        if (not isinstance(actor, str) or actor not in identities and not (route and actor == "operator")
                 or not isinstance(caller, str) or not isinstance(bindings, dict)
                 or not hash_value(bindings.get(caller))
                 or control.get("operation_id") not in operations
@@ -81,6 +84,10 @@ def evaluate_check(check, report):
             row.get("source") == "application" and row.get("request_id") == control.get("request_id")
             and (row.get("operation_id") != control.get("operation_id")
                  or row.get("run_id") != control.get("run_id")))]
+        if route:
+            from .route_oracle import evaluate_route
+            return evaluate_route(observation, control, snapshots, correlated, identities=identities,
+                                  subscriptions=bindings, observer_identity=next(iter(observers)))
         return evaluate_origin(observation, control, snapshots, correlated,
             runtime_identity=identities[actor], observer_identity=next(iter(observers)),
             credential_sha256=bindings[caller])

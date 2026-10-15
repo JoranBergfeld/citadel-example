@@ -1,4 +1,5 @@
 import json
+import hashlib
 import unittest
 
 import httpx
@@ -34,6 +35,19 @@ class ProbeTransportTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(requests[0].headers["Ocp-Apim-Subscription-Key"], "allocated-key")
         self.assertEqual(requests[0].headers["x-citadel-operation-id"], result["operation_id"])
         self.assertNotIn("allocated-key", str(result))
+        self.assertEqual(result["reason"], "observed")
+        self.assertEqual(result["check_id"], "route.candidate-planner.release-reviewer.discovery")
+        self.assertEqual(result["target"], hashlib.sha256(
+            b"https://gateway.example/release-reviewer/.well-known/agent-card.json").hexdigest())
+
+    async def test_only_explicit_gateway_denial_metadata_establishes_a_denial_reason(self):
+        async with httpx.AsyncClient(transport=httpx.MockTransport(lambda request: httpx.Response(
+                403, headers={"apim-request-id": "actual-denial", "x-citadel-denial": "route_denied"}))) as client:
+            probe = GatewayProbe("candidate-planner", "https://gateway.example", "allocated",
+                                 client=client, enabled=True, run_id="r1")
+            result = await probe.denied_invocation("release-reviewer")
+        self.assertEqual(result["reason"], "route_denied")
+        self.assertEqual(result["check_id"], "route.candidate-planner.release-reviewer.invoke")
 
     async def test_missing_service_id_is_not_replaced_with_a_client_id(self):
         async with httpx.AsyncClient(transport=httpx.MockTransport(
@@ -100,3 +114,18 @@ class ProbeTransportTests(unittest.IsolatedAsyncioTestCase):
             result = await probe.reference_tool("lookup_airport", ident="EBAM")
         self.assertEqual(result["status"], "blocked")
         self.assertEqual(result["reason"], "protocol_control_failed")
+
+    async def test_reference_control_requires_real_shaped_payload_not_an_empty_success_envelope(self):
+        results = [{}, {"structuredContent": {"provenance": {"fixture": {"id": "base-source"}},
+                                            "airports": [{"ident": {"parsed": "EBAM"}}]}}]
+        async with httpx.AsyncClient(transport=httpx.MockTransport(lambda request: httpx.Response(
+                200, headers={"apim-request-id": "service1"},
+                json={"jsonrpc": "2.0", "result": results.pop(0)}))) as client:
+            probe = GatewayProbe("candidate-planner", "https://gateway.example", "allocated",
+                                 client=client, enabled=True, run_id="r1")
+            absent = await probe.reference_tool("search_airports")
+            observed = await probe.reference_tool("search_airports")
+        self.assertEqual(absent.get("status"), "blocked")
+        self.assertEqual(observed.get("actual"), "reference_data")
+        self.assertNotIn("airports", observed)
+        self.assertNotIn("provenance", observed)

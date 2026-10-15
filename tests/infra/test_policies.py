@@ -63,3 +63,24 @@ class PolicyTests(unittest.TestCase):
             policy = ET.parse(path)
             for status in policy.findall("./on-error//set-status"):
                 self.assertNotIn(status.get("code"), {"401", "403"})
+
+    def test_authorization_branches_expose_only_fixed_denial_codes_and_real_gateway_ids(self):
+        reasons = {"Route denied": "route_denied", "Method denied": "method_denied",
+                   "Unknown caller": "unknown_caller", "Model caller denied": "model_caller_denied"}
+        for path in (ROOT / "infra/policies").glob("*.xml"):
+            policy = ET.parse(path)
+            for response in policy.findall(".//return-response"):
+                status = response.find("set-status")
+                if status.get("code") != "403":
+                    continue
+                denial = response.find("./set-header[@name='X-Citadel-Denial']")
+                self.assertIsNotNone(denial, path.name)
+                self.assertEqual(denial.find("value").text, reasons[status.get("reason")])
+                request_id = response.find("./set-header[@name='X-Citadel-Gateway-Request-Id']/value")
+                self.assertEqual(request_id.text, '@(context.RequestId.ToString("N"))')
+        global_policy = ET.parse(ROOT / "infra/policies/global.xml")
+        self.assertEqual(global_policy.find(
+            "./outbound/set-header[@name='X-Citadel-Denial']").get("exists-action"), "delete")
+        self.assertEqual(global_policy.find(
+            "./outbound/set-header[@name='X-Citadel-Gateway-Request-Id']/value").text,
+            '@(context.RequestId.ToString("N"))')

@@ -1,6 +1,7 @@
 """Bounded incremental queries of actual service-side tables, never stdout fixtures."""
 
 import math
+import json
 import re
 import time
 from datetime import datetime, timezone
@@ -57,6 +58,15 @@ def normalize_tables(response):
             if len(row) != len(columns):
                 raise ValueError("Malformed telemetry row")
             record = {k: v for k, v in zip(columns, row) if k in ROW_FIELDS}
+            if isinstance(record.get("facts"), str):
+                if len(record["facts"].encode()) > 4096:
+                    raise ValueError("Service metadata exceeds its nonpayload bound")
+                try:
+                    record["facts"] = json.loads(record["facts"])
+                except ValueError:
+                    raise ValueError("Malformed service metadata") from None
+            if record.get("facts") is not None and not isinstance(record["facts"], dict):
+                raise ValueError("Malformed service metadata")
             if (record["source"] not in SOURCES or type(record["status_code"]) is not int
                     or type(record["observed"]) not in (float, int)
                     or not math.isfinite(record["observed"])):
@@ -98,6 +108,10 @@ union
  replace_string(tostring(toguid(CorrelationId)),'-',''),tostring(CorrelationId)),
  status_code=toint(ResponseCode), runtime_identity='', observed=todouble(datetime_diff('millisecond',TimeGenerated,datetime(1970-01-01)))/1000,
  caller=extract(@"([^/]+)$",1,tostring(ApimSubscriptionId)), method=tostring(Method),
+ target=hash_sha256(extract(@"^[^?]+",0,tostring(Url))),
+ facts=bag_pack('backend_dispatched',case(
+ isempty(BackendUrl) and isempty(BackendMethod) and BackendResponseCode == 0 and BackendTime == 0,false,
+ isnotempty(BackendUrl) and isnotempty(BackendMethod),true,bool(null))),
  credential_sha256=hash_sha256(tolower(strcat(_ResourceId,'/subscriptions/',
  extract(@"([^/]+)$",1,tostring(ApimSubscriptionId)))))),
 (StorageBlobLogs | where TimeGenerated between (begin .. end)

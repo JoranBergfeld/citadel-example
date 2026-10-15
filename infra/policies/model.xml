@@ -3,7 +3,11 @@
     <base />
     <choose>
       <when condition="@(!new [] { &quot;candidate-planner&quot;, &quot;evidence-assessor&quot;, &quot;release-reviewer&quot;, &quot;briefing-author&quot; }.Contains((string)context.Variables[&quot;caller&quot;]) || context.Request.Url.Query.Count &gt; 0)">
-        <return-response><set-status code="403" reason="Model caller denied" /></return-response>
+        <return-response>
+          <set-status code="403" reason="Model caller denied" />
+          <set-header name="X-Citadel-Denial" exists-action="override"><value>model_caller_denied</value></set-header>
+          <set-header name="X-Citadel-Gateway-Request-Id" exists-action="override"><value>@(context.RequestId.ToString("N"))</value></set-header>
+        </return-response>
       </when>
     </choose>
     <set-variable name="validModelRequest" value="@{

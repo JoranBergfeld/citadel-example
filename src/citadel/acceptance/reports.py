@@ -18,7 +18,7 @@ supported gaps_visible fictional confirmed_at expected actual business_state rea
 source sources request_id control_request_id caller runtime_identity gateway_identity
 control_identity
 observation control before after target container action etag suite_id client_request_id
-method event_id facts certificate_sha256 generation read_attempts agent_executions upstream_attempts
+method event_id facts certificate_sha256 generation read_attempts agent_executions upstream_attempts backend_dispatched
 model_attempts input_tokens output_tokens tokens deadline retry artifact_count probe_id
 started finished observed status_code control_status before_sha256 after_sha256
 before_count after_count evidence evidence_sha256 artifacts sha256 count version
