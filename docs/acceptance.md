@@ -39,9 +39,11 @@ requires its four independently verified, actually executed storage denials.
   its run, workload, assigned client ID, fixed mode and absolute deadline before
   accessing any SDK. It obtains only its allocated Key Vault subscription secret
   using explicit `ManagedIdentityCredential`; no operator fallback.
-- `gateway-matrix` runs four-agent discovery/forbidden-invocation, MCP
-  initialization and all three reference-tool probes.
-- Discovery and MCP read observations now have individual deterministic oracles,
+- `gateway-matrix` runs four-agent discovery/forbidden-invocation, owner-status,
+  actual A2A `GetTask`, exact finding, MCP initialization and all three reference-tool
+  probes. `OperatorProbe` separately obtains only the operator's own allocated key;
+  the workload provider still refuses operator impersonation.
+- Read observations have individual deterministic oracles,
   rather than remaining raw catalogue entries. Each binds an exact allocated
   subscription, actual destination hash, actual service ID, measured window and
   digest-bound workload probe trace. Allowed controls also require the destination
@@ -49,9 +51,34 @@ requires its four independently verified, actually executed storage denials.
   snapshots real draft/finding ledgers around each worker and the operator control.
   A denial needs the gateway's explicit `route_denied` response metadata and
   explicit no-backend-dispatch evidence, not just HTTP 403. Null/unknown backend
-  fields remain blocked. These gates cover the existing 33 discovery/MCP read
-  observations; remaining invocation/status/task/finding/model obligations are
-  still blocked until their own complete proofs exist.
+  fields remain blocked. These gates cover all 85 caller/read-capability obligations;
+  invocation and model obligations still need their complete independent proofs.
+- Owner controls derive bounded IDs and hashes from five actual ledgers in the
+  completed comparison. They never export private products, invent completed tasks,
+  seed findings or create/refill operation pools. Exact final ticket-marker reads
+  identify existing remaining capacity; absence requires an actual Blob 404, not
+  an exception-only assertion. Pool use is observed, never an assumed invariant.
+  The additional assessor/reviewer task reads consume one existing ticket each.
+  Two exact finding controls use distinct released findings and reviewer pools;
+  the task control uses a third reviewer pool.
+- Assessor/reviewer status controls reuse actual successful in-workflow HTTP
+  responses. Unsampled `status.observed` records bind the returned service ID,
+  measured window, owner/run/input/result hashes and a digest of the reconstructed
+  observation. They consume no additional reads. Collection requires the actual
+  caller's application trace, matching APIM subscription and destination backend
+  trace, plus independently observed immutable state. Console records cannot
+  substitute. Missing capacity, old/out-of-window controls or missing correlations
+  block; no probe changes the original operation's allowance.
+- Owner/task/finding proofs survive sanitization and are re-evaluated from the
+  exact comparison context and correlated operator reads. A2A controls validate
+  the real direct `Task` JSON result, task/context/artifact IDs and committed hash;
+  MCP controls also bind the actual JSON-RPC response ID. Malformed response bodies
+  retain their real service receipts rather than becoming untraceable failures.
+  The local five-application integration test executes a genuine comparison,
+  observes its status controls, then performs the eight remaining successful
+  owner/finding reads and real MCP tools. Existing pool identities/capacities and
+  business products remain unchanged; consumed tickets are not returned.
+  No live Azure execution is implied.
 - Fixed APIM authorization branches return only a nonpayload denial code and
   the actual gateway `context.RequestId`. Normal outbound policy removes any
   backend-supplied denial marker and replaces the response correlation ID.

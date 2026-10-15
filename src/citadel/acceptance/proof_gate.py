@@ -86,8 +86,25 @@ def evaluate_check(check, report):
                  or row.get("run_id") != control.get("run_id")))]
         if route:
             from .route_oracle import evaluate_route
+            context, reads = actual.get("route_context"), actual.get("context_reads")
+            if check["check_id"].split(".")[-1] in ("status", "task", "findings"):
+                from .route_context import validate_route_context
+                try:
+                    validate_route_context(context)
+                except (ValueError, TypeError):
+                    return blocked
+                comparison = report.get("scenarios", {}).get("comparison", {})
+                if (not isinstance(comparison, dict) or comparison.get("operation_id") != context["read_scope"]["run_id"]
+                        or not isinstance(reads, list)
+                        or any(not isinstance(row, dict) or row.get("operation_id") not in operations
+                               or row.get("suite_id") != report.get("run_id") for row in reads)
+                        or any(row["operation_id"] not in operations
+                               for row in [*context["operations"].values(), *[
+                                   item["read_scope"] for item in context["finding_controls"].values()]])):
+                    return blocked
             return evaluate_route(observation, control, snapshots, correlated, identities=identities,
-                                  subscriptions=bindings, observer_identity=next(iter(observers)))
+                subscriptions=bindings, observer_identity=next(iter(observers)),
+                route_context=context, context_observations=reads)
         return evaluate_origin(observation, control, snapshots, correlated,
             runtime_identity=identities[actor], observer_identity=next(iter(observers)),
             credential_sha256=bindings[caller])

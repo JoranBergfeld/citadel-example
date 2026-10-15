@@ -9,6 +9,74 @@ from citadel.operations import OperationError
 
 
 class ProbeTransportTests(unittest.IsolatedAsyncioTestCase):
+    async def test_malformed_service_body_preserves_actual_failed_attempt_receipt(self):
+        async with httpx.AsyncClient(transport=httpx.MockTransport(lambda request: httpx.Response(
+                200, headers={"apim-request-id": "actual-malformed"}, content=b"not-json"))) as client:
+            probe = GatewayProbe("candidate-planner", "https://gateway.example", "allocated",
+                                 client=client, enabled=True, run_id="r1")
+            result = await probe.discovery("evidence-assessor")
+        self.assertEqual(result["status"], "blocked")
+        self.assertEqual(result.get("request_id"), "actual-malformed")
+        self.assertEqual(result.get("status_code"), 200)
+        self.assertEqual(result.get("check_id"), "route.candidate-planner.evidence-assessor.discovery")
+
+    async def test_denied_owner_read_preserves_exact_target_binding_without_private_product(self):
+        from citadel.acceptance.route_context import build_route_context
+        from tests.acceptance.test_route_context import ledgers
+        context = build_route_context(ledgers(), run_ids=["real-run"])
+        async with httpx.AsyncClient(transport=httpx.MockTransport(lambda request: httpx.Response(
+                403, headers={"apim-request-id": "denied1", "x-citadel-denial": "route_denied"}))) as client:
+            probe = GatewayProbe("candidate-planner", "https://gateway.example", "allocated",
+                client=client, enabled=True, run_id="probe1", route_context=context)
+            observed = await probe.status("release-reviewer", "review3")
+        self.assertEqual(observed.get("control_reference"), context["operations"]["release-reviewer"])
+        self.assertNotIn("private test prose", str(observed))
+
+    async def test_status_task_and_finding_controls_bind_observed_owner_state_and_exact_hashes(self):
+        from a2a.types import Task, TaskStatus, TaskState, Artifact, Part
+        from google.protobuf.json_format import MessageToDict
+        from citadel.acceptance.route_context import build_route_context
+        from tests.acceptance.test_route_context import ledgers
+        documents = ledgers()
+        context = build_route_context(documents, run_ids=["real-run"])
+        status = documents["evidence-assessor"]["operations"]["candidate-planner/invoke/assess2"]
+        finding = documents["findings"]["findings"]["finding1"]["1"]
+        requests, wrong_owner, wrong_artifact = [], [False], [False]
+
+        def provider(request):
+            requests.append(request)
+            headers = {"apim-request-id": "real-response-" + str(len(requests))}
+            if "/operations/" in request.url.path:
+                body = status | {"run_id": "another-run" if wrong_owner[0] else "real-run"}
+            elif "/findings/" in request.url.path:
+                body = finding
+            else:
+                task = Task(id="assess2", context_id="real-run",
+                    status=TaskStatus(state=TaskState.TASK_STATE_COMPLETED),
+                    artifacts=[Artifact(artifact_id="another-operation" if wrong_artifact[0] else "assess2",
+                                        parts=[Part(text=json.dumps(status["result"]))])])
+                body = {"jsonrpc": "2.0", "id": json.loads(request.content)["id"], "result": MessageToDict(task)}
+            return httpx.Response(200, headers=headers, json=body)
+
+        async with httpx.AsyncClient(transport=httpx.MockTransport(provider)) as client:
+            probe = GatewayProbe("candidate-planner", "https://gateway.example", "allocated",
+                client=client, enabled=True, run_id="probe-run", route_context=context)
+            observed = [await probe.status("evidence-assessor", "assess2"),
+                        await probe.task("evidence-assessor", "assess2"),
+                        await probe.finding(context["finding"], context["read_scope"])]
+            wrong_owner[0] = True
+            rejected = await probe.status("evidence-assessor", "assess2")
+            wrong_artifact[0] = True
+            rejected_task = await probe.task("evidence-assessor", "assess2")
+            with self.assertRaises(ValueError):
+                await probe.task("evidence-assessor", "unobserved-operation")
+        self.assertEqual([row.get("actual") for row in observed], ["owned_status", "owned_task", "exact_finding"])
+        self.assertEqual(rejected.get("status"), "blocked")
+        self.assertEqual(rejected_task.get("status"), "blocked")
+        self.assertEqual(len(requests), 5)
+        self.assertEqual(requests[2].headers["x-citadel-read-pool"], "review1")
+        self.assertNotIn("private test prose", str(observed))
+
     async def test_normal_mode_refuses_probe_before_any_network_request(self):
         async with httpx.AsyncClient(transport=httpx.MockTransport(
                 lambda request: self.fail("Disabled probe dispatched"))) as client:
@@ -96,6 +164,7 @@ class ProbeTransportTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(requests), 4)
         self.assertEqual(json.loads(requests[0].content)["method"], "GetTask")
         self.assertEqual(json.loads(requests[0].content)["params"], {"id": "known-task"})
+        self.assertEqual(requests[0].headers.get("a2a-version"), "1.0")
         for request, tool in zip(requests[1:], ("search_airports", "lookup_airport", "list_runways")):
             body = json.loads(request.content)
             self.assertEqual(request.url.path, "/reference-data/mcp")
@@ -120,7 +189,7 @@ class ProbeTransportTests(unittest.IsolatedAsyncioTestCase):
                                             "airports": [{"ident": {"parsed": "EBAM"}}]}}]
         async with httpx.AsyncClient(transport=httpx.MockTransport(lambda request: httpx.Response(
                 200, headers={"apim-request-id": "service1"},
-                json={"jsonrpc": "2.0", "result": results.pop(0)}))) as client:
+                json={"jsonrpc": "2.0", "id": json.loads(request.content)["id"], "result": results.pop(0)}))) as client:
             probe = GatewayProbe("candidate-planner", "https://gateway.example", "allocated",
                                  client=client, enabled=True, run_id="r1")
             absent = await probe.reference_tool("search_airports")
@@ -129,3 +198,12 @@ class ProbeTransportTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(observed.get("actual"), "reference_data")
         self.assertNotIn("airports", observed)
         self.assertNotIn("provenance", observed)
+
+    async def test_mcp_control_cannot_accept_another_jsonrpc_request_response(self):
+        async with httpx.AsyncClient(transport=httpx.MockTransport(lambda request: httpx.Response(
+                200, headers={"apim-request-id": "actual-service"}, json={
+                    "jsonrpc": "2.0", "id": "unrelated", "result": {"protocolVersion": "2025-11-25"}}))) as client:
+            probe = GatewayProbe("candidate-planner", "https://gateway.example", "allocated",
+                                 client=client, enabled=True, run_id="r1")
+            result = await probe.mcp_initialize()
+        self.assertEqual(result.get("status"), "blocked")

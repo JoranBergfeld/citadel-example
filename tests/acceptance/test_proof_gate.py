@@ -35,6 +35,30 @@ def storage_proof():
 
 
 class ProofGateTests(unittest.TestCase):
+    def test_owner_route_report_preserves_hash_only_context_and_rechecks_each_real_observer_read(self):
+        from tests.acceptance.test_route_oracle import owner_route_proof
+        args, context, reads = owner_route_proof("task")
+        observed, control, snapshots, records, identities, subscriptions = args
+        check = {"check_id": observed["check_id"], "expected": "deny", "status": "pass",
+            "actual": {"observation": observed, "control": control, "route_context": context,
+                      "context_reads": reads, **{side: list(rows.values()) for side, rows in snapshots.items()}}}
+        report = {"run_id": "suite1", "runtime_identities": identities, "evidence": records,
+            "subscription_bindings": subscriptions, "scenarios": {"comparison": {"operation_id": "real-run"}},
+            "operation_ids": ["denied-run", "denied-op", "control-run", "control-op", "real-run",
+                             "assess2", "review1", "review2", "review3", "author1",
+                             *[row["operation_id"] for row in reads]]}
+        self.assertEqual(evaluate_check(sanitize(check), sanitize(report))["status"], "pass")
+        self.assertNotIn("private test prose", str(sanitize(check)))
+        changed = copy.deepcopy(report)
+        changed["scenarios"]["comparison"]["operation_id"] = "different-comparison"
+        self.assertEqual(evaluate_check(check, changed)["status"], "blocked")
+        changed = copy.deepcopy(report)
+        changed["operation_ids"].remove("context-1")
+        self.assertEqual(evaluate_check(check, changed)["status"], "blocked")
+        changed = copy.deepcopy(check)
+        changed["actual"]["context_reads"][0]["target"] = "9" * 64
+        self.assertEqual(evaluate_check(changed, report)["status"], "blocked")
+
     def test_route_proof_survives_sanitization_and_rejects_substituted_authority(self):
         from tests.acceptance.test_route_oracle import route_proof
         observed, control, snapshots, records, identities, subscriptions = route_proof()

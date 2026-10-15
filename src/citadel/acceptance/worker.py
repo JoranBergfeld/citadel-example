@@ -30,6 +30,8 @@ def validate_request(request, *, enabled, workload, client_id):
         keys.add("storage")
     if isinstance(request, dict) and request.get("mode") == "origin-boundary":
         keys.add("origin")
+    if isinstance(request, dict) and request.get("mode") == "gateway-matrix" and "routes" in request:
+        keys.add("routes")
     if (enabled is not True or not isinstance(request, dict)
             or request.keys() != keys
             or type(request["schema_version"]) is not int or request["schema_version"] != 1
@@ -41,6 +43,11 @@ def validate_request(request, *, enabled, workload, client_id):
             or not time.time() < request["deadline"] <= time.time() + 900):
         raise ValueError("Disabled, unallocated or malformed fixed-purpose probe")
     identity(request["run_id"])
+    if len(canonical_bytes(request)) > 3072:
+        raise ValueError("Probe manifest exceeds its 4096-byte base64 environment envelope")
+    if "routes" in request:
+        from .route_context import validate_route_context
+        validate_route_context(request["routes"])
     if request["mode"] == "storage-boundaries":
         from .storage_probes import validate_storage_manifest
         validate_storage_manifest(request["storage"])
@@ -226,13 +233,20 @@ async def run_gateway_matrix(config, request):
             results = []
             async with httpx.AsyncClient(timeout=30, follow_redirects=False, trust_env=False) as client:
                 probe = GatewayProbe(config.target, config.gateway, secret.value, client=client,
-                    enabled=True, run_id=request["run_id"], deadline=request["deadline"], admit=pool.admit)
+                    enabled=True, run_id=request["run_id"], deadline=request["deadline"], admit=pool.admit,
+                    route_context=request.get("routes"))
                 with read_scope(pool, deadline=request["deadline"]), correlate(
                         request["run_id"], request["run_id"], config.target):
                     for target in AGENTS:
                         result = await probe.discovery(target)
                         result["check_id"] = f"route.{config.target}.{target}.discovery"
                         results.append(result)
+                        if "routes" in request:
+                            owner = request["routes"]["operations"][target]["operation_id"]
+                            if not (target in ("evidence-assessor", "release-reviewer")
+                                    and config.target in INVOCATION_CALLERS[target]):
+                                results.append(await probe.status(target, owner))
+                            results.append(await probe.task(target, owner))
                         if config.target not in INVOCATION_CALLERS[target]:
                             result = await probe.denied_invocation(target)
                             result["check_id"] = f"route.{config.target}.{target}.invoke"
@@ -245,6 +259,10 @@ async def run_gateway_matrix(config, request):
                             tool, ident=None if tool == "search_airports" else "EBAM")
                         result["check_id"] = f"route.{config.target}.reference-data.{tool}"
                         results.append(result)
+                    if "routes" in request:
+                        from .route_context import finding_control
+                        control = finding_control(request["routes"], config.target)
+                        results.append(await probe.finding(control["finding"], control["read_scope"]))
             # Private allocated storage is the worker-result channel, not an operator HTTP proxy.
             if config.target == "candidate-planner":
                 await store.release_run(scope)

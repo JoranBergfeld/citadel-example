@@ -50,6 +50,9 @@ class RevisionTests(unittest.TestCase):
         self.assertEqual(lifecycle.value["probe_intents"]["r1"]["origin"], request["origin"])
 
     def test_same_image_identity_fixed_command_and_restore_without_operator_keys(self):
+        from citadel.acceptance.route_context import build_route_context
+        from tests.acceptance.test_route_context import ledgers
+        context = build_route_context(ledgers(), run_ids=["real-run"])
         native = NativeFixture()
         original = copy.deepcopy(native.app["properties"]["template"])
         app = {"app": "/subscriptions/s/resourceGroups/g/providers/Microsoft.App/containerApps/d-candidate-planner",
@@ -59,7 +62,8 @@ class RevisionTests(unittest.TestCase):
         lifecycle = SimpleNamespace(native=native, value={"probe_intents": {}}, state=state)
         admissions = []
         result = RevisionProbe(lifecycle, sleep=lambda seconds: None,
-                               admit=lambda: admissions.append(1)).execute(app, "candidate-planner", "r1")
+                               admit=lambda: admissions.append(1)).execute(
+                                   app, "candidate-planner", "r1", routes=context)
         self.assertEqual(result["run_id"], "r1")
         self.assertEqual(len(admissions), 4)
         self.assertEqual(native.app["properties"]["template"], original)
@@ -69,6 +73,8 @@ class RevisionTests(unittest.TestCase):
         manifest = next(e["value"] for e in container["env"] if e["name"] == "CITADEL_ACCEPTANCE_REQUEST")
         request = json.loads(base64.b64decode(manifest))
         self.assertEqual(request["client_id"], app["identityClientId"])
+        self.assertEqual(request["routes"], context)
+        self.assertNotIn("private test prose", json.dumps(request))
         self.assertNotIn("credential", manifest)
 
     def test_ambiguous_previous_dispatch_cannot_be_replayed(self):

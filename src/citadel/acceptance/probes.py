@@ -2,6 +2,7 @@
 
 import asyncio
 import hashlib
+import json
 import time
 from uuid import uuid4
 
@@ -21,19 +22,21 @@ class ProbeDisabled(ValueError):
     pass
 
 
-class GatewayProbe:
-    """Allocated subscription only. Production construction happens inside its workload."""
+class _GatewayWire:
+    """Fixed routes only; concrete providers select their own allocated credential."""
 
     def __init__(self, workload, gateway, subscription_key, *, client, enabled, run_id,
-                 deadline=None, admit=None):
+                 deadline=None, admit=None, route_context=None):
         if enabled is not True:
             raise ProbeDisabled("Acceptance probes are disabled in normal mode")
-        if workload not in AGENTS:
-            raise ValueError("Only the actual allocated agent may run a workload probe")
         self.workload, self.gateway, self.key = workload, endpoint(gateway), subscription_key
         self.http, self.run_id = client, identity(run_id)
         self.deadline = min(deadline or time.time() + 900, time.time() + 900)
         self.remaining, self.admit = 512, admit
+        if route_context is not None:
+            from .route_context import validate_route_context
+            validate_route_context(route_context)
+        self.context = route_context
 
     async def _exchange(self, target, path, *, capability, method="GET", payload=None, headers=None):
         if target not in (*AGENTS, "reference-data"):
@@ -51,8 +54,11 @@ class GatewayProbe:
         request_headers = {"Ocp-Apim-Subscription-Key": self.key, "x-citadel-run-id": self.run_id,
                            "x-citadel-operation-id": operation,
                            "x-ms-client-request-id": uuid4().hex}
+        if path == "/a2a":
+            request_headers["a2a-version"] = "1.0"
         if headers:
             request_headers.update(headers)
+        result = None
         try:
             async with asyncio.timeout(min(30, self.deadline - time.time())):
                 response = await self.http.request(method, url,
@@ -65,9 +71,15 @@ class GatewayProbe:
                 "check_id": check_id, "target": target_hash,
                 "run_id": self.run_id, "operation_id": operation, "caller": self.workload,
                 "started": started, "finished": time.time(), "request_id": request_id,
-                "status_code": response.status_code, "sources": ["gateway"],
+                "status_code": int(response.status_code), "sources": ["gateway"],
                 "reason": reason,
             }
+            if self.context is not None:
+                if capability in ("status", "task"):
+                    result["control_reference"] = self.context["operations"][target]
+                elif capability == "findings":
+                    from .route_context import finding_control
+                    result["control_reference"] = finding_control(self.context, self.workload)
             if response.status_code == 200 and path == "/.well-known/agent-card.json":
                 card = response.json()
                 expected = f"{self.gateway}/{target}/a2a"
@@ -79,6 +91,7 @@ class GatewayProbe:
             if response.status_code == 200 and path in ("/mcp", "/a2a"):
                 envelope = response.json()
                 if (not isinstance(envelope, dict) or envelope.get("jsonrpc") != "2.0"
+                        or envelope.get("id") != payload.get("id")
                         or "error" in envelope or not isinstance(envelope.get("result"), dict)
                         or envelope["result"].get("isError", False) is not False
                         or payload.get("method") == "initialize"
@@ -105,14 +118,61 @@ class GatewayProbe:
                         result.update(actual="reference_data", sha256=sha256(content))
                     else:
                         result.update(status="blocked", reason="protocol_control_failed")
-            with correlate(self.run_id, operation, self.workload):
-                emit("probe", request_id=request_id, status_code=response.status_code, target=target_hash,
-                     facts={"probe_id": check_id, "reason": reason, "sha256": sha256(result)})
+            if response.status_code == 200 and capability in ("status", "task", "findings"):
+                if self.context is None:
+                    result.update(status="blocked", reason="observed_owner_context_required")
+                else:
+                    result.update(self._read_result(target, capability, response.json(), payload))
+            if self.workload != "operator":
+                with correlate(self.run_id, operation, self.workload):
+                    emit("probe", request_id=request_id, status_code=int(response.status_code), target=target_hash,
+                         facts={"probe_id": check_id, "reason": reason, "sha256": sha256(result)})
             return result
-        except (httpx.HTTPError, TimeoutError, ValueError, TypeError, AttributeError):
-            return {"run_id": self.run_id, "operation_id": operation, "caller": self.workload, "status": "blocked",
-                    "reason": "transport_or_protocol_unavailable",
+        except (httpx.HTTPError, TimeoutError, ValueError, TypeError, AttributeError, KeyError, IndexError):
+            if result is None:
+                result = {"run_id": self.run_id, "operation_id": operation, "caller": self.workload,
+                    "check_id": check_id, "target": target_hash, "request_id": None, "status_code": 0,
                     "started": started, "finished": time.time()}
+            result.update(status="blocked", reason="transport_or_protocol_unavailable")
+            if self.workload != "operator":
+                with correlate(self.run_id, operation, self.workload):
+                    emit("probe", request_id=result["request_id"], status_code=result["status_code"],
+                         target=target_hash, facts={"probe_id": check_id, "sha256": sha256(result)})
+            return result
+
+    def _read_result(self, target, capability, body, payload):
+        blocked = {"status": "blocked", "reason": "owner_or_exact_result_binding_failed"}
+        if not isinstance(body, dict):
+            return blocked
+        if capability == "findings":
+            from .route_context import finding_control
+            control = finding_control(self.context, self.workload)
+            reference = control["finding"]
+            if (body.get("artifact_id") != reference["artifact_id"] or body.get("version") != reference["version"]
+                    or sha256(body) != reference["sha256"]):
+                return blocked
+            return {"actual": "exact_finding", "sha256": sha256(body),
+                    "control_reference": control}
+        reference = self.context["operations"][target]
+        if capability == "status":
+            if (body.get("state") != "succeeded" or body.get("operation_id") != reference["operation_id"]
+                    or body.get("run_id") != reference["run_id"] or body.get("input_hash") != reference["input_hash"]
+                    or sha256(body.get("result")) != reference["result_sha256"]):
+                return blocked
+            return {"actual": "owned_status", "sha256": sha256(body["result"]), "control_reference": reference}
+        task = body.get("result")
+        if (body.get("jsonrpc") != "2.0" or body.get("id") != payload.get("id") or "error" in body
+                or not isinstance(task, dict) or task.get("id") != reference["operation_id"]
+                or task.get("contextId") != reference["run_id"]
+                or task.get("status", {}).get("state") != "TASK_STATE_COMPLETED"
+                or len(task.get("artifacts", [])) != 1
+                or task["artifacts"][0].get("artifactId") != reference["operation_id"]
+                or len(task["artifacts"][0].get("parts", [])) != 1):
+            return blocked
+        result = json.loads(task["artifacts"][0]["parts"][0]["text"])
+        if sha256(result) != reference["task_sha256"]:
+            return blocked
+        return {"actual": "owned_task", "sha256": sha256(result), "control_reference": reference}
 
     async def discovery(self, target):
         if target not in AGENTS:
@@ -122,11 +182,15 @@ class GatewayProbe:
     async def status(self, target, operation_id):
         if target not in AGENTS:
             raise ValueError("Status requires an allocated agent")
+        if self.context is not None and operation_id != self.context["operations"][target]["operation_id"]:
+            raise ValueError("Only the independently observed owner operation may be read")
         return await self._exchange(target, "/operations/" + identity(operation_id), capability="status")
 
     async def task(self, target, operation_id):
         if target not in AGENTS:
             raise ValueError("Task reads require an allocated agent")
+        if self.context is not None and operation_id != self.context["operations"][target]["operation_id"]:
+            raise ValueError("Only the independently observed owner operation may be read")
         return await self._exchange(target, "/a2a", method="POST", capability="task",
             payload={"jsonrpc": "2.0", "method": "GetTask", "id": uuid4().hex,
                      "params": {"id": identity(operation_id)}})
@@ -141,6 +205,11 @@ class GatewayProbe:
         return await self._exchange(target, "/a2a", method="POST", payload=payload, capability="invoke")
 
     async def finding(self, reference, read_scope):
+        if self.context is not None:
+            from .route_context import finding_control
+            control = finding_control(self.context, self.workload)
+            if reference != control["finding"] or read_scope != control["read_scope"]:
+                raise ValueError("Only the exact observed finding and its funded scope may be read")
         artifact = identity(reference["artifact_id"])
         version = reference["version"]
         if type(version) is not int or version < 1:
@@ -171,3 +240,32 @@ class GatewayProbe:
                      "MCP-Protocol-Version": "2025-11-25"},
             payload={"jsonrpc": "2.0", "id": uuid4().hex, "method": "tools/call",
                      "params": {"name": tool, "arguments": arguments}})
+
+
+class GatewayProbe(_GatewayWire):
+    """Allocated subscription only. Production construction happens inside its workload."""
+
+    def __init__(self, workload, gateway, subscription_key, **options):
+        if workload not in AGENTS:
+            raise ValueError("Only the actual allocated agent may run a workload probe")
+        super().__init__(workload, gateway, subscription_key, **options)
+
+
+class OperatorProbe(_GatewayWire):
+    """Operator credential only; never accepts a workload identity or key."""
+
+    def __init__(self, lifecycle, *, client, enabled, run_id, deadline, admit, route_context):
+        if enabled is not True:
+            raise ProbeDisabled("Acceptance probes are disabled in normal mode")
+        if time.time() >= deadline:
+            raise OperationError("deadline", "Expired operator probes cannot read credentials")
+        credentials = lifecycle.credentials()
+        if credentials["callerStates"]["operator"] != "active":
+            raise ValueError("Operator credential is suspended")
+
+        async def admitted():
+            admit()
+
+        super().__init__("operator", lifecycle.value["outputs"]["gatewayUrl"],
+            credentials["callerKeys"]["operator"]["primary"], client=client, enabled=enabled,
+            run_id=run_id, deadline=deadline, admit=admitted, route_context=route_context)

@@ -19,10 +19,11 @@ METHODS = {"SendMessage", "GetTask", "discovery", "status", "findings-read", "in
            "tools/call", "search_airports", "lookup_airport", "list_runways", "chat.completions",
            "storage.read", "storage.write", "storage.lease", "execution", "probe",
            "mcp.GET", "mcp.DELETE", "ping", "tools/list", "notifications/initialized", "authorization.denied",
-           "model.direct"}
+           "model.direct", "status.observed"}
 FACTS = {"generation", "read_attempts", "agent_executions", "model_attempts", "input_tokens",
          "output_tokens", "tokens", "deadline", "retry", "artifact_count", "sha256",
-         "business_state", "probe_id", "status_code", "before_sha256", "after_sha256", "reason"}
+         "business_state", "probe_id", "status_code", "before_sha256", "after_sha256", "reason",
+         "read_operation_id", "input_hash", "result_sha256", "started", "finished"}
 _correlation = ContextVar("citadel_evidence_correlation", default={})
 _exporter = None
 

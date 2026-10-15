@@ -9,13 +9,13 @@ import time
 from uuid import UUID, uuid4
 
 from azure.core import MatchConditions
-from azure.core.exceptions import AzureError, HttpResponseError
+from azure.core.exceptions import AzureError, HttpResponseError, ResourceNotFoundError
 from azure.storage.blob.aio import BlobClient
 
-from citadel.evidence.manifests import canonical_bytes
+from citadel.evidence.manifests import canonical_bytes, sha256
 from citadel.operations import OperationError, identity
 from citadel.operations.blob import API_VERSION, MAX_LEDGER_BYTES
-from citadel.runtime.configuration import endpoint
+from citadel.runtime.configuration import endpoint, OPERATIONS
 from .coverage import CONTAINERS, STORAGE
 from .oracle import evaluate_control, hash_value
 from .telemetry import correlate, storage_response
@@ -219,6 +219,57 @@ class StorageControls:
             record["count"] = len(document[container])
             records[container] = record
         return records
+
+    def route_context(self, run_ids):
+        from .route_context import build_route_context
+        if not isinstance(run_ids, list) or not 0 < len(run_ids) <= 4:
+            raise ValueError("Approved scenario run identities are required")
+        for run_id in run_ids:
+            identity(run_id)
+        documents, observations = {}, []
+        for actor, container in {**OPERATIONS, "findings": "findings"}.items():
+            record, content = self._read(container, "ledger-v1.json")
+            try:
+                document = json.loads(content)
+                if not isinstance(document, dict) or document.get("schema_version") != 1:
+                    raise ValueError()
+            except (ValueError, UnicodeError):
+                raise OperationError("data_integrity", "Actual route control ledger is malformed") from None
+            documents[actor] = document
+            observations.append(record)
+        from citadel.runtime.tickets import CAPACITY
+        from citadel.gateway.trust import INVOCATION_CALLERS
+        available, tickets = {}, []
+        for actor in ("evidence-assessor", "release-reviewer"):
+            owner = next(iter(INVOCATION_CALLERS[actor]))
+            rows = [row for key, row in documents[actor].get("operations", {}).items()
+                if isinstance(row, dict) and row.get("state") == "succeeded" and row.get("run_id") in run_ids
+                and isinstance(row.get("operation_id"), str)
+                and key == owner + "/invoke/" + row["operation_id"]]
+            if not 0 < len(rows) <= 20:
+                raise ValueError("Bounded completed owner pools are required")
+            available[actor] = set()
+            for row in rows:
+                operation = identity(row["operation_id"])
+                scope = owner + "/invoke/" + operation
+                name = f"read-tickets/{sha256(scope)}/{CAPACITY[actor] - 1:03}.json"
+                record, once, received = self._record(OPERATIONS[actor], "read", name)
+                try:
+                    with self.native.blob(self.account, OPERATIONS[actor], name) as blob:
+                        content = blob.download_blob(offset=0, length=10, max_concurrency=1,
+                            raw_request_hook=once, raw_response_hook=received, timeout=30).readall()
+                    if content not in (b"spent", b"delegated"):
+                        raise ValueError("Existing ticket marker is malformed")
+                    record.update(state="spent", sha256=hashlib.sha256(content).hexdigest(), count=1)
+                except ResourceNotFoundError:
+                    if record.get("status_code") != 404:
+                        raise ValueError("Missing marker requires an actual service response") from None
+                    record.update(state="unspent", count=0)
+                    available[actor].add(operation)
+                record["finished"] = time.time()
+                tickets.append(record)
+        return {"context": build_route_context(documents, run_ids=run_ids, available=available),
+                "observations": observations, "ticket_reads": tickets}
 
 
 def _correlated(record, evidence, expected_identity, *, application=False):

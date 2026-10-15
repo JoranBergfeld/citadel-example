@@ -35,11 +35,15 @@ class BlobProvider:
                 provider.requests.append((method, container, name))
                 options["raw_response_hook"](SimpleNamespace(
                     http_request=request.http_request,
-                    http_response=SimpleNamespace(status_code=206 if method == "GET" else 201,
+                    http_response=SimpleNamespace(status_code=(
+                        206 if (container, name) in provider.objects else 404) if method == "GET" else 201,
                         headers={"x-ms-request-id": f"actual-provider-{len(provider.requests)}"})))
 
             def download_blob(self, **options):
                 self.exchange("GET", options)
+                if (container, name) not in provider.objects:
+                    from azure.core.exceptions import ResourceNotFoundError
+                    raise ResourceNotFoundError("External fixture: blob does not exist")
                 return SimpleNamespace(properties=SimpleNamespace(etag='"known"'),
                                        readall=lambda: provider.objects[container, name])
 
@@ -54,6 +58,36 @@ class BlobProvider:
 
 
 class StorageControlTests(unittest.TestCase):
+    def test_route_context_observes_existing_ledgers_without_exporting_products_or_funding_new_pools(self):
+        from tests.acceptance.test_route_context import ledgers
+        provider = BlobProvider()
+        documents = ledgers()
+        containers = {"candidate-planner": "planner-operations", "evidence-assessor": "assessor-operations",
+                      "release-reviewer": "reviewer-operations", "briefing-author": "author-operations",
+                      "findings": "findings"}
+        for actor, container in containers.items():
+            provider.objects[container, "ledger-v1.json"] = json.dumps(
+                documents[actor] | {"schema_version": 1}).encode()
+        original, admissions = dict(provider.objects), []
+        from citadel.evidence.manifests import sha256
+        provider.objects["assessor-operations", "read-tickets/" + sha256(
+            "candidate-planner/invoke/assess2") + "/019.json"] = b"spent"
+        original = dict(provider.objects)
+        controls = StorageControls(provider, account="https://allocated.blob.core.windows.net",
+                                   suite_id="suite1", admit=lambda: admissions.append(1))
+        result = controls.route_context(["real-run"])
+        self.assertEqual(result["context"]["read_scope"]["operation_id"], "review1")
+        self.assertNotEqual(result["context"]["operations"]["evidence-assessor"]["operation_id"], "assess2")
+        self.assertEqual(len(result["observations"]), 5)
+        self.assertEqual(len(admissions), 11)
+        self.assertEqual(len(result["ticket_reads"]), 6)
+        self.assertEqual(provider.objects, original)
+        self.assertEqual({(method, container, name) for method, container, name in provider.requests
+                          if name == "ledger-v1.json"},
+                         {("GET", container, "ledger-v1.json") for container in containers.values()})
+        self.assertNotIn("private test prose", str(result))
+        self.assertNotIn("product", result["context"]["operations"]["briefing-author"])
+
     def test_product_observer_reads_real_business_ledgers_without_seeding_or_writes(self):
         provider = BlobProvider()
         original = dict(provider.objects)

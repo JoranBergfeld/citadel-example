@@ -9,10 +9,12 @@ from .oracle import hash_value
 from .storage_probes import _correlated
 
 
-READ_CAPABILITIES = {"discovery", "initialize", "search_airports", "lookup_airport", "list_runways"}
+READ_CAPABILITIES = {"discovery", "initialize", "search_airports", "lookup_airport", "list_runways",
+                     "status", "task", "findings"}
 
 
-def evaluate_route(observation, control, snapshots, evidence, *, identities, subscriptions, observer_identity):
+def evaluate_route(observation, control, snapshots, evidence, *, identities, subscriptions, observer_identity,
+                   route_context=None, context_observations=None):
     blocked = {"check_id": observation.get("check_id") if isinstance(observation, dict) else None, "status": "blocked",
                "reason": "route_authority_control_or_no_effect_missing"}
     if (not isinstance(evidence, list) or any(not isinstance(row, dict) for row in evidence)
@@ -47,7 +49,7 @@ def evaluate_route(observation, control, snapshots, evidence, *, identities, sub
     def gateway(row, **fields):
         capability = row["check_id"].split(".")[3]
         return matches(row, "gateway", caller=row["caller"], target=row["target"],
-            method="GET" if capability == "discovery" else "POST",
+            method="GET" if capability in ("discovery", "status", "findings") else "POST",
             credential_sha256=subscriptions[row["caller"]], **fields)
 
     def client(row):
@@ -56,26 +58,71 @@ def evaluate_route(observation, control, snapshots, evidence, *, identities, sub
         return any(isinstance(item.get("facts"), dict)
             and item["facts"].get("sha256") == sha256(row)
             and item["facts"].get("probe_id") == row["check_id"]
-            and matches(row, "application", method="probe", runtime_identity=identities.get(row["caller"]),
+            and matches(row, "application",
+                method="status.observed" if row.get("observation_kind") == "workflow" else "probe",
+                runtime_identity=identities.get(row["caller"]),
                 caller=row["caller"], run_id=row["run_id"], operation_id=row["operation_id"],
                 target=row["target"], facts=item["facts"]) for item in evidence)
 
     def positive(row):
         _, caller, target, capability = row["check_id"].split(".")
-        actual = ("gateway_card" if capability == "discovery" else
-                  "mcp_initialized" if capability == "initialize" else "reference_data")
+        actual = {"discovery": "gateway_card", "initialize": "mcp_initialized", "status": "owned_status",
+                  "task": "owned_task", "findings": "exact_finding"}.get(capability, "reference_data")
+        method = {"task": "GetTask", "findings": "findings-read"}.get(capability, capability)
+        bound_hash = None
+        if capability in ("status", "task", "findings"):
+            if not context_bound(row):
+                return False
+            from .route_context import finding_control
+            bound_hash = (finding_control(route_context, caller)["finding"]["sha256"] if capability == "findings" else
+                          route_context["operations"][target][
+                              "result_sha256" if capability == "status" else "task_sha256"])
         return (required_checks()[row["check_id"]] == "allow" and row["status_code"] == 200
             and row.get("status") != "blocked" and row.get("actual") == actual
             and (capability in ("discovery", "initialize") or hash_value(row.get("sha256")))
+            and (bound_hash is None or row.get("sha256") == bound_hash)
             and gateway(row) and client(row)
-            and matches(row, "application", runtime_identity=identities[target], method=capability,
+            and matches(row, "application", runtime_identity=identities[target], method=method,
                         caller=caller, run_id=row["run_id"], operation_id=row["operation_id"]))
+
+    def context_bound(row):
+        from .route_context import validate_route_context
+        try:
+            validate_route_context(route_context)
+        except (ValueError, TypeError):
+            return False
+        if (not isinstance(context_observations, list) or len(context_observations) != 5
+                or any(not isinstance(item, dict) or not isinstance(item.get("container"), str)
+                       or not isinstance(item.get("request_id"), str) for item in context_observations)
+                or {item.get("container") for item in context_observations} != {
+                    "planner-operations", "assessor-operations", "reviewer-operations", "author-operations", "findings"}
+                or len({item.get("request_id") for item in context_observations}) != 5):
+            return False
+        for item in context_observations:
+            workflow = row.get("observation_kind") == "workflow"
+            if (item.get("action") != "read" or item.get("status_code") not in (200, 206)
+                    or not hash_value(item.get("sha256")) or not _correlated(item, evidence, observer_identity)
+                    or not workflow and item["finished"] > row["started"]
+                    or abs(row["finished"] - item["started"]) > 900
+                    or item.get("suite_id") != snapshots["before"].get("findings", {}).get("suite_id")):
+                return False
+        _, caller, target, capability = row["check_id"].split(".")
+        if row.get("observation_kind") == "workflow" and (
+                capability != "status" or target not in ("evidence-assessor", "release-reviewer")
+                or row["run_id"] != route_context["read_scope"]["run_id"]):
+            return False
+        from .route_context import finding_control
+        reference = (finding_control(route_context, caller)
+                     if capability == "findings" else route_context["operations"][target])
+        return row.get("control_reference") == reference
 
     if not shape(observation) or not shape(control) or not gateway(observation) or not client(observation):
         return blocked
     expected = required_checks()[observation["check_id"]]
     if expected == "deny" and 200 <= observation["status_code"] < 300:
         return blocked | {"status": "fail", "reason": "forbidden_route_succeeded"}
+    if observation["check_id"].split(".")[-1] in ("status", "task", "findings") and not context_bound(observation):
+        return blocked
     if (observation["target"] != control["target"]
             or observation["check_id"].split(".")[2:] != control["check_id"].split(".")[2:]
             or not positive(control)
@@ -102,7 +149,8 @@ def evaluate_route(observation, control, snapshots, evidence, *, identities, sub
                 return blocked
         if (not before.get("suite_id") or before["suite_id"] != after.get("suite_id")
                 or before.get("target") != after.get("target")
-                or before["finished"] > observation["started"] or after["started"] < observation["finished"]):
+                or observation.get("observation_kind") != "workflow" and (
+                    before["finished"] > observation["started"] or after["started"] < observation["finished"])):
             return blocked
         if before["sha256"] != after["sha256"] or before["count"] != after["count"]:
             return blocked | {"status": "fail", "reason": "read_route_changed_business_products"}

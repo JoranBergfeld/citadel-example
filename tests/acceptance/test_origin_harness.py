@@ -11,6 +11,125 @@ from citadel.operations import OperationError
 
 
 class OriginHarnessTests(unittest.IsolatedAsyncioTestCase):
+    def test_collection_uses_correlated_workflow_status_without_dispatching_an_extra_read(self):
+        from tests.acceptance.test_route_oracle import owner_route_proof
+        from citadel.evidence.manifests import sha256
+        args, context, reads = owner_route_proof("status")
+        observed, control, snapshots, records, identities, _ = args
+        control.update(observation_kind="workflow", run_id="real-run", started=80, finished=81,
+                       sources=["gateway"], reason="observed")
+        records[2]["observed"] = 80.5
+        reference = control["control_reference"]
+        records[3].update(control, observed=80.5, method="status.observed", facts={
+            "probe_id": control["check_id"], "sha256": sha256(control),
+            "read_operation_id": reference["operation_id"], "input_hash": reference["input_hash"],
+            "result_sha256": reference["result_sha256"], "started": 80, "finished": 81})
+        records[4].update(control, observed=80.5)
+        subscriptions = [
+            "/subscriptions/s/resourceGroups/g/providers/Microsoft.ApiManagement/service/a/subscriptions/" + caller
+            for caller in ("candidate-planner", "briefing-author")]
+        for row in records:
+            if row["source"] == "gateway":
+                resource = next(value for value in subscriptions if value.endswith("/" + row["caller"]))
+                row["credential_sha256"] = hashlib.sha256(resource.lower().encode()).hexdigest()
+        lifecycle = SimpleNamespace(value={"outputs": {"inventory": {"gateway": {"subscriptions": subscriptions}}}})
+        report = {"run_id": "suite1", "operation_ids": ["real-run"], "boundary_phase": {
+            "origins": [], "gateway": [observed], "identities": identities, "route_context": context,
+            "context_reads": reads, "snapshots": {observed["run_id"]: snapshots}}}
+        evaluated = BoundaryAcceptance(lifecycle).evaluate(report, records)
+        self.assertEqual({row["check_id"]: row["status"] for row in evaluated},
+                         {observed["check_id"]: "pass", control["check_id"]: "pass"})
+        self.assertIn(control["operation_id"], report["operation_ids"])
+
+    def test_boundary_driver_persists_comparison_derived_targets_before_fixed_operator_dispatch(self):
+        from tests.acceptance.test_storage_controls import BlobProvider
+        from tests.acceptance.test_route_context import ledgers
+        from citadel.runtime.configuration import OPERATIONS
+        from unittest.mock import patch
+        import json
+        native, documents, saves, requests = BlobProvider(), ledgers(), [], []
+        for actor, container in {**OPERATIONS, "findings": "findings"}.items():
+            native.objects[container, "ledger-v1.json"] = json.dumps(
+                documents[actor] | {"schema_version": 1}).encode()
+        report = {"run_id": "suite1", "operation_ids": ["real-run"],
+                  "scenarios": {"comparison": {"operation_id": "real-run"}}}
+        lifecycle = SimpleNamespace(native=native, value={
+            "inventory": ["/subscriptions/s/resourceGroups/g/providers/Microsoft.Storage/storageAccounts/allocated"],
+            "outputs": {"appInventory": [], "gatewayUrl": "https://gateway.example"}},
+            state=SimpleNamespace(save=lambda: saves.append(len(native.requests))),
+            credentials=lambda: {"callerStates": {"operator": "active"},
+                                 "callerKeys": {"operator": {"primary": "operator-only"}}})
+        def provider(request):
+            requests.append(request)
+            self.assertIn("route_context", report["boundary_phase"])
+            self.assertGreaterEqual(saves[-1], 5)
+            return httpx.Response(403, headers={
+                "apim-request-id": "wire-" + str(len(requests)), "x-citadel-denial": "route_denied"})
+        client_type = httpx.AsyncClient
+        with patch("httpx.AsyncClient", lambda **kw: client_type(transport=httpx.MockTransport(provider), **kw)):
+            rows = BoundaryAcceptance(lifecycle).execute(report)
+        self.assertEqual(len(rows), 20)
+        self.assertEqual(len(report["boundary_phase"]["context_reads"]), 5)
+        self.assertIn("review1", report["operation_ids"])
+        self.assertIn("review2", report["operation_ids"])
+        self.assertEqual(len(set(report["operation_ids"])), len(report["operation_ids"]))
+        self.assertEqual(report["boundary_phase"]["state"], "observed")
+        self.assertTrue(all(row["status_code"] == 403 for row in rows))
+        self.assertTrue(all(method == "GET" for method, _, _ in native.requests))
+
+    async def test_operator_matrix_reads_only_own_key_and_actual_owner_task_without_workload_impersonation(self):
+        from citadel.acceptance.origin_harness import operator_routes
+        from citadel.acceptance.route_context import build_route_context
+        from tests.acceptance.test_route_context import ledgers
+        from a2a.types import Task, TaskStatus, TaskState, Artifact, Part
+        from google.protobuf.json_format import MessageToDict
+        import json
+        documents = ledgers()
+        context = build_route_context(documents, run_ids=["real-run"])
+        row = documents["candidate-planner"]["operations"]["operator/invoke/real-run"]
+        requests, reads = [], []
+
+        class OwnKey(dict):
+            def __getitem__(self, key):
+                self_case.assertEqual(key, "operator")
+                return super().__getitem__(key)
+        self_case = self
+        lifecycle = SimpleNamespace(value={"outputs": {"gatewayUrl": "https://gateway.example"}},
+            credentials=lambda: {"callerStates": OwnKey(operator="active"),
+                                 "callerKeys": OwnKey(operator={"primary": "only-operator-key"})})
+
+        def provider(request):
+            requests.append(request)
+            self.assertEqual(request.headers["Ocp-Apim-Subscription-Key"], "only-operator-key")
+            headers = {"apim-request-id": "actual-" + str(len(requests))}
+            if request.url.path == "/candidate-planner/operations/real-run":
+                return httpx.Response(200, headers=headers, json=row)
+            if request.url.path == "/candidate-planner/a2a":
+                self.assertEqual(request.headers["a2a-version"], "1.0")
+                payload = json.loads(request.content)
+                self.assertEqual(payload["method"], "GetTask")
+                task = Task(id="real-run", context_id="real-run",
+                    status=TaskStatus(state=TaskState.TASK_STATE_COMPLETED),
+                    artifacts=[Artifact(artifact_id="real-run", parts=[Part(text=json.dumps(row["product"]))])])
+                return httpx.Response(200, headers=headers,
+                    json={"jsonrpc": "2.0", "id": payload["id"], "result": MessageToDict(task)})
+            if request.url.path == "/candidate-planner/.well-known/agent-card.json":
+                return httpx.Response(200, headers=headers, json={"supportedInterfaces": [{
+                    "url": "https://gateway.example/candidate-planner/a2a",
+                    "protocolBinding": "JSONRPC", "protocolVersion": "1.0"}]})
+            return httpx.Response(403, headers=headers | {"x-citadel-denial": "route_denied"})
+
+        async with httpx.AsyncClient(transport=httpx.MockTransport(provider)) as client:
+            observed = await operator_routes(lifecycle, run_id="suite1", deadline=time.time() + 120,
+                admit=lambda: reads.append(1), client=client, route_context=context)
+        self.assertEqual(len(requests), 20)
+        self.assertEqual(len(reads), 20)
+        self.assertEqual({item.get("actual") for item in observed if item["status_code"] == 200},
+                         {"gateway_card", "owned_status", "owned_task"})
+        self.assertTrue(all(row["caller"] == "operator" and "runtime_identity" not in row for row in observed))
+        self.assertNotIn("only-operator-key", str(observed))
+        self.assertNotIn("private test prose", str(observed))
+
     def test_collected_gateway_controls_are_evaluated_individually_with_observer_evidence(self):
         from tests.acceptance.test_route_oracle import route_proof
         observed, control, snapshots, records, identities, _ = route_proof()

@@ -73,6 +73,28 @@ async def operator_discovery(lifecycle, *, run_id, deadline, admit, client):
     return result
 
 
+async def operator_routes(lifecycle, *, run_id, deadline, admit, client, route_context):
+    from .probes import AGENTS, OperatorProbe
+    if (type(deadline) not in (float, int) or not math.isfinite(deadline)
+            or not time.time() < deadline <= time.time() + 900):
+        raise OperationError("deadline", "Operator matrix requires its bounded deadline")
+    probe = OperatorProbe(lifecycle, client=client, enabled=True, run_id=run_id,
+        deadline=deadline, admit=admit, route_context=route_context)
+    rows = []
+    for target in AGENTS:
+        rows.append(await probe.discovery(target))
+        owner = route_context["operations"][target]["operation_id"]
+        rows.append(await probe.status(target, owner))
+        rows.append(await probe.task(target, owner))
+        if target != "candidate-planner":
+            rows.append(await probe.denied_invocation(target))
+    rows.append(await probe.mcp_initialize())
+    for tool in ("search_airports", "lookup_airport", "list_runways"):
+        rows.append(await probe.reference_tool(tool, ident=None if tool == "search_airports" else "EBAM"))
+    rows.append(await probe.finding(route_context["finding"], route_context["read_scope"]))
+    return rows
+
+
 class BoundaryAcceptance:
     def __init__(self, lifecycle):
         self.lifecycle = lifecycle
@@ -109,6 +131,20 @@ class BoundaryAcceptance:
         previous = getattr(native, "deadline", None)
         native.deadline = min(previous or float("inf"), time.monotonic() + 900)
         try:
+            comparison = report.get("scenarios", {}).get("comparison", {}).get("operation_id")
+            identity(comparison)
+            observed_context = controls.route_context([comparison])
+            phase["route_context"] = observed_context["context"]
+            phase["context_reads"] = observed_context["observations"]
+            phase["ticket_reads"] = observed_context["ticket_reads"]
+            context_ids = [row["operation_id"] for row in [*phase["context_reads"], *phase["ticket_reads"]]]
+            context_ids += [row["operation_id"] for row in phase["route_context"]["operations"].values()]
+            context_ids.extend(row["read_scope"]["operation_id"]
+                               for row in phase["route_context"]["finding_controls"].values())
+            for operation in context_ids:
+                if operation not in report["operation_ids"]:
+                    report["operation_ids"].append(operation)
+            self.lifecycle.state.save()
             driver = RevisionProbe(self.lifecycle, admit=admit)
             for app in self.lifecycle.value["outputs"]["appInventory"]:
                 actor = app["app"].split("/")[-1].removeprefix(self.lifecycle.id + "-")
@@ -137,7 +173,8 @@ class BoundaryAcceptance:
                 report["operation_ids"].append(gateway_run)
                 phase["snapshots"][gateway_run] = {"before": controls.products()}
                 self.lifecycle.state.save()
-                result = driver.execute(app, actor, gateway_run, deadline=phase["deadline"])
+                result = driver.execute(app, actor, gateway_run, deadline=phase["deadline"],
+                                        routes=phase["route_context"])
                 rows = result["observations"]
                 if any(row.get("caller") != actor or row.get("run_id") != gateway_run for row in rows):
                     raise Blocked("gateway_worker_authority_binding_conflict")
@@ -152,10 +189,10 @@ class BoundaryAcceptance:
             self.lifecycle.state.save()
             async def operator():
                 async with httpx.AsyncClient(follow_redirects=False, trust_env=False, timeout=30) as client:
-                    return await operator_discovery(self.lifecycle, run_id=report["run_id"],
-                        deadline=phase["deadline"], admit=admit, client=client)
-            control = asyncio.run(operator())
-            phase["gateway"].extend(retain([control], [control["operation_id"]]))
+                    return await operator_routes(self.lifecycle, run_id=report["run_id"],
+                        deadline=phase["deadline"], admit=admit, client=client, route_context=phase["route_context"])
+            controls_observed = asyncio.run(operator())
+            phase["gateway"].extend(retain(controls_observed, [row["operation_id"] for row in controls_observed]))
             phase["snapshots"][report["run_id"]]["after"] = controls.products()
             phase["state"] = "observed"
         except (AzureError, OperationError, ValueError, TimeoutError, Blocked):
@@ -202,18 +239,32 @@ class BoundaryAcceptance:
         from .route_oracle import READ_CAPABILITIES, evaluate_route
         credential_hashes = {rid.rsplit("/", 1)[-1]: hashlib.sha256(rid.lower().encode()).hexdigest()
                              for rid in subscriptions}
-        for row in phase.get("gateway", []):
+        gateway_rows = list(phase.get("gateway", []))
+        if phase.get("route_context"):
+            from .workflow_routes import status_controls
+            for row in status_controls(evidence, phase["route_context"]):
+                gateway_rows.append(row)
+                for operation in (row["run_id"], row["operation_id"]):
+                    if operation not in report["operation_ids"]:
+                        report["operation_ids"].append(operation)
+        for row in gateway_rows:
             if row.get("check_id", "").split(".")[-1] not in READ_CAPABILITIES:
                 continue
             pair = snapshots.get(row.get("run_id"), {})
+            if row.get("observation_kind") == "workflow":
+                pair = next(iter(snapshots.values()), {})
             evaluations = [(evaluate_route(row, control, pair, evidence, identities=phase["identities"],
-                subscriptions=credential_hashes, observer_identity=observer), control)
-                for control in phase.get("gateway", [])]
+                subscriptions=credential_hashes, observer_identity=observer,
+                route_context=phase.get("route_context"), context_observations=phase.get("context_reads")), control)
+                for control in gateway_rows]
             selected = next((item for item in evaluations if item[0]["status"] == "pass"),
                 next((item for item in evaluations if item[0]["status"] == "fail"), None))
             result, control = selected or ({"check_id": row.get("check_id"), "status": "blocked",
                 "reason": "route_service_control_or_no_effect_proof_missing"}, {})
             result["actual"] = {"observation": row, "control": control,
                 "before": list(pair.get("before", {}).values()), "after": list(pair.get("after", {}).values())}
+            if row.get("check_id", "").split(".")[-1] in ("status", "task", "findings"):
+                result["actual"].update(route_context=phase.get("route_context"),
+                                        context_reads=phase.get("context_reads"))
             output.append(result)
         return output

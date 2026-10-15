@@ -19,7 +19,13 @@ from tests.runtime.test_storage import FixtureCredential
 class WorkerExecutionTests(unittest.IsolatedAsyncioTestCase):
     async def test_gateway_worker_uses_allocated_secret_and_publishes_digest_bound_wire_observations(self):
         from citadel.acceptance.telemetry import configure
+        from citadel.acceptance.route_context import build_route_context
         from citadel.evidence.manifests import sha256
+        from tests.acceptance.test_route_context import ledgers
+        from a2a.types import Task, TaskStatus, TaskState, Artifact, Part
+        from google.protobuf.json_format import MessageToDict
+        documents = ledgers()
+        context = build_route_context(documents, run_ids=["real-run"])
         runtime_tests = str(Path(__file__).resolve().parents[1] / "runtime")
         sys.path.insert(0, runtime_tests)
         try:
@@ -52,6 +58,26 @@ class WorkerExecutionTests(unittest.IsolatedAsyncioTestCase):
             requests.append(request)
             self.assertEqual(request.headers["Ocp-Apim-Subscription-Key"], "fixture-allocated-candidate-key")
             headers = {"apim-request-id": f"{len(requests):032x}"}
+            target = request.url.path.split("/")[1]
+            if target in ("evidence-assessor", "briefing-author") and (
+                    "/operations/" in request.url.path or request.url.path.endswith("/a2a")):
+                reference = context["operations"][target]
+                row = documents[target]["operations"]["candidate-planner/invoke/" + reference["operation_id"]]
+                if request.method == "GET":
+                    return httpx.Response(200, headers=headers, json=row)
+                self.assertEqual(request.headers["a2a-version"], "1.0")
+                payload = json.loads(request.content)
+                self.assertEqual(payload["method"], "GetTask")
+                self.assertEqual(payload["params"], {"id": reference["operation_id"]})
+                task = Task(id=reference["operation_id"], context_id="real-run",
+                    status=TaskStatus(state=TaskState.TASK_STATE_COMPLETED),
+                    artifacts=[Artifact(artifact_id=reference["operation_id"],
+                        parts=[Part(text=json.dumps(row.get("product", row["result"])))])])
+                return httpx.Response(200, headers=headers,
+                                      json={"jsonrpc": "2.0", "id": payload["id"], "result": MessageToDict(task)})
+            if "/findings/" in request.url.path:
+                self.assertEqual(request.headers["x-citadel-read-pool"], "review1")
+                return httpx.Response(200, headers=headers, json=documents["findings"]["findings"]["finding1"]["1"])
             if request.url.path.endswith("agent-card.json") and request.url.path.split("/")[1] in (
                     "evidence-assessor", "briefing-author"):
                 return httpx.Response(200, headers=headers, json={"supportedInterfaces": [{
@@ -71,7 +97,8 @@ class WorkerExecutionTests(unittest.IsolatedAsyncioTestCase):
                     else:
                         content["runways"] = [{"airport_ident": {"parsed": "EBAM"}}]
                     result = {"structuredContent": content}
-                return httpx.Response(200, headers=headers, json={"jsonrpc": "2.0", "result": result})
+                return httpx.Response(200, headers=headers,
+                                      json={"jsonrpc": "2.0", "id": payload["id"], "result": result})
             return httpx.Response(403, headers=headers | {"x-citadel-denial": "route_denied"})
 
         client_type = httpx.AsyncClient
@@ -90,7 +117,8 @@ class WorkerExecutionTests(unittest.IsolatedAsyncioTestCase):
             vault="https://allocated.vault.azure.net", subscription_secret="caller-candidate-planner",
             gateway="https://gateway.example")
         request = {"schema_version": 1, "mode": "gateway-matrix", "workload": config.target,
-            "client_id": config.client_id, "run_id": "gateway-worker", "deadline": time.time() + 120}
+            "client_id": config.client_id, "run_id": "gateway-worker", "deadline": time.time() + 120,
+            "routes": context}
         with (patch.dict(os.environ, {"CITADEL_ACCEPTANCE_ENABLED": "true"}),
               patch("citadel.acceptance.worker.ManagedIdentityCredential", credential),
               patch("citadel.acceptance.worker.ContainerClient",
@@ -104,9 +132,11 @@ class WorkerExecutionTests(unittest.IsolatedAsyncioTestCase):
             observations = await run_gateway_matrix(config, request)
         self.assertEqual(identities, [{"client_id": config.client_id}])
         self.assertEqual(secret_names, ["caller-candidate-planner"])
-        self.assertEqual(len(requests), 10)
+        self.assertEqual(len(requests), 18)
         self.assertTrue(all(options.get("trust_env") is False for options in options_seen))
-        self.assertEqual(len(observations), 10)
+        self.assertEqual(len(observations), 18)
+        self.assertEqual(sum(row.get("actual") in ("owned_status", "owned_task", "exact_finding")
+                             for row in observations), 4)
         self.assertNotIn("/planner-operations/active-run-slot.json", wire.leases)
         self.assertLessEqual(len([key for key in wire.blobs if "/read-tickets/" in key]), 512)
         for row in observations:

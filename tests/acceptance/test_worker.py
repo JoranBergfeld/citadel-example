@@ -1,4 +1,5 @@
 import time
+import copy
 import unittest
 
 from citadel.acceptance.worker import validate_request
@@ -33,6 +34,21 @@ class WorkerTests(unittest.TestCase):
         request = self.request()
         self.assertEqual(validate_request(request, enabled=True, workload=request["workload"],
                                           client_id=request["client_id"]), request)
+
+    def test_gateway_owner_targets_are_bounded_observed_metadata_not_proxy_arguments(self):
+        from citadel.acceptance.route_context import build_route_context
+        from tests.acceptance.test_route_context import ledgers
+        request = self.request() | {"routes": build_route_context(ledgers(), run_ids=["real-run"])}
+        self.assertEqual(validate_request(request, enabled=True, workload=request["workload"],
+                                          client_id=request["client_id"]), request)
+        for mutate in (
+                lambda value: value["routes"].update(credential="forbidden"),
+                lambda value: value["routes"]["read_scope"].update(run_id="different-run"),
+                lambda value: value["routes"]["finding"].update(version=10 ** 3000)):
+            altered = copy.deepcopy(request)
+            mutate(altered)
+            with self.assertRaises(ValueError):
+                validate_request(altered, enabled=True, workload=request["workload"], client_id=request["client_id"])
 
     def test_storage_mode_accepts_only_fixed_disposable_target_bindings(self):
         from citadel.acceptance.coverage import CONTAINERS

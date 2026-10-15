@@ -154,8 +154,12 @@ class GatewayPeers:
                 await self.sleep(15)
 
                 async def status_read():
+                    started = time.time()
                     response = await self.http.get(f"{self.gateway}/{child}/operations/{operation_id}")
                     response.raise_for_status()
+                    from citadel.acceptance.workflow_routes import observe_status
+                    observe_status(response, caller=self.workload, target=child, run_id=payload["run_id"],
+                                   operation_id=parent_id, started=started, finished=time.time())
                     return response.json()
 
                 status = await self.exchange(child, grant["deadline"], status_read)
