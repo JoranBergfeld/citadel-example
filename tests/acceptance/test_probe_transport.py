@@ -43,6 +43,14 @@ class ProbeTransportTests(unittest.IsolatedAsyncioTestCase):
             result = await probe.discovery("release-reviewer")
         self.assertIsNone(result["request_id"])
 
+    async def test_gateway_guid_response_matches_the_signed_backend_context_representation(self):
+        async with httpx.AsyncClient(transport=httpx.MockTransport(lambda request: httpx.Response(
+                403, headers={"apim-request-id": "75A98280-52C1-4D14-A7DA-D01B5445A305"}))) as client:
+            probe = GatewayProbe("candidate-planner", "https://gateway.example", "allocated",
+                                 client=client, enabled=True, run_id="r1")
+            result = await probe.discovery("release-reviewer")
+        self.assertEqual(result["request_id"], "75a9828052c14d14a7dad01b5445a305")
+
     async def test_fixed_purpose_transport_refuses_operator_impersonation_and_arbitrary_targets(self):
         async with httpx.AsyncClient() as client:
             with self.assertRaises(ValueError):

@@ -186,7 +186,13 @@ not `RequestIdHeader`. The former must match the actual response service ID;
 the latter remains a separate physical request binding. Targets are query-free
 URL hashes. That live storage-ID correspondence has not been observed locally.
 Gateway evidence retains a logical caller and a hash of its actual service-scoped
-subscription ID, separately from workload managed-identity hashes.
+subscription ID, separately from workload managed-identity hashes. It uses the
+published `ApimSubscriptionId` column (not a nonexistent `SubscriptionId` or the
+Azure account's `_SubscriptionId`). Actual gateway GUIDs are represented without
+hyphens in both collected records and client observations, matching the signed
+backend context's `context.RequestId.ToString("N")`. No new ID is generated;
+missing response IDs stay missing, and model-provider IDs do not substitute for
+gateway IDs.
 
 Managed-environment diagnostics also enable the documented
 [`ContainerAppHTTPLogs` category](https://learn.microsoft.com/en-us/azure/azure-monitor/reference/supported-logs/microsoft-app-managedenvironments-logs)

@@ -9,7 +9,7 @@ import httpx
 from citadel.gateway.trust import INVOCATION_CALLERS
 from citadel.operations import identity, OperationError
 from citadel.runtime.configuration import endpoint
-from .telemetry import correlate, emit
+from .telemetry import correlate, emit, gateway_request_id
 
 
 AGENTS = ("candidate-planner", "evidence-assessor", "release-reviewer", "briefing-author")
@@ -53,8 +53,7 @@ class GatewayProbe:
                 response = await self.http.request(method, f"{self.gateway}/{target}{path}",
                                                    headers=request_headers, json=payload,
                                                    follow_redirects=False)
-            request_id = (response.headers.get("apim-request-id")
-                          or response.headers.get("x-citadel-gateway-request-id"))
+            request_id = gateway_request_id(response.headers)
             with correlate(self.run_id, operation, self.workload):
                 emit("probe", request_id=request_id, status_code=response.status_code)
             result = {

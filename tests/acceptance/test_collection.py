@@ -102,7 +102,9 @@ class CollectionTests(unittest.TestCase):
 
     def test_gateway_query_preserves_allocated_credential_binding_without_exporting_resource_ids(self):
         query = query_for_window(100, 101)
-        self.assertIn('caller=extract(@"([^/]+)$",1,tostring(SubscriptionId))', query)
+        self.assertIn('caller=extract(@"([^/]+)$",1,tostring(ApimSubscriptionId))', query)
+        self.assertNotIn("tostring(SubscriptionId)", query)
+        self.assertIn("replace_string(tostring(toguid(CorrelationId)),'-','')", query)
         self.assertIn("credential_sha256=hash_sha256(tolower(strcat(_ResourceId,'/subscriptions/',", query)
         provider = QueryFixture()
         provider.query = lambda query, timeout: {"tables": [{

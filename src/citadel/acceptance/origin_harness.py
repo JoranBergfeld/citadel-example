@@ -16,6 +16,7 @@ from .origin_probes import MODES, evaluate_origin
 from .oracle import hash_value
 from .revision import RevisionProbe
 from .storage_probes import StorageControls
+from .telemetry import gateway_request_id
 
 
 def bind_origin_result(result, *, actor, run_id, principal, origin):
@@ -58,7 +59,7 @@ async def operator_discovery(lifecycle, *, run_id, deadline, admit, client):
     response = await planner.exchange(path, deadline, lambda: client.get(planner.gateway + path, headers={
         "x-citadel-run-id": run_id, "x-citadel-operation-id": operation}))
     result.update(finished=time.time(), status_code=response.status_code,
-        request_id=response.headers.get("apim-request-id") or response.headers.get("x-citadel-gateway-request-id"))
+        request_id=gateway_request_id(response.headers))
     if response.status_code == 200:
         try:
             interfaces = response.json()["supportedInterfaces"]

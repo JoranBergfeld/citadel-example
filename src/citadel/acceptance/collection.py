@@ -94,11 +94,12 @@ def query_for_window(started, finished, *, ingress=None):
 let begin=datetime({start}); let end=datetime({end});
 union
 (ApiManagementGatewayLogs | where TimeGenerated between (begin .. end)
- | project source='gateway', request_id=tostring(CorrelationId),
+ | project source='gateway', request_id=iff(isnotnull(toguid(CorrelationId)),
+ replace_string(tostring(toguid(CorrelationId)),'-',''),tostring(CorrelationId)),
  status_code=toint(ResponseCode), runtime_identity='', observed=todouble(datetime_diff('millisecond',TimeGenerated,datetime(1970-01-01)))/1000,
- caller=extract(@"([^/]+)$",1,tostring(SubscriptionId)), method=tostring(Method),
+ caller=extract(@"([^/]+)$",1,tostring(ApimSubscriptionId)), method=tostring(Method),
  credential_sha256=hash_sha256(tolower(strcat(_ResourceId,'/subscriptions/',
- extract(@"([^/]+)$",1,tostring(SubscriptionId)))))),
+ extract(@"([^/]+)$",1,tostring(ApimSubscriptionId)))))),
 (StorageBlobLogs | where TimeGenerated between (begin .. end)
  | project source='storage', request_id=tostring(CorrelationId), client_request_id=tostring(ClientRequestId),
  status_code=toint(StatusCode), runtime_identity=hash_sha256(tolower(tostring(RequesterObjectId))),

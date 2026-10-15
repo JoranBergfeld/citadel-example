@@ -33,6 +33,16 @@ def opaque(value):
     return value
 
 
+def gateway_request_id(headers):
+    value = headers.get("apim-request-id") or headers.get("x-citadel-gateway-request-id")
+    if value is None:
+        return None
+    try:
+        return UUID(value).hex
+    except (ValueError, TypeError, AttributeError):
+        return opaque(value)
+
+
 @contextmanager
 def uncorrelated():
     token = _correlation.set({})

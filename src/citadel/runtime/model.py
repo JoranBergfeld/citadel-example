@@ -11,7 +11,7 @@ from agent_framework_openai import OpenAIChatCompletionClient
 from openai import AsyncOpenAI
 
 from citadel.operations import OperationError
-from citadel.acceptance.telemetry import correlation_headers, emit
+from citadel.acceptance.telemetry import correlation_headers, emit, gateway_request_id
 
 
 INSTRUCTIONS = {
@@ -77,7 +77,7 @@ class GovernedModel:
 
     async def _response(self, response):
         emit("chat.completions",
-             request_id=response.headers.get("apim-request-id") or response.headers.get("x-request-id"),
+             request_id=gateway_request_id(response.headers),
              status_code=response.status_code)
 
     async def explain(self, accounting, budget_id, execution_id, evidence):
