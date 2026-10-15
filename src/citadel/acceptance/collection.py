@@ -10,7 +10,7 @@ from .oracle import SOURCES
 TABLES = {"AppRequests", "AppDependencies", "AppTraces", "StorageBlobLogs",
           "ApiManagementGatewayLogs", "ContainerAppConsoleLogs_CL"}
 ROW_FIELDS = {"source", "request_id", "status_code", "runtime_identity", "observed",
-              "run_id", "operation_id", "caller", "method", "target", "event_id", "facts"}
+              "run_id", "operation_id", "caller", "method", "target", "event_id", "facts", "client_request_id"}
 
 
 def verify_retention(workspace, tables):
@@ -58,23 +58,23 @@ union
  status_code=toint(ResponseCode), runtime_identity='', observed=todouble(datetime_diff('millisecond',TimeGenerated,datetime(1970-01-01)))/1000,
  caller=tostring(SubscriptionId), method=tostring(Method)),
 (StorageBlobLogs | where TimeGenerated between (begin .. end)
- | project source='storage', request_id=tostring(RequestIdHeader),
+ | project source='storage', request_id=tostring(CorrelationId), client_request_id=tostring(ClientRequestId),
  status_code=toint(StatusCode), runtime_identity=hash_sha256(tolower(tostring(RequesterObjectId))),
  observed=todouble(datetime_diff('millisecond',TimeGenerated,datetime(1970-01-01)))/1000,
- method=tostring(OperationName)),
+ method=tostring(OperationName), target=hash_sha256(extract(@"^[^?]+",0,tostring(Uri)))),
 (ContainerAppConsoleLogs_CL | where TimeGenerated between (begin .. end)
  | extend e=parse_json(Log_s) | where e.schema == 'citadel.telemetry.v1'
  | project source='application', request_id=tostring(e.request_id),
  status_code=toint(e.status_code), runtime_identity=tostring(e.runtime_identity),
  observed=todouble(datetime_diff('millisecond',TimeGenerated,datetime(1970-01-01)))/1000,
  run_id=tostring(e.run_id), operation_id=tostring(e.operation_id), caller=tostring(e.caller),
- method=tostring(e.method), event_id=tostring(e.event_id), facts=e.facts)
+ method=tostring(e.method), target=tostring(e.target), event_id=tostring(e.event_id), facts=e.facts)
 | take 100001
 """
 
 
 class Collector:
-    def __init__(self, provider, *, started, finished, clock=time.monotonic, budget_seconds=600):
+    def __init__(self, provider, *, started, finished, clock=time.monotonic, budget_seconds=600, prior=None):
         if (type(started) not in (float, int) or type(finished) not in (float, int)
                 or not math.isfinite(started) or not math.isfinite(finished)
                 or finished < started or type(budget_seconds) not in (int, float)
@@ -84,6 +84,14 @@ class Collector:
         self.deadline = clock() + budget_seconds
         self.query = query_for_window(started, finished)
         self.records = {}
+        if prior is not None:
+            if not isinstance(prior, list) or len(prior) > 100000 or any(not isinstance(r, dict) for r in prior):
+                raise ValueError("Invalid retained evidence")
+            columns = sorted(ROW_FIELDS)
+            normalized = normalize_tables({"tables": [{"columns": [{"name": c} for c in columns],
+                "rows": [[r.get(c) for c in columns] for r in prior]}]})
+            self._merge([{k: v for k, v in record.items() if k in original}
+                         for record, original in zip(normalized, prior)])
 
     def poll(self):
         remaining = self.deadline - self.clock()
@@ -92,15 +100,18 @@ class Collector:
         records = normalize_tables(self.provider.query(self.query, timeout=min(remaining, 120)))
         if self.clock() > self.deadline:
             raise TimeoutError("Evidence returned after collection deadline")
+        self._merge(records)
+        return list(self.records.values())
+
+    def _merge(self, records):
         for record in records:
             key = (record["source"], record["request_id"], record.get("event_id", ""),
-                   record["observed"], record["status_code"])
+                   record["observed"])
             if key in self.records and self.records[key] != record:
                 raise ValueError("Contradictory service evidence")
             self.records[key] = record
         if len(self.records) > 100000:
             raise ValueError("Evidence export bound exceeded")
-        return list(self.records.values())
 
 
 class AzureQuery:

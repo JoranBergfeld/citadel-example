@@ -1,6 +1,6 @@
 import unittest
 
-from citadel.acceptance.collection import Collector, normalize_tables, verify_retention
+from citadel.acceptance.collection import Collector, normalize_tables, verify_retention, query_for_window
 
 
 class QueryFixture:
@@ -46,3 +46,22 @@ class CollectionTests(unittest.TestCase):
         tables[0]["properties"]["plan"] = "Basic"
         self.assertFalse(verify_retention(workspace, tables))
         self.assertFalse(verify_retention(workspace, []))
+
+    def test_resume_keeps_previous_records_and_refuses_contradictory_service_results(self):
+        provider = QueryFixture()
+        first = Collector(provider, started=100, finished=101).poll()
+        resumed = Collector(provider, started=100, finished=101, prior=first, budget_seconds=5)
+        provider.query = lambda query, timeout: {"tables": [{"columns": [
+            {"name": k} for k in first[0]], "rows": []}]}
+        self.assertEqual(resumed.poll(), first)
+        contradictory = first[0] | {"status_code": 200}
+        provider.query = lambda query, timeout: {"tables": [{"columns": [
+            {"name": k} for k in contradictory], "rows": [list(contradictory.values())]}]}
+        with self.assertRaises(ValueError):
+            resumed.poll()
+
+    def test_storage_query_uses_published_fields_without_fabricating_service_ids(self):
+        query = query_for_window(100, 101)
+        self.assertNotIn("RequestIdHeader", query)
+        self.assertIn("request_id=tostring(CorrelationId), client_request_id=tostring(ClientRequestId)", query)
+        self.assertIn('target=hash_sha256(extract(@"^[^?]+",0,tostring(Uri)))', query)

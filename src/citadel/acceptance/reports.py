@@ -17,6 +17,7 @@ required_checks checks scenarios human_reviews product_sha256 semantics_sha256
 supported gaps_visible fictional confirmed_at expected actual business_state reason
 source sources request_id control_request_id caller runtime_identity gateway_identity
 control_identity
+observation control before after target container action etag suite_id client_request_id
 started finished observed status_code control_status before_sha256 after_sha256
 before_count after_count evidence evidence_sha256 artifacts sha256 count version
 software configuration image manifest protocols model inputs limits lifecycle_refs

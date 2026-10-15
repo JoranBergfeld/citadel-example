@@ -52,7 +52,7 @@ class Telemetry:
         self.identity = hashlib.sha256(str(UUID(principal_id)).encode()).hexdigest()
         self.output = output or sys.stdout
 
-    def emit(self, method, *, request_id, status_code, facts=None):
+    def emit(self, method, *, request_id, status_code, facts=None, target=None):
         if method not in METHODS or type(status_code) is not int or not 0 <= status_code <= 599:
             raise ValueError("Invalid telemetry metadata")
         clean = {}
@@ -67,6 +67,10 @@ class Telemetry:
                   "workload": self.workload, "runtime_identity": self.identity,
                   "method": method, "request_id": opaque(request_id) if request_id else "",
                   "status_code": status_code, "facts": clean, **_correlation.get()}
+        if target is not None:
+            if not isinstance(target, str) or not re.fullmatch("[a-f0-9]{64}", target):
+                raise ValueError("Only a hashed service target may enter telemetry")
+            record["target"] = target
         self.output.write(json.dumps(record, sort_keys=True, allow_nan=False) + "\n")
         self.output.flush()
 
@@ -76,9 +80,9 @@ def configure(workload, principal_id):
     _exporter = Telemetry(workload, principal_id)
 
 
-def emit(method, *, request_id=None, status_code=0, facts=None):
+def emit(method, *, request_id=None, status_code=0, facts=None, target=None):
     if _exporter is not None:
-        _exporter.emit(method, request_id=request_id, status_code=status_code, facts=facts)
+        _exporter.emit(method, request_id=request_id, status_code=status_code, facts=facts, target=target)
 
 
 def correlation_headers():
@@ -94,4 +98,5 @@ def storage_response(response):
     method = response.http_request.method
     emit("storage.read" if method in ("GET", "HEAD") else "storage.write",
          request_id=headers.get("x-ms-request-id"),
-         status_code=response.http_response.status_code)
+         status_code=response.http_response.status_code,
+         target=hashlib.sha256(response.http_request.url.split("?", 1)[0].encode()).hexdigest())

@@ -23,7 +23,7 @@ class WorkerTests(unittest.TestCase):
         request = self.request()
         for change in ({"operator_key": "stolen"}, {"url": "https://other.example"},
                        {"deadline": time.time() + 901}, {"deadline": time.time() - 1},
-                       {"mode": "arbitrary-python"}):
+                       {"mode": "arbitrary-python"}, {"schema_version": True}):
             with self.subTest(change=change):
                 with self.assertRaises(ValueError):
                     validate_request(request | change, enabled=True, workload=request["workload"],
@@ -33,3 +33,17 @@ class WorkerTests(unittest.TestCase):
         request = self.request()
         self.assertEqual(validate_request(request, enabled=True, workload=request["workload"],
                                           client_id=request["client_id"]), request)
+
+    def test_storage_mode_accepts_only_fixed_disposable_target_bindings(self):
+        from citadel.acceptance.coverage import CONTAINERS
+        request = self.request() | {"mode": "storage-boundaries",
+            "storage": {"suite_id": "suite1", "targets": {
+                name: {"sha256": "a" * 64, "etag": '"known"'} for name in CONTAINERS}}}
+        self.assertEqual(validate_request(request, enabled=True, workload=request["workload"],
+                                          client_id=request["client_id"]), request)
+        for bad in ({"suite_id": "../other", "targets": request["storage"]["targets"]},
+                    {"suite_id": "suite1", "targets": {}},
+                    request["storage"] | {"credential": "not-allowed"}):
+            with self.assertRaises((ValueError, RuntimeError)):
+                validate_request(request | {"storage": bad}, enabled=True,
+                                 workload=request["workload"], client_id=request["client_id"])

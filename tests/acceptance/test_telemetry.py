@@ -30,3 +30,13 @@ class TelemetryTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             with correlate("run1", "op1", "Bearer private"):
                 pass
+
+    def test_storage_target_is_a_hash_not_a_resource_url(self):
+        output = io.StringIO()
+        telemetry = Telemetry("candidate-planner", "11111111-1111-1111-1111-111111111111",
+                              output=output)
+        telemetry.emit("storage.read", request_id="real", status_code=206, target="a" * 64)
+        self.assertEqual(json.loads(output.getvalue())["target"], "a" * 64)
+        with self.assertRaises(ValueError):
+            telemetry.emit("storage.read", request_id="real", status_code=206,
+                           target="https://allocated.blob.core.windows.net/private")

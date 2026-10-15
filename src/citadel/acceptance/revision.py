@@ -18,10 +18,11 @@ def template(value):
 
 
 class RevisionProbe:
-    def __init__(self, lifecycle, *, sleep=time.sleep, clock=time.time):
+    def __init__(self, lifecycle, *, sleep=time.sleep, clock=time.time, admit=None):
         self.lifecycle, self.sleep, self.clock = lifecycle, sleep, clock
+        self.admit = admit
 
-    def execute(self, app, workload, run_id, *, mode="gateway-matrix"):
+    def execute(self, app, workload, run_id, *, mode="gateway-matrix", storage=None, deadline=None):
         identity(run_id)
         if workload not in AGENTS:
             raise ValueError("Only an allocated, durably admitted workload probe is supported")
@@ -40,8 +41,12 @@ class RevisionProbe:
         if container != OPERATIONS[workload]:
             raise ValueError("Result channel is not allocated to this workload")
         request = {"schema_version": 1, "run_id": run_id, "workload": workload,
-                   "client_id": app["identityClientId"], "deadline": self.clock() + 900,
+                   "client_id": app["identityClientId"], "deadline": min(deadline or float("inf"), self.clock() + 900),
                    "mode": mode}
+        if storage is not None:
+            request["storage"] = storage
+        from .worker import validate_request
+        validate_request(request, enabled=True, workload=workload, client_id=app["identityClientId"])
         replacement = copy.deepcopy(original)
         replacement["containers"][0]["command"] = ["python", "-m", "citadel.acceptance.worker"]
         replacement["containers"][0]["env"] += [
@@ -54,6 +59,8 @@ class RevisionProbe:
         self.lifecycle.state.save()
         native.rest("patch", app["app"], "2025-01-01", {"properties": {"template": replacement}})
         while self.clock() < request["deadline"]:
+            if self.admit is not None:
+                self.admit()
             content = native.blob_read(account, container, f"acceptance/{run_id}/observations.json")
             if content is not None:
                 result = json.loads(content)

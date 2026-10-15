@@ -117,6 +117,10 @@ class Harness:
                 self.save(report)
             if all(run["state"] in ("succeeded", "failed_no_commit")
                    for run in self.lifecycle.value["runs"].values()):
+                from .storage_harness import StorageAcceptance
+                StorageAcceptance(self.lifecycle).execute(report)
+                report["finished"] = time.time()
+                self.save(report)
                 driver = RevisionProbe(self.lifecycle)
                 for app in self.lifecycle.value["outputs"]["appInventory"]:
                     workload = app["app"].split("/")[-1].removeprefix(self.lifecycle.id + "-")
@@ -179,8 +183,11 @@ class Harness:
                       "actual_sampling_exporter_proof_required" if retained else "retention_contract_mismatch")
             collector = Collector(AzureQuery(self.lifecycle.native, details["properties"]["customerId"]),
                                   started=report["started"], finished=report["finished"],
-                                  budget_seconds=end - time.time())
+                                  budget_seconds=end - time.time(), prior=report["evidence"])
             report["evidence"] = collector.poll()
+            from .storage_harness import StorageAcceptance
+            for result in StorageAcceptance.evaluate(report, report["evidence"]):
+                self._replace(report, result)
             # No repeated polling can turn an unimplemented/absent required control into pass.
         except (Blocked, ValueError, TimeoutError):
             self._set(report, "telemetry.application-ingestion", "blocked",

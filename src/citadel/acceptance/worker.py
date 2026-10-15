@@ -15,7 +15,7 @@ from azure.storage.blob.aio import ContainerClient
 
 from citadel.evidence.manifests import canonical_bytes
 from citadel.gateway.trust import INVOCATION_CALLERS
-from citadel.operations import identity
+from citadel.operations import identity, OperationError
 from citadel.runtime.configuration import Configuration
 from citadel.runtime.state import read_scope
 from citadel.runtime.tickets import AzureTicketStore, TicketPool
@@ -24,16 +24,23 @@ from .telemetry import configure, correlate, emit
 
 
 def validate_request(request, *, enabled, workload, client_id):
+    keys = {"schema_version", "run_id", "workload", "client_id", "deadline", "mode"}
+    if isinstance(request, dict) and request.get("mode") == "storage-boundaries":
+        keys.add("storage")
     if (enabled is not True or not isinstance(request, dict)
-            or request.keys() != {"schema_version", "run_id", "workload", "client_id", "deadline", "mode"}
-            or request["schema_version"] != 1 or request["workload"] != workload
+            or request.keys() != keys
+            or type(request["schema_version"]) is not int or request["schema_version"] != 1
+            or request["workload"] != workload
             or workload not in AGENTS or str(UUID(request["client_id"])) != str(UUID(client_id))
-            or request["mode"] not in ("gateway-matrix", "operation-faults")
+            or request["mode"] not in ("gateway-matrix", "operation-faults", "storage-boundaries")
             or request["mode"] == "operation-faults" and workload not in ("candidate-planner", "briefing-author")
             or type(request["deadline"]) not in (float, int) or not math.isfinite(request["deadline"])
             or not time.time() < request["deadline"] <= time.time() + 900):
         raise ValueError("Disabled, unallocated or malformed fixed-purpose probe")
     identity(request["run_id"])
+    if request["mode"] == "storage-boundaries":
+        from .storage_probes import validate_storage_manifest
+        validate_storage_manifest(request["storage"])
     return request
 
 
@@ -67,6 +74,44 @@ async def run_gateway_matrix(config, request):
             if not await store.open_pool(scope, exclusive=config.target == "candidate-planner"):
                 raise ValueError("Existing probe admission cannot be replayed")
             pool = TicketPool(store, scope, 512)
+            if request["mode"] == "storage-boundaries":
+                from .storage_probes import StorageProbe
+                from .coverage import CONTAINERS, STORAGE
+                probe = StorageProbe(account=config.blob, credential=credential,
+                    workload=config.target, principal_id=os.environ["AZURE_PRINCIPAL_ID"],
+                    enabled=True, run_id=request["run_id"],
+                    suite_id=request["storage"]["suite_id"], deadline=request["deadline"],
+                    admit=pool.admit)
+                results = []
+                state = "complete"
+                try:
+                    with read_scope(pool, deadline=request["deadline"]):
+                        for name in CONTAINERS:
+                            for action in ("read", "write"):
+                                target = request["storage"]["targets"][name]
+                                result = await probe.observe(name, action, target)
+                                results.append(result)
+                                await container.get_blob_client(
+                                    scope + "/observations/" + result["operation_id"] + ".json").upload_blob(
+                                        canonical_bytes(result), overwrite=False, timeout=5)
+                                grant = STORAGE[config.target].get(name)
+                                if grant == "write" or action == "read" and grant == "read":
+                                    if (not 200 <= result.get("status_code", 0) < 300
+                                            or action == "read" and result.get("sha256") != target["sha256"]):
+                                        raise OperationError("unavailable", "Known permitted storage control failed")
+                                    if action == "write":
+                                        target = target | {"etag": result["etag"]}
+                                    control = await probe.observe(name, action, target)
+                                    control["control"] = True
+                                    results.append(control)
+                except (OperationError, ValueError):
+                    state = "blocked"
+                await container.get_blob_client(scope + "/observations.json").upload_blob(
+                    canonical_bytes({"schema_version": 1, "run_id": request["run_id"],
+                                     "state": state, "observations": results}), overwrite=False, timeout=5)
+                if config.target == "candidate-planner" and state == "complete":
+                    await store.release_run(scope)
+                return results
             if request["mode"] == "operation-faults":
                 from citadel.operations.blob import AzureBlobLedger
                 from citadel.acceptance.faults import OperationProbes

@@ -36,6 +36,15 @@ rotation retirement and denied-bypass continuation cannot pass through placehold
   in their existing operations container. Candidate Planner also acquires its
   existing active-run slot. Failed probe admissions/results are retained; repair
   is explicit. No new resource, data role, package pin or fixture was introduced.
+- `storage-boundaries` uses the actual Blob SDK and assigned workload MI, before
+  any subscription-secret access. The operator seeds isolated same-container
+  copies of real ledgers; real draft/finding products are prerequisites, never
+  fabricated controls. Each writable workload performs the fixed read/write
+  matrix with independent permitted controls and conditional writes. Operator
+  snapshots verify unchanged content; runtime and storage records must agree on
+  service ID, physical client-request ID, identity, method, target and time.
+  Shared 900-second orchestration and durable 512-ticket envelopes remain bounded.
+  Reference Data execution is still pending the narrow console decision.
 
 ## Evidence and human review
 
@@ -92,6 +101,11 @@ to `ContainerAppConsoleLogs_CL`; the collector queries that table, actual
 tables, mismatched request/identity/window/status correlation and excessive results
 block. Retention checks require the effective 30-day Analytics settings and no
 daily ingestion cutoff.
+Collection merges prior evidence on resume and rejects contradictory records.
+The resource-specific storage table exposes `CorrelationId` and `ClientRequestId`,
+not `RequestIdHeader`. The former must match the actual response service ID;
+the latter remains a separate physical request binding. Targets are query-free
+URL hashes. That live storage-ID correspondence has not been observed locally.
 
 **Console export is supplemental, not the required assigned-MI Application
 Insights exporter.** No SDK exporter exists in the approved application lock:
@@ -107,8 +121,8 @@ effective sampling must be established before any full acceptance.
    requiring additional `opentelemetry-sdk`, `msrest` and `psutil`. It was inspected,
    not selected or installed. Existing approval of the beta A2A adapter does not
    approve another beta or an arbitrary new dependency graph.
-2. Complete actual-identity storage boundaries, known disposable draft/finding
-   controls and no-effect verification, direct-model/origin probes, all route
+2. Execute/verify the implemented storage providers and finish read-only Reference
+   Data execution; complete direct-model/origin probes, all route
    capabilities and credential/certificate/context rotation proof.
 3. Complete all deployed accounting/time boundaries, safe-read retry probes,
    release-response loss, cross-operation release uniqueness, incompatible version
