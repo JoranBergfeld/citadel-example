@@ -62,6 +62,28 @@ class ReleaseHarnessTests(unittest.TestCase):
 
             async def execute(self, request):
                 rows = []
+                if request["mode"] == "draft-versions":
+                    from citadel.acceptance.version_probes import VersionProbes
+                    ledger, operation, started = MemoryLedger(clock=time.time), "versionprobe", time.time()
+                    ref = request["release"]["draft"]
+                    source_draft = await DraftReader(drafts).get_draft(
+                        ref["artifact_id"], ref["version"], ref["sha256"])
+                    actual = await VersionProbes(ledger, reference=data, workload=request["workload"],
+                        enabled=True, run_id=request["run_id"], deadline=request["deadline"]).concurrent_version(
+                            source_draft, operation_id=operation)
+                    check = "fault.concurrent-version-conflict"
+                    rows.append({"check_id": check, "probe_id": check, "run_id": request["run_id"],
+                        "operation_id": operation, "caller": request["workload"],
+                        "runtime_identity": hashlib.sha256(request["client_id"].encode()).hexdigest(), "actual": actual,
+                        "target": hashlib.sha256((account + "/assessor-operations/acceptance/" + request["run_id"]
+                                                  + "/observations/" + operation + ".json").encode()).hexdigest(),
+                        "request_id": "external-version", "status_code": 201,
+                        "started": started, "finished": time.time()})
+                    self.objects["drafts", f"acceptance/{request['run_id']}/drafts/{operation}.json"] = (
+                        canonical_bytes((await ledger.read())[0]))
+                    self.summary = canonical_bytes({"schema_version": 1, "run_id": request["run_id"],
+                                                    "state": "complete", "observations": rows})
+                    return
                 for n, check in enumerate(("fault.dropped-committed-release", "fault.concurrent-exact-draft-release",
                                            "fault.concurrent-different-operation-release", "fault.draft-hash-binding")):
                     ledger, operation, started = MemoryLedger(clock=time.time), "probe" + str(n), time.time()
@@ -85,7 +107,7 @@ class ReleaseHarnessTests(unittest.TestCase):
                                                 "state": "complete", "observations": rows})
 
             def blob_read(self, account, container, name):
-                if container != "reviewer-operations" or not name.endswith("/observations.json"):
+                if container not in ("reviewer-operations", "assessor-operations") or not name.endswith("/observations.json"):
                     raise AssertionError("Wrong reviewer result authority")
                 return self.summary
 
@@ -115,3 +137,20 @@ class ReleaseHarnessTests(unittest.TestCase):
         with self.assertRaises(Blocked):
             ReleaseAcceptance(lifecycle).execute(report)
         self.assertEqual(len(native.dispatches), 1)
+        assessor_app = app | {"app": app["app"].replace("release-reviewer", "evidence-assessor"),
+            "identityClientId": "22222222-2222-2222-2222-222222222222",
+            "identityPrincipalId": "22222222-2222-2222-2222-222222222222"}
+        lifecycle.value["outputs"]["appInventory"] = [assessor_app]
+        native.app["properties"]["template"]["containers"][0]["env"][1]["value"] = "assessor-operations"
+        restored = copy.deepcopy(native.app)
+        ReleaseAcceptance(lifecycle).execute(report, mode="draft-versions")
+        self.assertEqual(report["version_phase"]["state"], "observed")
+        self.assertEqual(len(report["version_phase"]["snapshots"]), 1)
+        self.assertEqual(report["operation_ids"].count("versionprobe-v1"), 1)
+        self.assertEqual(report["operation_ids"].count("versionprobe-a"), 1)
+        self.assertEqual(report["operation_ids"].count("versionprobe-b"), 1)
+        self.assertEqual(native.app, restored)
+        self.assertNotIn("PRIVATE", str(report))
+        with self.assertRaises(Blocked):
+            ReleaseAcceptance(lifecycle).execute(report, mode="draft-versions")
+        self.assertEqual(len(native.dispatches), 2)

@@ -127,8 +127,19 @@ requires its four independently verified, actually executed storage denials.
   bindings, one immutable finding, matching released projection and definitive
   conditional conflicts. Sanitized exports are independently re-evaluated.
   Missing layers or source bindings block; changed business state fails.
-  These four drivers do **not** establish version-conflict, new-version or actual
-  process-restart proof. Those requirements remain blocked pending their drivers.
+  These four reviewer drivers do **not** by themselves establish draft-version
+  contention, immutable multi-version findings or actual process-restart proof.
+- `draft-versions` separately runs as Evidence Assessor, never as Reviewer or
+  Operator. It reads a genuine comparison draft and reference evidence using
+  the assessor's allocated MI/key, then copies its unchanged content into an
+  isolated private draft ledger with fresh control identities. Actual conditional
+  writes race for version two. Exactly one succeeds and the other receives a
+  definitive conflict; version one's exact bytes remain readable and unchanged.
+  Ambiguous responses block instead of being interpreted as expected conflicts.
+  Independent operator reads verify source-content lineage, immutable hashes,
+  exact operation/input/deadline bindings and one version-two winner. This
+  implements `fault.concurrent-version-conflict`; it does not yet prove both
+  versions released as immutable findings or actual process restart.
 - Writable workloads persist one-shot admission and finite 512-ticket read pools
   in their existing operations container. Candidate Planner also acquires its
   existing active-run slot. Failed probe admissions/results are retained; repair

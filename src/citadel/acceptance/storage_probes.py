@@ -259,6 +259,33 @@ class StorageControls:
             raise OperationError("data_integrity", "Isolated release state is malformed") from None
         return record, document
 
+    def version_source(self, run_ids):
+        from .version_oracle import content_hash
+        source = self.release_source(run_ids)
+        record, content = self._read("drafts", "ledger-v1.json")
+        ref = source["release_source"]["draft"]
+        try:
+            document = json.loads(content)
+            draft = document["drafts"][ref["artifact_id"]][str(ref["version"])]
+            if sha256(draft) != ref["sha256"] or draft["run_id"] != source["release_source"]["run_id"]:
+                raise ValueError()
+        except (ValueError, TypeError, KeyError, UnicodeError):
+            raise OperationError("data_integrity", "Observed version source does not match the released reference") from None
+        return source | {"draft_read": record, "content_sha256": content_hash(draft)}
+
+    def version_state(self, run_id, operation_id):
+        record, content = self._read("drafts",
+            f"acceptance/{identity(run_id)}/drafts/{identity(operation_id)}.json")
+        try:
+            document = json.loads(content)
+            if (not isinstance(document, dict) or document.get("schema_version") != 1
+                    or any(not isinstance(document.get(key), dict)
+                           for key in ("operations", "drafts", "findings", "budgets", "runs"))):
+                raise ValueError()
+        except (ValueError, UnicodeError):
+            raise OperationError("data_integrity", "Isolated draft-version state is malformed") from None
+        return record, document
+
     def route_context(self, run_ids):
         from .route_context import build_route_context
         if not isinstance(run_ids, list) or not 0 < len(run_ids) <= 4:

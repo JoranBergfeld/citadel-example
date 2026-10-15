@@ -135,6 +135,9 @@ class Harness:
                 ReleaseAcceptance(self.lifecycle).execute(report)
                 report["finished"] = time.time()
                 self.save(report)
+                ReleaseAcceptance(self.lifecycle).execute(report, mode="draft-versions")
+                report["finished"] = time.time()
+                self.save(report)
                 from .origin_harness import BoundaryAcceptance
                 for observed in BoundaryAcceptance(self.lifecycle).execute(report):
                     if observed.get("check_id") in required_checks():
@@ -201,6 +204,8 @@ class Harness:
                 self._replace(report, result)
             from .release_harness import ReleaseAcceptance
             for result in ReleaseAcceptance.evaluate(report, report["evidence"]):
+                self._replace(report, result)
+            for result in ReleaseAcceptance.evaluate(report, report["evidence"], mode="draft-versions"):
                 self._replace(report, result)
             from .origin_harness import BoundaryAcceptance
             for result in BoundaryAcceptance(self.lifecycle).evaluate(report, report["evidence"]):

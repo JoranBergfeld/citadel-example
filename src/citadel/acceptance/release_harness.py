@@ -13,6 +13,32 @@ from .release_oracle import evaluate_release, release_snapshot
 from .release_probes import RELEASE_CHECKS
 from .revision import RevisionProbe
 from .storage_probes import StorageControls
+from .version_oracle import evaluate_version, version_snapshot
+
+
+def bind_version_result(result, *, run_id, principal, account):
+    if (not isinstance(result, dict) or type(result.get("schema_version")) is not int
+            or result["schema_version"] != 1 or result.get("run_id") != run_id
+            or result.get("state") not in ("complete", "blocked")
+            or not isinstance(result.get("observations"), list) or len(result["observations"]) > 1):
+        raise Blocked("version_worker_result_shape_conflict")
+    if not result["observations"]:
+        if result["state"] == "complete":
+            raise Blocked("version_worker_coverage_conflict")
+        return []
+    row = result["observations"][0]
+    if not isinstance(row, dict) or not isinstance(row.get("actual"), dict):
+        raise Blocked("version_worker_result_shape_conflict")
+    operation = identity(row.get("operation_id"))
+    children = [identity(operation + suffix) for suffix in ("-v1", "-a", "-b")]
+    if (row.get("check_id") != "fault.concurrent-version-conflict" or row.get("probe_id") != row["check_id"]
+            or row.get("run_id") != run_id or row.get("caller") != "evidence-assessor"
+            or row.get("runtime_identity") != principal or row["actual"].get("operation_id") != operation
+            or row["actual"].get("operation_ids") != children
+            or row.get("target") != hashlib.sha256(
+                f"{account}/assessor-operations/acceptance/{run_id}/observations/{operation}.json".encode()).hexdigest()):
+        raise Blocked("version_worker_authority_or_target_conflict")
+    return [operation, *children]
 
 
 def bind_release_result(result, *, run_id, principal, account):
@@ -54,19 +80,23 @@ class ReleaseAcceptance:
     def __init__(self, lifecycle):
         self.lifecycle = lifecycle
 
-    def execute(self, report):
-        if "release_phase" in report:
+    def execute(self, report, *, mode="release-faults"):
+        if mode not in ("release-faults", "draft-versions"):
+            raise ValueError("Only fixed release and draft-version modes are supported")
+        versions = mode == "draft-versions"
+        actor, phase_key = (("evidence-assessor", "version_phase") if versions else ("release-reviewer", "release_phase"))
+        if phase_key in report:
             raise Blocked("release_probe_intent_requires_reconciliation")
         accounts = [resource for resource in self.lifecycle.value["inventory"]
             if "/providers/Microsoft.Storage/storageAccounts/" in resource and "/blobServices/" not in resource]
         apps = [app for app in self.lifecycle.value["outputs"]["appInventory"]
-                if app["app"].rsplit("/", 1)[-1] == self.lifecycle.id + "-release-reviewer"]
+                if app["app"].rsplit("/", 1)[-1] == self.lifecycle.id + "-" + actor]
         comparison = report.get("scenarios", {}).get("comparison", {}).get("operation_id")
         if len(accounts) != 1 or len(apps) != 1 or comparison not in report["operation_ids"]:
             raise Blocked("exact_completed_release_source_and_inventory_required")
         phase = {"state": "dispatching", "deadline": time.time() + 900, "read_attempts": 0,
                  "observations": [], "snapshots": {}}
-        report["release_phase"] = phase
+        report[phase_key] = phase
         self.lifecycle.state.save()
 
         def admit():
@@ -83,22 +113,27 @@ class ReleaseAcceptance:
             account = "https://" + accounts[0].rsplit("/", 1)[-1] + ".blob.core.windows.net"
             principal = hashlib.sha256(str(UUID(app["identityPrincipalId"])).encode()).hexdigest()
             controls = StorageControls(native, account=account, suite_id=report["run_id"], admit=admit)
-            phase["source"] = controls.release_source([comparison])
+            phase["source"] = (controls.version_source if versions else controls.release_source)([comparison])
             phase["before"] = controls.products()
             report["operation_ids"].extend([run_id, phase["source"]["observation"]["operation_id"],
                                            *[row["operation_id"] for row in phase["before"].values()]])
+            if versions:
+                report["operation_ids"].append(phase["source"]["draft_read"]["operation_id"])
             self.lifecycle.state.save()
-            result = RevisionProbe(self.lifecycle, admit=admit).execute(app, "release-reviewer", run_id,
-                mode="release-faults", release=phase["source"]["release_source"], deadline=phase["deadline"])
-            operations = bind_release_result(result, run_id=run_id, principal=principal, account=account)
+            result = RevisionProbe(self.lifecycle, admit=admit).execute(app, actor, run_id,
+                mode=mode, release=phase["source"]["release_source"], deadline=phase["deadline"])
+            operations = (bind_version_result if versions else bind_release_result)(
+                result, run_id=run_id, principal=principal, account=account)
             if set(operations) & set(report["operation_ids"]):
                 raise Blocked("release_probe_identity_reused")
             report["operation_ids"].extend(operations)
             phase["observations"] = result["observations"]
             self.lifecycle.state.save()
             for row in phase["observations"]:
-                snapshot, document = controls.release_state(run_id, row["operation_id"])
-                phase["snapshots"][row["operation_id"]] = snapshot | release_snapshot(document, row["actual"])
+                snapshot, document = (controls.version_state if versions else controls.release_state)(
+                    run_id, row["operation_id"])
+                phase["snapshots"][row["operation_id"]] = snapshot | (
+                    version_snapshot if versions else release_snapshot)(document, row["actual"])
                 report["operation_ids"].append(snapshot["operation_id"])
             phase["after"] = controls.products()
             report["operation_ids"].extend(row["operation_id"] for row in phase["after"].values())
@@ -111,8 +146,12 @@ class ReleaseAcceptance:
             self.lifecycle.state.save()
 
     @staticmethod
-    def evaluate(report, evidence):
-        phase, output = report.get("release_phase", {}), []
+    def evaluate(report, evidence, *, mode="release-faults"):
+        if mode not in ("release-faults", "draft-versions"):
+            raise ValueError("Only fixed release and draft-version modes are supported")
+        versions = mode == "draft-versions"
+        actor = "evidence-assessor" if versions else "release-reviewer"
+        phase, output = report.get("version_phase" if versions else "release_phase", {}), []
         for row in phase.get("observations", []):
             snapshot = phase.get("snapshots", {}).get(row.get("operation_id"), {})
             observers = {record.get("runtime_identity") for record in evidence
@@ -123,11 +162,11 @@ class ReleaseAcceptance:
             observer = next(iter(observers)) if len(observers) == 1 else None
             snapshot = snapshot | {"runtime_identity": observer}
             source = phase.get("source", {})
-            result = evaluate_release(row, snapshot, source,
+            result = (evaluate_version if versions else evaluate_release)(row, snapshot, source,
                 {side: phase.get(side, {}) for side in ("before", "after")}, evidence,
-                runtime_identity=report.get("runtime_identities", {}).get("release-reviewer"),
+                runtime_identity=report.get("runtime_identities", {}).get(actor),
                 reference_identity=report.get("runtime_identities", {}).get("reference-data"),
-                observer_identity=observer, subscription=report.get("subscription_bindings", {}).get("release-reviewer"))
+                observer_identity=observer, subscription=report.get("subscription_bindings", {}).get(actor))
             output.append(result | {"expected": "fault", "actual": {
                 "observation": row, "control": snapshot, "source": source,
                 **{side: list(phase.get(side, {}).values()) for side in ("before", "after")}}})

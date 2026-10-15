@@ -32,7 +32,7 @@ def validate_request(request, *, enabled, workload, client_id):
         keys.add("origin")
     if isinstance(request, dict) and request.get("mode") == "gateway-matrix" and "routes" in request:
         keys.add("routes")
-    if isinstance(request, dict) and request.get("mode") == "release-faults":
+    if isinstance(request, dict) and request.get("mode") in ("release-faults", "draft-versions"):
         keys.add("release")
     if (enabled is not True or not isinstance(request, dict)
             or request.keys() != keys
@@ -40,9 +40,10 @@ def validate_request(request, *, enabled, workload, client_id):
             or request["workload"] != workload
             or workload not in AGENTS or str(UUID(request["client_id"])) != str(UUID(client_id))
             or request["mode"] not in ("gateway-matrix", "operation-faults", "release-faults",
-                                      "storage-boundaries", "origin-boundary")
+                                      "draft-versions", "storage-boundaries", "origin-boundary")
             or request["mode"] == "operation-faults" and workload not in ("candidate-planner", "briefing-author")
             or request["mode"] == "release-faults" and workload != "release-reviewer"
+            or request["mode"] == "draft-versions" and workload != "evidence-assessor"
             or type(request["deadline"]) not in (float, int) or not math.isfinite(request["deadline"])
             or not time.time() < request["deadline"] <= time.time() + 900):
         raise ValueError("Disabled, unallocated or malformed fixed-purpose probe")
@@ -81,7 +82,8 @@ async def publish_operation(container, *, run_id, workload, principal_id, check_
     identity(run_id)
     operation = identity(actual["operation_id"])
     from .release_probes import RELEASE_CHECKS
-    if not (workload == "release-reviewer" and check_id in RELEASE_CHECKS) and (
+    if not (workload == "release-reviewer" and check_id in RELEASE_CHECKS) and not (
+            workload == "evidence-assessor" and check_id == "fault.concurrent-version-conflict") and (
             workload not in ("candidate-planner", "briefing-author") or check_id not in {
             "fault.dropped-committed-write", "fault.pending-incomplete", "fault.fenced-explicit-retry",
             "fault.safe-read-recovery", "fault.safe-read-exhaustion", "fault.deadline-no-late-effect"}):
@@ -113,6 +115,25 @@ async def publish_operation(container, *, run_id, workload, principal_id, check_
                  "business_state": actual.get("state", "incomplete"),
                  "artifact_count": actual.get("artifact_count", 0)})
     return row
+
+
+async def run_draft_version_control(config, request, pool, container, drafts, reference, source, reference_reads):
+    from citadel.operations.blob import AzureBlobLedger
+    from .version_probes import VersionProbes
+    operation, started = uuid4().hex, time.time()
+    if started >= request["deadline"]:
+        raise OperationError("deadline", "Late draft-version initialization refused")
+    with correlate(request["run_id"], operation, config.target):
+        ledger = AzureBlobLedger(drafts.get_blob_client(
+            f"acceptance/{request['run_id']}/drafts/{operation}.json"), control_plane=True)
+        await ledger.initialize()
+        actual = await VersionProbes(ProbeLedger(ledger, pool, request["deadline"]),
+            reference=reference, workload=config.target, enabled=True, run_id=request["run_id"],
+            deadline=request["deadline"]).concurrent_version(source, operation_id=operation)
+        actual["reference_reads"] = reference_reads
+        return await publish_operation(container, run_id=request["run_id"], workload=config.target,
+            principal_id=os.environ["AZURE_PRINCIPAL_ID"], check_id="fault.concurrent-version-conflict",
+            actual=actual, started=started, deadline=request["deadline"])
 
 
 async def run_release_faults(config, request, credential, pool, container):
@@ -159,12 +180,21 @@ async def run_release_faults(config, request, credential, pool, container):
                     async with asyncio.timeout(max(0, min(30, deadline - time.time()))):
                         secret = await vault.get_secret(config.subscription_secret)
                 if not secret.value:
-                    raise ValueError("Allocated reviewer subscription is missing")
+                    raise ValueError("Allocated workload subscription is missing")
                 async with httpx.AsyncClient(timeout=30, follow_redirects=False, trust_env=False,
                         event_hooks={"request": [sent], "response": [received]}) as client:
                     peers = GatewayPeers(config.target, config.gateway, secret.value, http_client=client)
                     reference = await peers.reference(
                         draft["provenance"]["fixture"]["id"], deadline, ident=draft["airport_ident"])
+                if request["mode"] == "draft-versions":
+                    results.append(await run_draft_version_control(
+                        config, request, pool, container, drafts, reference, draft, reference_reads))
+                    async with asyncio.timeout(max(0, min(30, deadline - time.time()))):
+                        await container.get_blob_client(f"acceptance/{run_id}/observations.json").upload_blob(
+                            canonical_bytes({"schema_version": 1, "run_id": run_id,
+                                             "state": "complete", "observations": results}),
+                            overwrite=False, timeout=5)
+                    return results
                 async with ContainerClient(config.blob, "findings", **options) as findings:
                     for check in sorted(RELEASE_CHECKS):
                         operation, started = uuid4().hex, time.time()
@@ -213,7 +243,7 @@ async def run_gateway_matrix(config, request):
             if not await store.open_pool(scope, exclusive=config.target == "candidate-planner"):
                 raise ValueError("Existing probe admission cannot be replayed")
             pool = TicketPool(store, scope, 512)
-            if request["mode"] == "release-faults":
+            if request["mode"] in ("release-faults", "draft-versions"):
                 return await run_release_faults(config, request, credential, pool, container)
             if request["mode"] == "storage-boundaries":
                 from .storage_probes import StorageProbe

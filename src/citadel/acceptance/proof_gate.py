@@ -30,9 +30,11 @@ def evaluate_check(check, report):
                 and observation.get("run_id") == report.get("run_id"))):
         return blocked
     from .release_probes import RELEASE_CHECKS, validate_source
-    if check["check_id"] in RELEASE_CHECKS:
+    if check["check_id"] in RELEASE_CHECKS or check["check_id"] == "fault.concurrent-version-conflict":
         from citadel.operations import OperationError
         from .release_oracle import evaluate_release
+        from .version_oracle import evaluate_version
+        versions = check["check_id"] == "fault.concurrent-version-conflict"
         source = actual.get("source")
         if not isinstance(source, dict) or not isinstance(source.get("observation"), dict):
             return blocked
@@ -42,6 +44,10 @@ def evaluate_check(check, report):
             return blocked
         comparison = report.get("scenarios", {}).get("comparison", {})
         snapshot_rows = [control, source["observation"]]
+        if versions:
+            if not isinstance(source.get("draft_read"), dict):
+                return blocked
+            snapshot_rows.append(source["draft_read"])
         snapshots = {}
         for side in ("before", "after"):
             rows = actual.get(side)
@@ -61,12 +67,14 @@ def evaluate_check(check, report):
                 or any(row.get("suite_id") != report["run_id"] or row.get("caller") != "operator"
                        or row.get("action") != "read" or row.get("operation_id") not in operations
                        for row in snapshot_rows)
-                or control.get("container") != "findings"
+                or control.get("container") != ("drafts" if versions else "findings")
+                or not isinstance(report.get("subscription_bindings"), dict)
                 or not hash_value(observer) or observer in identities.values()):
             return blocked
-        return evaluate_release(observation, control, source, snapshots, records,
-            runtime_identity=identities["release-reviewer"], reference_identity=identities["reference-data"],
-            observer_identity=observer, subscription=report.get("subscription_bindings", {}).get("release-reviewer"))
+        actor = "evidence-assessor" if versions else "release-reviewer"
+        return (evaluate_version if versions else evaluate_release)(observation, control, source, snapshots, records,
+            runtime_identity=identities[actor], reference_identity=identities["reference-data"],
+            observer_identity=observer, subscription=report["subscription_bindings"].get(actor))
     if check["check_id"].startswith("fault."):
         from .operation_oracle import evaluate_operation
         if (control.get("suite_id") != report.get("run_id")
