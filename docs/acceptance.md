@@ -45,7 +45,7 @@ rotation retirement and denied-bypass continuation cannot pass through placehold
   snapshots verify unchanged content; runtime and storage records must agree on
   service ID, physical client-request ID, identity, method, target and time.
   Shared 900-second orchestration and durable 512-ticket envelopes remain bounded.
-  Reference Data execution is still pending the narrow console decision.
+  Reference Data uses the separately approved bounded one-shot console path.
 - `origin-boundary` derives the actual HTTPS origin from the inventoried app's
   ARM response. It sends only protected discovery (or MCP initialization) using
   missing certificates, freshly generated unrelated certificates, or forged
@@ -67,6 +67,20 @@ rotation retirement and denied-bypass continuation cannot pass through placehold
   enable a worker model mode without integrated global admission and working
   APIM controls. Normal delegated model grants have not been expanded to hide
   that missing orchestration.
+- `ConsoleProbe` selects only the inventoried Reference Data app's actual ready
+  revision/replica/container, pinned image and assigned identity. Its CLI 2.91.0
+  process uses a real PTY and the approved console-only ARM `2025-07-01` exception.
+  Private descriptor input keeps target arguments out of the process command line;
+  only one hash-framed result is retained, not raw console output. No template,
+  identity grant, operations container or subscription secret is added.
+- The Reference Data process explicitly requires `--enabled`, validates an
+  immutable bounded manifest, and executes real storage/origin providers under
+  its read-only MI. It has at most 512 attempts and the inherited 900-second
+  deadline. Durable private operator intent precedes dispatch; incomplete,
+  conflicting or ambiguous outcomes cannot automatically replay. The controller
+  charges a conservative 186-request CLI allowance (six pinned requests, each
+  with the underlying client's 30-redirect ceiling) to the existing operator
+  control budget in one local reservation, not Azure prepaid ticket writes.
 
 ## Evidence and human review
 
@@ -170,11 +184,10 @@ complete per-check correlations remain unverified locally.
 4. Connect validated independent service correlations/no-effect proofs to each
    required check. The partial harness intentionally cannot produce a complete
    pass merely because its available probes ran.
-5. Implement the approved bounded Reference Data console path: pinned CLI 2.91.0
-   `containerapp exec`, PTY and its narrow ARM `2025-07-01` exception. All other
-   application deployment/revision APIs remain `2025-01-01`. No write grant,
-   operations container, subscription secret or automatic ambiguous replay is
-   authorized for Reference Data.
+5. Validate the implemented Reference Data console path against deployed services.
+   Its local tests cover a real PTY, the actual Blob/MCP wire, immutable request
+   bindings and no automatic replay. All other application deployment/revision
+   APIs remain `2025-01-01`; no live console connection has run locally.
 
 Fresh deployment, safe repair, manual teardown/residue evidence and actual portal
 plan observation remain operator/task-21 evidence conditions. Ordinary managed

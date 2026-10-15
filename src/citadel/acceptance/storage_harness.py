@@ -59,10 +59,11 @@ class StorageAcceptance:
         report["storage_phase"] = phase
         self.lifecycle.state.save()
 
-        def admit():
-            if phase["read_attempts"] >= 512 or time.time() >= phase["deadline"]:
+        def admit(count=1):
+            if (type(count) is not int or count < 1 or phase["read_attempts"] + count > 512
+                    or time.time() >= phase["deadline"]):
                 raise OperationError("exhausted", "Storage controls exhausted their fixed envelope")
-            phase["read_attempts"] += 1
+            phase["read_attempts"] += count
             self.lifecycle.state.save()
 
         account = "https://" + accounts[0].split("/")[-1] + ".blob.core.windows.net"
@@ -77,8 +78,6 @@ class StorageAcceptance:
             for app in self.lifecycle.value["outputs"]["appInventory"]:
                 actor = app["app"].split("/")[-1].removeprefix(self.lifecycle.id + "-")
                 phase["identities"][actor] = hashlib.sha256(str(UUID(app["identityPrincipalId"])).encode()).hexdigest()
-                if actor == "reference-data":
-                    continue
                 before = controls.snapshot()
                 if any(before[name]["sha256"] != phase["seeds"][name]["sha256"] for name in CONTAINERS):
                     raise Blocked("disposable_storage_target_changed")
@@ -86,7 +85,12 @@ class StorageAcceptance:
                 report["operation_ids"].append(operation)
                 phase["snapshots"][operation] = {"before": before}
                 self.lifecycle.state.save()
-                result = driver.execute(app, actor, operation, mode="storage-boundaries",
+                if actor == "reference-data":
+                    from .console import ConsoleProbe
+                    selected = ConsoleProbe(self.lifecycle, admit=admit)
+                else:
+                    selected = driver
+                result = selected.execute(app, actor, operation, mode="storage-boundaries",
                     deadline=phase["deadline"], storage={"suite_id": report["run_id"], "targets": {
                         name: {"sha256": before[name]["sha256"], "etag": before[name]["etag"]}
                         for name in CONTAINERS}})

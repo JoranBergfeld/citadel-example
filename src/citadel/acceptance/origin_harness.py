@@ -87,10 +87,11 @@ class BoundaryAcceptance:
         report["boundary_phase"] = phase
         self.lifecycle.state.save()
 
-        def admit():
-            if phase["read_attempts"] >= 512 or time.time() >= phase["deadline"]:
+        def admit(count=1):
+            if (type(count) is not int or count < 1 or phase["read_attempts"] + count > 512
+                    or time.time() >= phase["deadline"]):
                 raise OperationError("exhausted", "Boundary control envelope exhausted")
-            phase["read_attempts"] += 1
+            phase["read_attempts"] += count
             self.lifecycle.state.save()
 
         def retain(rows, operations):
@@ -111,13 +112,16 @@ class BoundaryAcceptance:
                 actor = app["app"].split("/")[-1].removeprefix(self.lifecycle.id + "-")
                 principal = hashlib.sha256(str(UUID(app["identityPrincipalId"])).encode()).hexdigest()
                 phase["identities"][actor] = principal
-                if actor == "reference-data":
-                    continue
                 origin_run = uuid4().hex
                 report["operation_ids"].append(origin_run)
                 phase["snapshots"][origin_run] = {"before": controls.products()}
                 self.lifecycle.state.save()
-                result = driver.execute(app, actor, origin_run, mode="origin-boundary", deadline=phase["deadline"])
+                if actor == "reference-data":
+                    from .console import ConsoleProbe
+                    selected = ConsoleProbe(self.lifecycle, admit=admit)
+                else:
+                    selected = driver
+                result = selected.execute(app, actor, origin_run, mode="origin-boundary", deadline=phase["deadline"])
                 operations = bind_origin_result(result, actor=actor, run_id=origin_run, principal=principal,
                     origin=self.lifecycle.value["probe_intents"][origin_run]["origin"])
                 phase["origins"].extend(retain(result["observations"], operations))
@@ -125,6 +129,8 @@ class BoundaryAcceptance:
                 self.lifecycle.state.save()
                 if result["state"] != "complete":
                     raise Blocked("origin_worker_partial_requires_reconciliation")
+                if actor == "reference-data":
+                    continue
                 gateway_run = uuid4().hex
                 report["operation_ids"].append(gateway_run)
                 self.lifecycle.state.save()
