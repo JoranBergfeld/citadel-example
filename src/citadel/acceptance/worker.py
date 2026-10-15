@@ -20,7 +20,7 @@ from citadel.runtime.configuration import Configuration
 from citadel.runtime.state import read_scope
 from citadel.runtime.tickets import AzureTicketStore, TicketPool
 from .probes import AGENTS, GatewayProbe
-from .telemetry import configure, correlate, emit
+from .telemetry import correlate, emit
 
 
 def validate_request(request, *, enabled, workload, client_id):
@@ -66,7 +66,6 @@ async def run_gateway_matrix(config, request):
     """No supplied credentials, identity substitution, developer fallback or raw URL."""
     validate_request(request, enabled=os.environ.get("CITADEL_ACCEPTANCE_ENABLED") == "true",
                      workload=config.target, client_id=config.client_id)
-    configure(config.target, os.environ["AZURE_PRINCIPAL_ID"])
     async with ManagedIdentityCredential(client_id=config.client_id) as credential:
         async with ContainerClient(config.blob, config.operations_container, credential=credential,
                 api_version="2026-10-06", retry_total=0, retry_connect=0, retry_read=0, retry_status=0,

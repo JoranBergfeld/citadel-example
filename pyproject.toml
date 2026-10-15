@@ -28,6 +28,8 @@ dependencies = [
     "aiohttp==3.14.3",
     "azure-keyvault-secrets==4.11.3",
     "cryptography==50.0.2",
+    "azure-monitor-opentelemetry-exporter==1.0.0b58",
+    "opentelemetry-sdk==1.45.1",
 ]
 
 [dependency-groups]
@@ -36,6 +38,13 @@ build = ["uv_build==0.12.21"]
 [tool.uv]
 required-version = "==0.12.21"
 environments = ["sys_platform == 'linux' and platform_machine == 'x86_64'"]
+constraint-dependencies = [
+    "msrest==0.7.1",
+    "oauthlib==4.0.0",
+    "opentelemetry-semantic-conventions==0.66b1",
+    "psutil==7.2.2",
+    "requests-oauthlib==2.0.0",
+]
 
 [tool.uv.build-backend]
 module-name = "citadel"

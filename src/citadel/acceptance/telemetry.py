@@ -1,4 +1,4 @@
-"""Payload-free application records for the existing ACA Azure Monitor exporter.
+"""Payload-free application records for assigned-MI Azure Monitor delivery.
 
 Writing a record is not delivery proof. Only the collector's cloud query may
 establish ingestion; lost or missing records block acceptance.
@@ -55,12 +55,13 @@ def correlate(run_id, operation_id, caller):
 
 
 class Telemetry:
-    def __init__(self, workload, principal_id, *, output=None):
+    def __init__(self, workload, principal_id, *, output=None, exporter=None):
         if workload not in ACTORS - {"operator"}:
             raise ValueError("Unknown runtime")
         self.workload = workload
         self.identity = hashlib.sha256(str(UUID(principal_id)).encode()).hexdigest()
         self.output = output or sys.stdout
+        self.exporter = exporter
 
     def emit(self, method, *, request_id, status_code, facts=None, target=None):
         if method not in METHODS or type(status_code) is not int or not 0 <= status_code <= 599:
@@ -83,11 +84,17 @@ class Telemetry:
             record["target"] = target
         self.output.write(json.dumps(record, sort_keys=True, allow_nan=False) + "\n")
         self.output.flush()
+        if self.exporter is not None:
+            self.exporter.emit(record)
 
 
-def configure(workload, principal_id):
+def configure(workload, principal_id, *, client_id, connection_string):
     global _exporter
-    _exporter = Telemetry(workload, principal_id)
+    from .monitor import MonitorExporter
+    exporter = MonitorExporter(workload, client_id=client_id, principal_id=principal_id,
+                               connection_string=connection_string)
+    _exporter = Telemetry(workload, principal_id, exporter=exporter)
+    return exporter
 
 
 def emit(method, *, request_id=None, status_code=0, facts=None, target=None):

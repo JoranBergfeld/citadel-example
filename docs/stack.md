@@ -93,6 +93,17 @@ offline path does not claim that network fault was repaired.
 Record the local image ID and config digest after building. They are not
 evidence of a pushed registry image or of the five application-image builds.
 
+### Approved acceptance exporter addition
+
+The acceptance exporter adds exactly seven packages: Azure Monitor OpenTelemetry
+exporter `1.0.0b58`, OpenTelemetry SDK `1.45.1`, semantic conventions `0.66b1`,
+msrest `0.7.1`, oauthlib `4.0.0`, psutil `7.2.2`, and requests-oauthlib `2.0.0`.
+All 75 pre-existing registry versions, including the build backend, are unchanged.
+The runtime wheelhouse consequently contains 81 hash-verified wheels. This
+specific prerelease graph is approved; it does not authorize unrelated upgrades.
+The SDK uses the inspected `v2.1` ingestion API; local import/wire tests and wheel
+hash verification are not cloud delivery proof.
+
 ## What the tests prove
 
 - The exact CPython release and real imports of all selected distributions.

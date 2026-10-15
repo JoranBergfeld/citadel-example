@@ -38,6 +38,7 @@ mcp_transport = "Streamable HTTP"
 model_path = "/openai/v1/chat/completions"
 blob_data_api = "2026-10-06"
 key_vault_data_api = "2025-07-01"
+monitor_ingestion_api = "v2.1"
 
 [model]
 name = "gpt-4.1-mini"

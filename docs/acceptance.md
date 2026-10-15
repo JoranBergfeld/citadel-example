@@ -137,20 +137,29 @@ URL hashes. That live storage-ID correspondence has not been observed locally.
 Gateway evidence retains a logical caller and a hash of its actual service-scoped
 subscription ID, separately from workload managed-identity hashes.
 
-**Console export is supplemental, not the required assigned-MI Application
-Insights exporter.** No SDK exporter exists in the approved application lock:
-`opentelemetry-api` alone cannot export. The required ingestion/sampling proof
-therefore remains blocked. No local stdout fixture or diagnostic setting can
-substitute for that proof. Actual exporter delivery, all sender/query authority and
-effective sampling must be established before any full acceptance.
+**Console export is supplemental, not assigned-MI Application Insights proof.**
+The approved official `azure-monitor-opentelemetry-exporter==1.0.0b58` now runs
+under the hosting workload's explicitly selected synchronous managed identity.
+It sends only sanitized metadata to the configured regional `/v2.1/track` endpoint
+using `https://monitor.azure.com//.default`. All pre-existing dependency versions
+were retained; exactly seven approved packages were added and hash-locked.
+
+The exporter has no trace-based sampling, client-side drop cap, automatic
+instrumentation, offline spool, Statsbeat, SDKStats or OneSettings channel.
+Its bounded queue holds 4,096 records (4 KiB maximum each), with at most 128 per
+batch. Overflow, rejected/partial acknowledgements, exceptions and unfinished
+delivery remain visible counters; failed batches are not replayed. SDK raw
+exception/body logging is suppressed. The normal hosting lifecycle owns one
+exporter and a bounded shutdown drain; workers do not create duplicate exporters.
+Acknowledgements include only actual response IDs/status and never claim queried
+ingestion. Actual cloud delivery, sender/query authority, effective sampling and
+complete per-check correlations remain unverified locally.
 
 ## Remaining implementation gates
 
-1. Select an approved exact assigned-MI exporter/ingestion protocol. Public PyPI
-   inspection found `azure-monitor-opentelemetry-exporter==1.0.0b58` is a **beta**,
-   requiring additional `opentelemetry-sdk`, `msrest` and `psutil`. It was inspected,
-   not selected or installed. Existing approval of the beta A2A adapter does not
-   approve another beta or an arbitrary new dependency graph.
+1. Finish complete telemetry health/count proof evaluation and deployed validation
+   of the approved exporter. Dependency approval is settled; no existing pin was
+   changed and no cloud delivery is inferred from local SDK wire tests.
 2. Execute/verify the implemented storage/origin providers and finish read-only
    Reference Data execution; establish pre-application ingress-denial evidence,
    and complete direct-model probes, all route
@@ -161,10 +170,11 @@ effective sampling must be established before any full acceptance.
 4. Connect validated independent service correlations/no-effect proofs to each
    required check. The partial harness intentionally cannot produce a complete
    pass merely because its available probes ran.
-5. Resolve one-shot execution for the read-only Reference Data identity without
-   granting write authority. Pinned CLI `containerapp exec` exists, but its
-   implementation uses a TTY and ARM `2025-07-01`; the approved application ARM
-   matrix uses `2025-01-01`. No console/API exception or broad proxy was introduced.
+5. Implement the approved bounded Reference Data console path: pinned CLI 2.91.0
+   `containerapp exec`, PTY and its narrow ARM `2025-07-01` exception. All other
+   application deployment/revision APIs remain `2025-01-01`. No write grant,
+   operations container, subscription secret or automatic ambiguous replay is
+   authorized for Reference Data.
 
 Fresh deployment, safe repair, manual teardown/residue evidence and actual portal
 plan observation remain operator/task-21 evidence conditions. Ordinary managed
