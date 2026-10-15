@@ -11,7 +11,7 @@ from uuid import UUID, uuid4
 from citadel.evidence import ReferenceData
 from citadel.evidence.manifests import sha256
 from citadel.operator.state import Blocked, ROOT, read_private, source_fingerprint
-from .collection import AzureQuery, Collector, verify_retention
+from .collection import AzureQuery, Collector, collection_remaining, verify_retention
 from .coverage import required_checks
 from .reports import acceptance_status, automated_status, confirm_narrative, export_report, report_directory
 from .scenarios import FIXTURES, evaluate_scenario
@@ -162,7 +162,8 @@ class Harness:
                      if "/Microsoft.OperationalInsights/workspaces/" in rid and "/tables/" not in rid]
         if len(workspace) != 1:
             raise Blocked("exact_acceptance_workspace_required")
-        end = report.setdefault("collection_deadline", time.time() + 600)
+        end = report.setdefault("collection_deadline",
+                                time.time() + collection_remaining(report, time.time()))
         remaining = end - time.time()
         self.lifecycle.state.save()
         if remaining <= 0:
@@ -209,11 +210,13 @@ def run(*, lifecycle, check_id, run_id):
         return harness.start(run_id)
     if check_id == "collect-evidence":
         return harness.collect(run_id)
+    if check_id == "denied-bypass-controls":
+        from .bypass import BypassControls
+        return BypassControls(lifecycle, export=lambda report: export_report(
+            harness.directory, report)).run(run_id, fingerprints=fingerprints(lifecycle))
     # These hooks cannot authorize retirement/continuation using route discovery,
     # a local contract fixture, or the operator's broader storage credentials.
-    obligations = (["storage.candidate-planner.drafts.read", "storage.candidate-planner.findings.write",
-                    "storage.briefing-author.drafts.read", "storage.briefing-author.findings.write"]
-                   if check_id == "denied-bypass-controls" else [check_id])
+    obligations = [check_id]
     report = {"schema_version": 1, "run_id": run_id, "mode": "cloud", **fingerprints(lifecycle),
               "acceptance": "blocked", "required_checks": obligations,
               "checks": [{"check_id": key, "status": "blocked",

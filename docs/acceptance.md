@@ -3,7 +3,8 @@
 **Task 20 is not complete. Do not start task 21 or claim cloud acceptance from
 the local tests.** The required coverage catalogue deliberately includes checks
 whose deployed drivers/proofs are still absent. Such checks remain `blocked`;
-rotation retirement and denied-bypass continuation cannot pass through placeholders.
+rotation retirement cannot pass through placeholders. Denied-bypass continuation
+requires its four independently verified, actually executed storage denials.
 
 ## Implemented public boundaries
 
@@ -14,6 +15,17 @@ rotation retirement and denied-bypass continuation cannot pass through placehold
   The independent semantic oracle compares the immutable source, labelled fixture,
   exact ordered candidates, assessments, released-version/hash shapes and caveats.
   It rejects fabricated completed briefs for pool exhaustion.
+- `denied-bypass-controls` executes the actual storage providers and their permitted
+  controls. It independently re-evaluates both planning identities' private-draft
+  reads and finding overwrites, including unchanged targets and queried application/
+  storage correlations. Only then can the existing `demo --scenario denied-bypass`
+  dispatch a separate normal APIM collaboration. Genuine prior draft/finding
+  products are required; on a fresh deployment run `comparison` first rather than
+  seed fabricated artifacts. Interrupted/ambiguous probes are never resubmitted.
+  Missing telemetry is polled at most forty times, fifteen seconds apart, within
+  the persisted collection deadline. A full suite shares one total 600-second
+  outstanding-telemetry allowance with these embedded controls; collection windows
+  survive interruption. A passing four-control report is not full acceptance.
 - `GatewayProbe` uses real HTTPX requests with the executing agent's allocated
   subscription. Discovery, forbidden `SendMessage`, `GetTask`, owner-status, exact
   finding reads, MCP initialization and the three reference tools are fixed-purpose
@@ -35,7 +47,7 @@ rotation retirement and denied-bypass continuation cannot pass through placehold
 - Writable workloads persist one-shot admission and finite 512-ticket read pools
   in their existing operations container. Candidate Planner also acquires its
   existing active-run slot. Failed probe admissions/results are retained; repair
-  is explicit. No new resource, data role, package pin or fixture was introduced.
+  is explicit. These probes add no resource, data role or fixture.
 - `storage-boundaries` uses the actual Blob SDK and assigned workload MI, before
   the worker's subscription-secret branch. Normal application hosting still
   initializes its allocated runtime. The operator seeds isolated same-container
@@ -174,7 +186,7 @@ complete per-check correlations remain unverified locally.
 1. Finish complete telemetry health/count proof evaluation and deployed validation
    of the approved exporter. Dependency approval is settled; no existing pin was
    changed and no cloud delivery is inferred from local SDK wire tests.
-2. Execute/verify the implemented storage/origin providers and finish read-only
+2. Execute/verify the implemented storage/origin providers and read-only
    Reference Data execution; establish pre-application ingress-denial evidence,
    and complete direct-model probes, all route
    capabilities and credential/certificate/context rotation proof.

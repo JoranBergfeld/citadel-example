@@ -14,6 +14,24 @@ ROW_FIELDS = {"source", "request_id", "status_code", "runtime_identity", "observ
               "client_request_id", "credential_sha256"}
 
 
+def collection_remaining(report, now):
+    windows = report.get("collection_windows", {})
+    if not isinstance(windows, dict):
+        raise ValueError("Malformed collection windows")
+    spent = 0
+    for window in windows.values():
+        if not isinstance(window, dict):
+            raise ValueError("Malformed collection window")
+        start, finish = window.get("started"), window.get("finished")
+        finish = now if finish is None else finish
+        if (any(type(value) not in (int, float) or not math.isfinite(value)
+                for value in (start, finish, now))
+                or not start <= finish <= now):
+            raise ValueError("Invalid collection window")
+        spent += finish - start
+    return max(0, 600 - spent)
+
+
 def verify_retention(workspace, tables):
     if (workspace.get("retentionInDays") != 30 or
             workspace.get("workspaceCapping", {}).get("dailyQuotaGb") != -1):

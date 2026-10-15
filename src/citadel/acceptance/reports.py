@@ -12,7 +12,7 @@ from .oracle import hash_value
 
 
 FIELDS = frozenset("""
-schema_version run_id operation_id operation_ids check_id status mode fingerprint
+schema_version run_id operation_id operation_ids check_id status mode fingerprint scope
 required_checks checks scenarios human_reviews product_sha256 semantics_sha256
 supported gaps_visible fictional confirmed_at expected actual business_state reason
 source sources request_id control_request_id caller runtime_identity gateway_identity
@@ -25,12 +25,13 @@ before_count after_count evidence evidence_sha256 artifacts sha256 count version
 software configuration image manifest protocols model inputs limits lifecycle_refs
 acceptance automated_status human_status coverage optional_not_exercised
 collection_deadline
+collection_windows collection_attempts last_collection
 runtime_identities subscription_bindings credential_sha256
 name region sku version_upgrade_option verification a2a a2a_binding mcp mcp_transport
 model_path blob_data_api key_vault_data_api
 """.split())
 DYNAMIC = {"scenarios", "human_reviews", "limits", "protocols", "inputs", "lifecycle_refs",
-           "runtime_identities", "subscription_bindings"}
+           "runtime_identities", "subscription_bindings", "collection_windows"}
 
 
 def sanitize(value, *, dynamic=False):
