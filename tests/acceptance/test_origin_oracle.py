@@ -59,3 +59,25 @@ class OriginOracleTests(unittest.TestCase):
         for altered in (observed | {"caller": []}, observed | {"operation_id": None}):
             self.assertEqual(self.evaluate(altered, control, snapshots, evidence)["status"], "blocked")
         self.assertEqual(self.evaluate(observed, control | {"caller": []}, snapshots, evidence)["status"], "blocked")
+
+    def test_preapplication_denial_needs_recognized_ingress_reason_zero_upstream_and_all_controls(self):
+        observed, control, snapshots, evidence = self.fixture()
+        evidence[1] = {"source": "ingress", "method": "GET", "observed": 100.5,
+            "request_id": observed["request_id"], "status_code": 403, "runtime_identity": "",
+            "target": observed["target"],
+            "facts": {"reason": "ingress_rbac_denied", "upstream_attempts": 0}}
+        self.assertEqual(self.evaluate(observed, control, snapshots, evidence)["status"], "pass")
+        for changes in (
+                {"target": "f" * 64}, {"request_id": "unrelated-platform-request"}, {"observed": 110},
+                {"method": "POST"}, {"facts": {"reason": "direct_response", "upstream_attempts": 0}},
+                {"facts": {"reason": "ingress_rbac_denied", "upstream_attempts": 1}},
+                {"facts": {"reason": "ingress_rbac_denied", "upstream_attempts": None}},
+                {"facts": {"reason": "ingress_rbac_denied", "upstream_attempts": False}}):
+            altered = copy.deepcopy(evidence)
+            altered[1].update(changes)
+            with self.subTest(changes=changes):
+                self.assertEqual(self.evaluate(observed, control, snapshots, altered)["status"], "blocked")
+        for index in range(len(evidence)):
+            with self.subTest(missing=index):
+                self.assertEqual(self.evaluate(observed, control, snapshots,
+                    evidence[:index] + evidence[index + 1:])["status"], "blocked")

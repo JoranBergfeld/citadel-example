@@ -80,6 +80,17 @@ class OriginProbeTests(unittest.IsolatedAsyncioTestCase):
             await probe.observe("missing-certificate")
         self.assertEqual(self.requests, [])
 
+    async def test_ingress_response_id_is_observed_not_supplied_by_the_probe(self):
+        def client(**options):
+            async def handler(request):
+                self.requests.append(request)
+                return httpx.Response(403, headers={"x-request-id": "actual-ingress-generated-id"})
+            return httpx.AsyncClient(transport=httpx.MockTransport(handler), **options)
+
+        result = await self.probe(client_factory=client).observe("missing-certificate")
+        self.assertEqual(result.get("request_id"), "actual-ingress-generated-id")
+        self.assertNotIn("x-request-id", self.requests[0].headers)
+
     async def test_unrelated_certificate_files_are_private_and_removed_from_a_fresh_working_directory(self):
         previous = Path.cwd()
         root = previous / ".build" / ("cold-origin-" + uuid4().hex)

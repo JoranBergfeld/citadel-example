@@ -88,6 +88,15 @@ requires its four independently verified, actually executed storage denials.
   actual client/server correlation, authorized APIM/application controls and
   unchanged independently observed business products. Transport failures and
   missing ingress request IDs remain inconclusive, never passing denials.
+  - Pre-application origin rejection can instead correlate actual
+    `ContainerAppHTTPLogs` ingress evidence. The probe captures the returned
+    `x-request-id` without supplying that header. Queries restrict ingress rows to
+    observed IDs, hashed destinations and individual measured windows (at most
+    30 seconds, with five-second correlation tolerance). A documented Envoy RBAC
+    denial and zero upstream attempts are required, together with the actual
+    workload's probe trace, working APIM control and independent unchanged products.
+    Generic `direct_response`, TLS errors, missing counters and ordinary 403s
+    cannot pass. No platform identity is invented for the ingress record.
 - `DirectModelProbe` has a tested actual-MI, one-shot HTTPX2 provider using the
   cognitive-services token scope, fixed v1 inference path, bounded nonprivate
   prompt and 2,000-output-token maximum. It exports no token or response prose.
@@ -179,6 +188,19 @@ URL hashes. That live storage-ID correspondence has not been observed locally.
 Gateway evidence retains a logical caller and a hash of its actual service-scoped
 subscription ID, separately from workload managed-identity hashes.
 
+Managed-environment diagnostics also enable the documented
+[`ContainerAppHTTPLogs` category](https://learn.microsoft.com/en-us/azure/azure-monitor/reference/supported-logs/microsoft-app-managedenvironments-logs)
+using the existing diagnostic-settings API and workspace, with 30-day Analytics
+retention. The [published ingress schema](https://learn.microsoft.com/en-us/azure/container-apps/log-monitoring)
+supplies response `RequestId`, `StartTime`, `ResponseCodeDetails` and
+`UpstreamRequestAttemptCount`. Only the
+[documented RBAC denial detail](https://www.envoyproxy.io/docs/envoy/latest/configuration/http/http_filters/rbac_filter)
+is recognized as ingress authorization evidence; no certificate-specific Azure
+reason is assumed. Reports omit raw authority/path/query, client addresses,
+user agents and policy names. The category's availability, effective table
+mapping and actual rejection detail remain deployed-validation gates; a
+missing table fails the real query rather than falling back to console output.
+
 **Console export is supplemental, not assigned-MI Application Insights proof.**
 The approved official `azure-monitor-opentelemetry-exporter==1.0.0b58` now runs
 under the hosting workload's explicitly selected synchronous managed identity.
@@ -203,7 +225,7 @@ complete per-check correlations remain unverified locally.
    of the approved exporter. Dependency approval is settled; no existing pin was
    changed and no cloud delivery is inferred from local SDK wire tests.
 2. Execute/verify the implemented storage/origin providers and read-only
-   Reference Data execution; establish pre-application ingress-denial evidence,
+   Reference Data execution; observe the implemented pre-application ingress evidence path,
    and complete direct-model probes, all route
    capabilities and credential/certificate/context rotation proof.
 3. Complete all remaining deployed accounting/time boundaries,

@@ -41,8 +41,9 @@ class CollectionTests(unittest.TestCase):
         tables = [{"name": name, "properties": {"plan": "Analytics", "retentionInDays": 30,
                                                 "totalRetentionInDays": 30}}
                   for name in ("AppRequests", "AppDependencies", "AppTraces", "StorageBlobLogs",
-                               "ApiManagementGatewayLogs", "ContainerAppConsoleLogs_CL")]
+                               "ApiManagementGatewayLogs", "ContainerAppConsoleLogs_CL", "ContainerAppHTTPLogs")]
         self.assertTrue(verify_retention(workspace, tables))
+        self.assertFalse(verify_retention(workspace, tables[:-1]))
         tables[0]["properties"]["plan"] = "Basic"
         self.assertFalse(verify_retention(workspace, tables))
         self.assertFalse(verify_retention(workspace, []))
@@ -65,6 +66,23 @@ class CollectionTests(unittest.TestCase):
         self.assertNotIn("RequestIdHeader", query)
         self.assertIn("request_id=tostring(CorrelationId), client_request_id=tostring(ClientRequestId)", query)
         self.assertIn('target=hash_sha256(extract(@"^[^?]+",0,tostring(Uri)))', query)
+
+    def test_ingress_queries_only_observed_service_ids_targets_and_individual_windows(self):
+        query = query_for_window(90, 110, ingress=[{
+            "request_id": "actual-ingress-id", "target": "a" * 64, "started": 100, "finished": 101}])
+        self.assertIn("ContainerAppHTTPLogs", query)
+        self.assertIn("request_id == 'actual-ingress-id'", query)
+        self.assertIn("target == '" + "a" * 64 + "'", query)
+        self.assertIn("UpstreamRequestAttemptCount", query)
+        self.assertIn("ResponseCodeDetails", query)
+        self.assertNotIn("XForwardedFor", query)
+        self.assertNotIn("UserAgent", query)
+        self.assertIn("where false", query_for_window(90, 110))
+        for row in ({"request_id": "x' | take 99", "target": "a" * 64, "started": 100, "finished": 101},
+                    {"request_id": "actual-id", "target": "not-a-hash", "started": 100, "finished": 101},
+                    {"request_id": "actual-id", "target": "a" * 64, "started": 100, "finished": 1001}):
+            with self.subTest(row=row), self.assertRaises(ValueError):
+                query_for_window(90, 110, ingress=[row])
 
     def test_application_ingestion_queries_insights_and_keeps_console_supplemental(self):
         provider = QueryFixture()

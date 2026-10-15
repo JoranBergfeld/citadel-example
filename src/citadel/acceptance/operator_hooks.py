@@ -185,7 +185,9 @@ class Harness:
                       "actual_sampling_exporter_proof_required" if retained else "retention_contract_mismatch")
             collector = Collector(AzureQuery(self.lifecycle.native, details["properties"]["customerId"]),
                                   started=report["started"], finished=report["finished"],
-                                  budget_seconds=end - time.time(), prior=report["evidence"])
+                                  budget_seconds=end - time.time(), prior=report["evidence"],
+                                  ingress=[row for row in report.get("boundary_phase", {}).get("origins", [])
+                                           if row.get("request_id")])
             report["evidence"] = collector.poll()
             from .storage_harness import StorageAcceptance
             for result in StorageAcceptance.evaluate(report, report["evidence"]):

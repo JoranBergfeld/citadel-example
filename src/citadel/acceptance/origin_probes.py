@@ -121,6 +121,7 @@ class OriginProbe:
                     response = await client.request("POST" if payload else "GET", self.origin + path,
                                                     headers=headers, json=payload)
             request_id = (response.headers.get("x-citadel-origin-request-id")
+                          or response.headers.get("x-request-id")
                           or response.headers.get("x-ms-request-id") or response.headers.get("x-azure-ref"))
             result["status_code"] = response.status_code
             if request_id:
@@ -175,8 +176,17 @@ def evaluate_origin(observation, control, snapshots, evidence, *,
                  and row["facts"].get("business_state") == "not_dispatched"
                  and row["facts"].get("reason") in (
                      "certificate_required", "certificate_rejected", "invalid_gateway_context")]
-    if not any(matches(observation, "application", method="authorization.denied",
-                       runtime_identity=runtime_identity, facts=row["facts"]) for row in rejection):
+    application_denied = any(matches(observation, "application", method="authorization.denied",
+                             runtime_identity=runtime_identity, facts=row["facts"]) for row in rejection)
+    ingress_denied = any(
+        isinstance(row.get("facts"), dict)
+        and row["facts"].get("reason") == "ingress_rbac_denied"
+        and type(row["facts"].get("upstream_attempts")) is int
+        and row["facts"]["upstream_attempts"] == 0
+        and matches(observation, "ingress", target=observation["target"], facts=row["facts"],
+                    method="POST" if actor == "reference-data" else "GET")
+        for row in evidence if row.get("source") == "ingress")
+    if not (application_denied or ingress_denied):
         return blocked
     capability = "initialize" if actor == "reference-data" else "discovery"
     caller = control.get("caller")

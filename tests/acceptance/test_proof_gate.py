@@ -58,6 +58,13 @@ class ProofGateTests(unittest.TestCase):
         changed = report | {"evidence": [row | {"run_id": "another"} if row.get("method") == "discovery"
             else row for row in records]}
         self.assertEqual(evaluate_check(check, changed)["status"], "blocked")
+        ingress = {"source": "ingress", "method": "GET", "observed": 100.5,
+            "request_id": observed["request_id"], "status_code": 403, "runtime_identity": "",
+            "target": observed["target"],
+            "facts": {"reason": "ingress_rbac_denied", "upstream_attempts": 0}}
+        changed = report | {"evidence": [ingress if row.get("method") == "authorization.denied"
+            else row for row in records]}
+        self.assertEqual(evaluate_check(sanitize(check), sanitize(changed))["status"], "pass")
 
     def test_exported_storage_proof_is_rechecked_against_pinned_identity_and_real_sources(self):
         check, report = storage_proof()

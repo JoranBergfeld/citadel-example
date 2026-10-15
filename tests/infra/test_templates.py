@@ -86,6 +86,10 @@ class TemplateTests(unittest.TestCase):
         self.assertEqual(workspace["workspaceCapping"]["dailyQuotaGb"], -1)
         table = resources["Microsoft.OperationalInsights/workspaces/tables"]["properties"]
         self.assertEqual(table, {"plan": "Analytics", "retentionInDays": 30, "totalRetentionInDays": 30})
+        self.assertIn("ContainerAppHTTPLogs", platform["variables"]["tableNames"])
+        self.assertTrue(any({"category": "ContainerAppHTTPLogs", "enabled": True}
+            in resource["properties"].get("logs", []) for resource in platform["resources"]
+            if resource["type"] == "Microsoft.Insights/diagnosticSettings"))
         diag = resources["Microsoft.ApiManagement/service/diagnostics"]["properties"]
         self.assertEqual(diag["sampling"], {"samplingType": "fixed", "percentage": 100})
         for side in ["frontend", "backend"]:

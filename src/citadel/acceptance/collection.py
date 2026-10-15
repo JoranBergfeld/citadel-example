@@ -1,6 +1,7 @@
 """Bounded incremental queries of actual service-side tables, never stdout fixtures."""
 
 import math
+import re
 import time
 from datetime import datetime, timezone
 
@@ -8,7 +9,7 @@ from .oracle import SOURCES
 
 
 TABLES = {"AppRequests", "AppDependencies", "AppTraces", "StorageBlobLogs",
-          "ApiManagementGatewayLogs", "ContainerAppConsoleLogs_CL"}
+          "ApiManagementGatewayLogs", "ContainerAppConsoleLogs_CL", "ContainerAppHTTPLogs"}
 ROW_FIELDS = {"source", "request_id", "status_code", "runtime_identity", "observed",
               "run_id", "operation_id", "caller", "method", "target", "event_id", "facts",
               "client_request_id", "credential_sha256"}
@@ -66,9 +67,29 @@ def normalize_tables(response):
     return records
 
 
-def query_for_window(started, finished):
+def query_for_window(started, finished, *, ingress=None):
     start = datetime.fromtimestamp(started - 5, timezone.utc).isoformat()
     end = datetime.fromtimestamp(finished + 5, timezone.utc).isoformat()
+    predicates = []
+    if ingress is not None:
+        if not isinstance(ingress, list) or len(ingress) > 128:
+            raise ValueError("Invalid ingress observation bound")
+        for row in ingress:
+            if (not isinstance(row, dict)
+                    or not isinstance(row.get("request_id"), str)
+                    or not re.fullmatch("[A-Za-z0-9_.:-]{1,128}", row["request_id"])
+                    or not isinstance(row.get("target"), str)
+                    or not re.fullmatch("[a-f0-9]{64}", row["target"])
+                    or any(type(row.get(k)) not in (int, float) or not math.isfinite(row[k])
+                           for k in ("started", "finished"))
+                    or not started <= row["started"] <= row["finished"] <= finished
+                    or row["finished"] - row["started"] > 30):
+                raise ValueError("Invalid measured ingress request")
+            begin = datetime.fromtimestamp(row["started"] - 5, timezone.utc).isoformat()
+            finish = datetime.fromtimestamp(row["finished"] + 5, timezone.utc).isoformat()
+            predicates.append(f"(request_id == '{row['request_id']}' and target == '{row['target']}'"
+                              f" and StartTime between (datetime({begin}) .. datetime({finish})))")
+    ingress_filter = " or ".join(predicates) or "false"
     return f"""
 let begin=datetime({start}); let end=datetime({end});
 union
@@ -83,6 +104,16 @@ union
  status_code=toint(StatusCode), runtime_identity=hash_sha256(tolower(tostring(RequesterObjectId))),
  observed=todouble(datetime_diff('millisecond',TimeGenerated,datetime(1970-01-01)))/1000,
  method=tostring(OperationName), target=hash_sha256(extract(@"^[^?]+",0,tostring(Uri)))),
+(ContainerAppHTTPLogs | where StartTime between (begin .. end)
+ | extend request_id=tostring(RequestId),
+ target=hash_sha256(strcat('https://',tolower(tostring(Authority)),extract(@"^[^?]+",0,tostring(Path))))
+ | where {ingress_filter}
+ | project source='ingress', request_id, target, status_code=toint(StatusCode), runtime_identity='',
+ observed=todouble(datetime_diff('millisecond',StartTime,datetime(1970-01-01)))/1000,
+ method=iff(Method in ('GET','POST','HEAD','PUT','DELETE','PATCH','OPTIONS'),tostring(Method),'OTHER'),
+ facts=bag_pack('upstream_attempts',toint(UpstreamRequestAttemptCount),'reason',
+ iff(ResponseCodeDetails matches regex @"^rbac_access_denied_matched_policy\\[[^\\]\\r\\n]{{1,128}}\\]$",
+ 'ingress_rbac_denied','unverified_ingress_response'))),
 (AppTraces | where TimeGenerated between (begin .. end)
  | extend e=parse_json(Message) | where e.schema == 'citadel.telemetry.v1'
  | project source='application', request_id=tostring(e.request_id),
@@ -102,7 +133,8 @@ union
 
 
 class Collector:
-    def __init__(self, provider, *, started, finished, clock=time.monotonic, budget_seconds=600, prior=None):
+    def __init__(self, provider, *, started, finished, clock=time.monotonic, budget_seconds=600, prior=None,
+                 ingress=None):
         if (type(started) not in (float, int) or type(finished) not in (float, int)
                 or not math.isfinite(started) or not math.isfinite(finished)
                 or finished < started or type(budget_seconds) not in (int, float)
@@ -110,7 +142,7 @@ class Collector:
             raise ValueError("A bounded measured run window is required")
         self.provider, self.clock = provider, clock
         self.deadline = clock() + budget_seconds
-        self.query = query_for_window(started, finished)
+        self.query = query_for_window(started, finished, ingress=ingress)
         self.records = {}
         if prior is not None:
             if not isinstance(prior, list) or len(prior) > 100000 or any(not isinstance(r, dict) for r in prior):

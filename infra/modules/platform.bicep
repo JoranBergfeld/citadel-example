@@ -29,6 +29,7 @@ var tableNames = [
   'ApiManagementGatewayLogs'
   'ContainerAppConsoleLogs_CL'
   'ContainerAppSystemLogs_CL'
+  'ContainerAppHTTPLogs'
   'StorageBlobLogs'
   'AZKVAuditLogs'
   'AzureDiagnostics'
@@ -67,6 +68,7 @@ resource environmentDiagnostics 'Microsoft.Insights/diagnosticSettings@2021-05-0
     logs: [
       { category: 'ContainerAppConsoleLogs', enabled: true }
       { category: 'ContainerAppSystemLogs', enabled: true }
+      { category: 'ContainerAppHTTPLogs', enabled: true }
     ]
   }
 }
