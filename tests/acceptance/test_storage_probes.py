@@ -153,3 +153,6 @@ class StorageProbeTests(unittest.IsolatedAsyncioTestCase):
         changed = [e | {"status_code": 200} if e["request_id"] == "denial" else e for e in evidence]
         self.assertEqual(evaluate_storage(unexpected, {}, {}, changed, identities)["status"], "fail")
         self.assertEqual(evaluate_storage(unexpected, {}, {}, [], identities)["status"], "blocked")
+        missing_id = snapshots | {"before": snapshots["before"] | {"request_id": None}}
+        changed = [e | {"request_id": None} if e["request_id"] == "before" else e for e in evidence]
+        self.assertEqual(evaluate_storage(observation, control, missing_id, changed, identities)["status"], "blocked")

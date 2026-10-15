@@ -7,7 +7,8 @@ import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Mapping
-from citadel.acceptance.telemetry import correlate, emit, opaque
+from uuid import uuid4
+from citadel.acceptance.telemetry import correlate, emit, opaque, uncorrelated
 
 
 INVOCATION_CALLERS = {
@@ -73,6 +74,7 @@ class GatewayTrust:
         if scope["type"] != "http":
             await send({"type": "websocket.close", "code": 1008})
             return
+        denial_reason = "invalid_gateway_context"
         try:
             headers = {}
             for key, value in scope["headers"]:
@@ -80,7 +82,9 @@ class GatewayTrust:
                 if name in headers and (name.startswith("x-citadel-") or name == "x-forwarded-client-cert"):
                     raise ValueError("Duplicate trust header")
                 headers[name] = value.decode("ascii")
+            denial_reason = "certificate_required"
             certificate = headers["x-forwarded-client-cert"]
+            denial_reason = "certificate_rejected"
             # One ingress-generated Envoy entry; no appended client-supplied chain.
             fingerprints = []
             position = 0
@@ -96,6 +100,7 @@ class GatewayTrust:
             start, end = self.configuration.certificates[fingerprints[0]]
             if not start <= datetime.now(timezone.utc) < end:
                 raise ValueError("Certificate outside validity")
+            denial_reason = "invalid_gateway_context"
             caller = headers["x-citadel-caller"]
             target = headers["x-citadel-target"]
             key_id = headers["x-citadel-key-id"]
@@ -129,9 +134,15 @@ class GatewayTrust:
             supplied = base64.b64decode(headers["x-citadel-signature"], validate=True)
             if not hmac.compare_digest(expected, supplied):
                 raise ValueError("Untrusted gateway context")
+            denial_reason = "route_denied"
             action = self._authorize(caller, scope["method"], path, body)
         except (ValueError, KeyError, UnicodeError, TypeError, OverflowError):
-            await send({"type": "http.response.start", "status": 403, "headers": [(b"content-type", b"application/json")]})
+            denial_id = uuid4().hex
+            with uncorrelated():
+                emit("authorization.denied", request_id=denial_id, status_code=403,
+                     facts={"reason": denial_reason, "business_state": "not_dispatched"})
+            await send({"type": "http.response.start", "status": 403, "headers": [
+                (b"content-type", b"application/json"), (b"x-citadel-origin-request-id", denial_id.encode())]})
             await send({"type": "http.response.body", "body": b'{"error":"gateway_authorization_denied"}'})
             return
         scope = dict(scope)

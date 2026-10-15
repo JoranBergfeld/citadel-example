@@ -4,6 +4,7 @@ import asyncio
 import hashlib
 import json
 import math
+import re
 import time
 from uuid import UUID, uuid4
 
@@ -192,10 +193,29 @@ class StorageControls:
     def snapshot(self):
         return {container: self._read(container, self.name)[0] for container in CONTAINERS}
 
+    def products(self):
+        records = {}
+        for container in ("drafts", "findings"):
+            record, content = self._read(container, "ledger-v1.json")
+            try:
+                document = json.loads(content)
+            except (ValueError, UnicodeError):
+                raise OperationError("missing", "Business product snapshot is invalid") from None
+            if not isinstance(document, dict) or not isinstance(document.get(container), dict):
+                raise OperationError("missing", "Business product snapshot is invalid")
+            record["count"] = len(document[container])
+            records[container] = record
+        return records
+
 
 def _correlated(record, evidence, expected_identity, *, application=False):
     required = ("request_id", "status_code", "started", "finished", "operation_id")
     if (any(key not in record for key in required) or not hash_value(expected_identity)
+            or any(not isinstance(record.get(key), str)
+                   or re.fullmatch("[A-Za-z0-9_.:-]{1,128}", record[key]) is None
+                   for key in ("request_id", "operation_id"))
+            or type(record["status_code"]) is not int or not 100 <= record["status_code"] <= 599
+            or record.get("action") not in ("read", "write")
             or any(type(record[k]) not in (int, float) or not math.isfinite(record[k])
                    for k in ("started", "finished"))
             or not 0 <= record["finished"] - record["started"] <= 900):

@@ -14,7 +14,6 @@ from citadel.operator.state import Blocked, ROOT, read_private, source_fingerpri
 from .collection import AzureQuery, Collector, verify_retention
 from .coverage import required_checks
 from .reports import acceptance_status, automated_status, confirm_narrative, export_report, report_directory
-from .revision import RevisionProbe
 from .scenarios import FIXTURES, evaluate_scenario
 
 
@@ -121,23 +120,14 @@ class Harness:
                 StorageAcceptance(self.lifecycle).execute(report)
                 report["finished"] = time.time()
                 self.save(report)
-                driver = RevisionProbe(self.lifecycle)
-                for app in self.lifecycle.value["outputs"]["appInventory"]:
-                    workload = app["app"].split("/")[-1].removeprefix(self.lifecycle.id + "-")
-                    if workload == "reference-data":
-                        continue
-                    operation = uuid4().hex
-                    report["operation_ids"].append(operation)
-                    result = driver.execute(app, workload, operation)
-                    # Observed wire requests remain blocked until independent service
-                    # correlation, working controls and target effects are established.
-                    for observed in result["observations"]:
-                        if observed.get("check_id") in required_checks():
-                            self._replace(report, {"check_id": observed["check_id"], "status": "blocked",
-                                "reason": "working_control_and_no_effect_proof_required",
-                                "actual": observed})
-                    report["finished"] = time.time()
-                    self.save(report)
+                from .origin_harness import BoundaryAcceptance
+                for observed in BoundaryAcceptance(self.lifecycle).execute(report):
+                    if observed.get("check_id") in required_checks():
+                        self._replace(report, {"check_id": observed["check_id"], "status": "blocked",
+                            "reason": "working_control_and_no_effect_proof_required",
+                            "actual": observed})
+                report["finished"] = time.time()
+                self.save(report)
         except (Blocked, ValueError, TimeoutError):
             # Partial attempts remain immutable exports; provider exception text is private.
             report["finished"] = time.time()
@@ -187,6 +177,9 @@ class Harness:
             report["evidence"] = collector.poll()
             from .storage_harness import StorageAcceptance
             for result in StorageAcceptance.evaluate(report, report["evidence"]):
+                self._replace(report, result)
+            from .origin_harness import BoundaryAcceptance
+            for result in BoundaryAcceptance(self.lifecycle).evaluate(report, report["evidence"]):
                 self._replace(report, result)
             # No repeated polling can turn an unimplemented/absent required control into pass.
         except (Blocked, ValueError, TimeoutError):

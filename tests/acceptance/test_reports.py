@@ -89,3 +89,12 @@ class ReportTests(unittest.TestCase):
                            "debug": {"Authorization": "secret"}}]}
         self.assertEqual(sanitize(raw), {"run_id": "run1", "status": "pass",
                          "checks": [{"check_id": "comparison", "status": "blocked"}]})
+
+    def test_sanitized_service_records_preserve_recheckable_metadata_without_payloads(self):
+        record = {"source": "application", "method": "authorization.denied",
+            "event_id": "event1", "request_id": "service1", "status_code": 403,
+            "certificate_sha256": "a" * 64,
+            "facts": {"reason": "certificate_rejected", "business_state": "not_dispatched",
+                      "generation": 2, "read_attempts": 3, "prompt": "private-prompt"}}
+        expected = record | {"facts": {key: value for key, value in record["facts"].items() if key != "prompt"}}
+        self.assertEqual(sanitize(record), expected)

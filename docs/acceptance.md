@@ -37,7 +37,8 @@ rotation retirement and denied-bypass continuation cannot pass through placehold
   existing active-run slot. Failed probe admissions/results are retained; repair
   is explicit. No new resource, data role, package pin or fixture was introduced.
 - `storage-boundaries` uses the actual Blob SDK and assigned workload MI, before
-  any subscription-secret access. The operator seeds isolated same-container
+  the worker's subscription-secret branch. Normal application hosting still
+  initializes its allocated runtime. The operator seeds isolated same-container
   copies of real ledgers; real draft/finding products are prerequisites, never
   fabricated controls. Each writable workload performs the fixed read/write
   matrix with independent permitted controls and conditional writes. Operator
@@ -45,6 +46,20 @@ rotation retirement and denied-bypass continuation cannot pass through placehold
   service ID, physical client-request ID, identity, method, target and time.
   Shared 900-second orchestration and durable 512-ticket envelopes remain bounded.
   Reference Data execution is still pending the narrow console decision.
+- `origin-boundary` derives the actual HTTPS origin from the inventoried app's
+  ARM response. It sends only protected discovery (or MCP initialization) using
+  missing certificates, freshly generated unrelated certificates, or forged
+  context/certificate headers. TLS chain/name checks stay enabled; no gateway
+  private key is read or exported. Ephemeral unrelated-key files are private and
+  removed. Normal middleware issues its own denial response ID and logs a fixed
+  rejection reason without attributing forged headers to a trusted caller.
+- The full boundary phase dispatches these real workers, preserves per-request
+  observations, reads actual draft/finding ledgers before and after, and runs
+  allocated gateway controls under one 900-second envelope. Its operator
+  discovery control uses only the operator's own key. Origin oracles require
+  actual client/server correlation, authorized APIM/application controls and
+  unchanged independently observed business products. Transport failures and
+  missing ingress request IDs remain inconclusive, never passing denials.
 
 ## Evidence and human review
 
@@ -121,8 +136,9 @@ effective sampling must be established before any full acceptance.
    requiring additional `opentelemetry-sdk`, `msrest` and `psutil`. It was inspected,
    not selected or installed. Existing approval of the beta A2A adapter does not
    approve another beta or an arbitrary new dependency graph.
-2. Execute/verify the implemented storage providers and finish read-only Reference
-   Data execution; complete direct-model/origin probes, all route
+2. Execute/verify the implemented storage/origin providers and finish read-only
+   Reference Data execution; establish pre-application ingress-denial evidence,
+   and complete direct-model probes, all route
    capabilities and credential/certificate/context rotation proof.
 3. Complete all deployed accounting/time boundaries, safe-read retry probes,
    release-response loss, cross-operation release uniqueness, incompatible version

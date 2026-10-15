@@ -75,6 +75,20 @@ class TrustTests(unittest.IsolatedAsyncioTestCase):
         response = await self.client.post("/a2a", content=body, headers=forged)
         self.assertEqual(response.status_code, 403)
 
+    async def test_denial_service_identifiers_are_server_issued_not_forged_context(self):
+        identifiers = []
+        for _ in range(2):
+            response = await self.client.get("/.well-known/agent-card.json", headers={
+                "x-citadel-origin-request-id": "forged-origin-id",
+                "x-citadel-request-id": "forged-gateway-id",
+                "x-citadel-caller": "operator"})
+            self.assertEqual(response.status_code, 403)
+            self.assertEqual(response.json(), {"error": "gateway_authorization_denied"})
+            identifiers.append(response.headers["x-citadel-origin-request-id"])
+        self.assertNotEqual(identifiers[0], identifiers[1])
+        self.assertTrue(all(len(value) == 32 and all(c in "0123456789abcdef" for c in value)
+                            for value in identifiers))
+
     async def test_adjacent_duplicate_certificate_fingerprints_are_rejected(self):
         body = b'{"jsonrpc":"2.0","id":1,"method":"SendMessage","params":{}}'
         forged = headers(body)

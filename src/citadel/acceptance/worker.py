@@ -27,12 +27,14 @@ def validate_request(request, *, enabled, workload, client_id):
     keys = {"schema_version", "run_id", "workload", "client_id", "deadline", "mode"}
     if isinstance(request, dict) and request.get("mode") == "storage-boundaries":
         keys.add("storage")
+    if isinstance(request, dict) and request.get("mode") == "origin-boundary":
+        keys.add("origin")
     if (enabled is not True or not isinstance(request, dict)
             or request.keys() != keys
             or type(request["schema_version"]) is not int or request["schema_version"] != 1
             or request["workload"] != workload
             or workload not in AGENTS or str(UUID(request["client_id"])) != str(UUID(client_id))
-            or request["mode"] not in ("gateway-matrix", "operation-faults", "storage-boundaries")
+            or request["mode"] not in ("gateway-matrix", "operation-faults", "storage-boundaries", "origin-boundary")
             or request["mode"] == "operation-faults" and workload not in ("candidate-planner", "briefing-author")
             or type(request["deadline"]) not in (float, int) or not math.isfinite(request["deadline"])
             or not time.time() < request["deadline"] <= time.time() + 900):
@@ -41,6 +43,9 @@ def validate_request(request, *, enabled, workload, client_id):
     if request["mode"] == "storage-boundaries":
         from .storage_probes import validate_storage_manifest
         validate_storage_manifest(request["storage"])
+    if request["mode"] == "origin-boundary":
+        from citadel.runtime.configuration import endpoint
+        endpoint(request["origin"], ".azurecontainerapps.io")
     return request
 
 
@@ -106,11 +111,35 @@ async def run_gateway_matrix(config, request):
                                     results.append(control)
                 except (OperationError, ValueError):
                     state = "blocked"
+                if config.target == "candidate-planner" and state == "complete":
+                    await store.release_run(scope)
                 await container.get_blob_client(scope + "/observations.json").upload_blob(
                     canonical_bytes({"schema_version": 1, "run_id": request["run_id"],
                                      "state": state, "observations": results}), overwrite=False, timeout=5)
+                return results
+            if request["mode"] == "origin-boundary":
+                from .origin_probes import OriginProbe, MODES
+                probe = OriginProbe(workload=config.target, origin=request["origin"],
+                    principal_id=os.environ["AZURE_PRINCIPAL_ID"],
+                    approved_certificate=next(iter(config.trust.certificates)),
+                    key_id=next(iter(config.trust.signing_keys)), enabled=True,
+                    run_id=request["run_id"], deadline=request["deadline"], admit=pool.admit)
+                results, state = [], "complete"
+                try:
+                    with read_scope(pool, deadline=request["deadline"]):
+                        for mode in MODES:
+                            result = await probe.observe(mode)
+                            results.append(result)
+                            await container.get_blob_client(
+                                scope + "/observations/" + result["operation_id"] + ".json").upload_blob(
+                                    canonical_bytes(result), overwrite=False, timeout=5)
+                except (OperationError, ValueError):
+                    state = "blocked"
                 if config.target == "candidate-planner" and state == "complete":
                     await store.release_run(scope)
+                await container.get_blob_client(scope + "/observations.json").upload_blob(
+                    canonical_bytes({"schema_version": 1, "run_id": request["run_id"],
+                                     "state": state, "observations": results}), overwrite=False, timeout=5)
                 return results
             if request["mode"] == "operation-faults":
                 from citadel.operations.blob import AzureBlobLedger
@@ -134,11 +163,11 @@ async def run_gateway_matrix(config, request):
                                                      "artifact_count": result.get("artifact_count", 0)})
                         results.append({"check_id": name, "actual": result, "run_id": request["run_id"],
                                         "operation_id": operation})
+                if config.target == "candidate-planner":
+                    await store.release_run(scope)
                 await container.get_blob_client(scope + "/observations.json").upload_blob(
                     canonical_bytes({"schema_version": 1, "run_id": request["run_id"],
                                      "observations": results}), overwrite=False, timeout=5)
-                if config.target == "candidate-planner":
-                    await store.release_run(scope)
                 return results
             async with SecretClient(config.vault, credential, api_version="2025-07-01",
                     retry_total=0, connection_timeout=5, read_timeout=30) as vault:
@@ -169,11 +198,11 @@ async def run_gateway_matrix(config, request):
                         result["check_id"] = f"route.{config.target}.reference-data.{tool}"
                         results.append(result)
             # Private allocated storage is the worker-result channel, not an operator HTTP proxy.
+            if config.target == "candidate-planner":
+                await store.release_run(scope)
             await container.get_blob_client(scope + "/observations.json").upload_blob(
                 canonical_bytes({"schema_version": 1, "run_id": request["run_id"], "observations": results}),
                 overwrite=False, timeout=5)
-            if config.target == "candidate-planner":
-                await store.release_run(scope)
             with correlate(request["run_id"], request["run_id"], config.target):
                 emit("probe", facts={"artifact_count": len(results), "business_state": "observed"})
             return results

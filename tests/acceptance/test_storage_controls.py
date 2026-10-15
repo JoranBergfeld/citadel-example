@@ -54,6 +54,19 @@ class BlobProvider:
 
 
 class StorageControlTests(unittest.TestCase):
+    def test_product_observer_reads_real_business_ledgers_without_seeding_or_writes(self):
+        provider = BlobProvider()
+        original = dict(provider.objects)
+        controls = StorageControls(provider, account="https://allocated.blob.core.windows.net",
+                                   suite_id="suite1", admit=lambda: None)
+        observations = controls.products()
+        self.assertEqual(set(observations), {"drafts", "findings"})
+        self.assertEqual(provider.objects, original)
+        self.assertEqual(provider.requests, [
+            ("GET", "drafts", "ledger-v1.json"), ("GET", "findings", "ledger-v1.json")])
+        self.assertTrue(all(record["count"] == 1 for record in observations.values()))
+        self.assertNotIn("not-for-reports", str(observations))
+
     def test_disposable_controls_copy_known_real_products_without_exporting_private_content(self):
         provider = BlobProvider()
         admissions = []

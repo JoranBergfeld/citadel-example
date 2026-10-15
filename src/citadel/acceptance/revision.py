@@ -30,7 +30,10 @@ class RevisionProbe:
         if run_id in intents:
             raise ValueError("Existing probe dispatch must be reconciled, never replayed")
         native = self.lifecycle.native
-        original = template(native.rest("get", app["app"], "2025-01-01")["properties"]["template"])
+        if self.admit is not None:
+            self.admit()
+        deployed = native.rest("get", app["app"], "2025-01-01")
+        original = template(deployed["properties"]["template"])
         containers = original["containers"]
         if (len(containers) != 1 or containers[0]["image"] != app["image"]
                 or containers[0].get("command") != ["python", "-m", "citadel.runtime"]):
@@ -45,6 +48,10 @@ class RevisionProbe:
                    "mode": mode}
         if storage is not None:
             request["storage"] = storage
+        if mode == "origin-boundary":
+            request["origin"] = endpoint(
+                "https://" + deployed["properties"]["configuration"]["ingress"]["fqdn"],
+                ".azurecontainerapps.io")
         from .worker import validate_request
         validate_request(request, enabled=True, workload=workload, client_id=app["identityClientId"])
         replacement = copy.deepcopy(original)
@@ -56,6 +63,8 @@ class RevisionProbe:
         ]
         intents[run_id] = {"state": "dispatching", "workload": workload, "original": original,
                           "replacement_sha256": sha256(replacement), "deadline": request["deadline"]}
+        if mode == "origin-boundary":
+            intents[run_id]["origin"] = request["origin"]
         self.lifecycle.state.save()
         native.rest("patch", app["app"], "2025-01-01", {"properties": {"template": replacement}})
         while self.clock() < request["deadline"]:
@@ -67,10 +76,14 @@ class RevisionProbe:
                 if (result.get("schema_version") != 1 or result.get("run_id") != run_id
                         or not isinstance(result.get("observations"), list)):
                     raise ValueError("Probe result has the wrong immutable binding")
+                if self.admit is not None:
+                    self.admit()
                 current = template(native.rest("get", app["app"], "2025-01-01")["properties"]["template"])
                 if current != replacement:
                     raise ValueError("Concurrent revision modification; do not overwrite")
                 native.rest("patch", app["app"], "2025-01-01", {"properties": {"template": original}})
+                if self.admit is not None:
+                    self.admit()
                 restored = template(native.rest("get", app["app"], "2025-01-01")["properties"]["template"])
                 if restored != original:
                     raise ValueError("Normal revision restoration unverified")

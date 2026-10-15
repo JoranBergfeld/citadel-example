@@ -32,6 +32,23 @@ class NativeFixture:
 
 
 class RevisionTests(unittest.TestCase):
+    def test_origin_driver_uses_actual_app_ingress_not_caller_supplied_destination(self):
+        native = NativeFixture()
+        native.app["properties"]["configuration"] = {"ingress": {
+            "fqdn": "deployed.example.azurecontainerapps.io", "clientCertificateMode": "require"}}
+        lifecycle = SimpleNamespace(native=native, value={},
+                                    state=SimpleNamespace(save=lambda: None))
+        app = {"app": "/subscriptions/s/resourceGroups/g/providers/Microsoft.App/containerApps/d-candidate-planner",
+               "identityClientId": "11111111-1111-1111-1111-111111111111",
+               "image": "registry.example/image@sha256:" + "a" * 64}
+        RevisionProbe(lifecycle).execute(app, "candidate-planner", "r1", mode="origin-boundary")
+        environment = native.patches[0]["properties"]["template"]["containers"][0]["env"]
+        request = json.loads(base64.b64decode(next(
+            entry["value"] for entry in environment if entry["name"] == "CITADEL_ACCEPTANCE_REQUEST")))
+        self.assertEqual(request["origin"], "https://deployed.example.azurecontainerapps.io")
+        self.assertEqual(request["mode"], "origin-boundary")
+        self.assertEqual(lifecycle.value["probe_intents"]["r1"]["origin"], request["origin"])
+
     def test_same_image_identity_fixed_command_and_restore_without_operator_keys(self):
         native = NativeFixture()
         original = copy.deepcopy(native.app["properties"]["template"])
@@ -40,8 +57,11 @@ class RevisionTests(unittest.TestCase):
                "image": "registry.example/image@sha256:" + "a" * 64}
         state = SimpleNamespace(save=lambda: None)
         lifecycle = SimpleNamespace(native=native, value={"probe_intents": {}}, state=state)
-        result = RevisionProbe(lifecycle, sleep=lambda seconds: None).execute(app, "candidate-planner", "r1")
+        admissions = []
+        result = RevisionProbe(lifecycle, sleep=lambda seconds: None,
+                               admit=lambda: admissions.append(1)).execute(app, "candidate-planner", "r1")
         self.assertEqual(result["run_id"], "r1")
+        self.assertEqual(len(admissions), 4)
         self.assertEqual(native.app["properties"]["template"], original)
         container = native.patches[0]["properties"]["template"]["containers"][0]
         self.assertEqual(container["command"], ["python", "-m", "citadel.acceptance.worker"])
