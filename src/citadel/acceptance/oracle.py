@@ -8,7 +8,7 @@ DENIALS = {"AuthorizationPermissionMismatch", "AuthorizationFailure", "Permissio
            "Forbidden", "Unauthorized", "Route denied", "Method denied",
            "invalid_gateway_context", "certificate_required", "certificate_rejected",
            "AccessDenied", "invalid_subscription"}
-SOURCES = {"application", "gateway", "storage", "model", "ingress"}
+SOURCES = {"application", "gateway", "storage", "model", "ingress", "console"}
 
 
 def hash_value(value):
@@ -34,7 +34,7 @@ def evaluate_control(observation, evidence):
                    for key in ("status_code", "control_status"))
             or o["request_id"] == o["control_request_id"]
             or not isinstance(o["sources"], list) or not o["sources"]
-            or any(not isinstance(source, str) or source not in SOURCES for source in o["sources"])
+            or any(not isinstance(source, str) or source not in SOURCES - {"console"} for source in o["sources"])
             or any(type(o[key]) not in (int, float) or not math.isfinite(o[key])
                    for key in ("started", "finished"))
             or not 0 <= o["finished"] - o["started"] <= 900

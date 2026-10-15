@@ -65,3 +65,19 @@ class CollectionTests(unittest.TestCase):
         self.assertNotIn("RequestIdHeader", query)
         self.assertIn("request_id=tostring(CorrelationId), client_request_id=tostring(ClientRequestId)", query)
         self.assertIn('target=hash_sha256(extract(@"^[^?]+",0,tostring(Uri)))', query)
+
+    def test_application_ingestion_queries_insights_and_keeps_console_supplemental(self):
+        provider = QueryFixture()
+        provider.query = lambda query, timeout: (
+            provider.calls.append((query, timeout)) or {"tables": [{
+                "columns": [{"name": key} for key in
+                    ("source", "request_id", "status_code", "runtime_identity", "observed")],
+                "rows": [["console", "actual-id", 403, "a" * 64, 100.0]]}]})
+        records = Collector(provider, started=100, finished=101).poll()
+        self.assertEqual(records[0]["source"], "console")
+        query = provider.calls[0][0]
+        self.assertIn("(AppTraces | where TimeGenerated between (begin .. end)", query)
+        self.assertIn("e=parse_json(Message)", query)
+        console_query = query.split("(ContainerAppConsoleLogs_CL", 1)[1]
+        self.assertIn("source='console'", console_query)
+        self.assertNotIn("source='application'", console_query)

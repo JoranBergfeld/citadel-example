@@ -62,9 +62,16 @@ union
  status_code=toint(StatusCode), runtime_identity=hash_sha256(tolower(tostring(RequesterObjectId))),
  observed=todouble(datetime_diff('millisecond',TimeGenerated,datetime(1970-01-01)))/1000,
  method=tostring(OperationName), target=hash_sha256(extract(@"^[^?]+",0,tostring(Uri)))),
+(AppTraces | where TimeGenerated between (begin .. end)
+ | extend e=parse_json(Message) | where e.schema == 'citadel.telemetry.v1'
+ | project source='application', request_id=tostring(e.request_id),
+ status_code=toint(e.status_code), runtime_identity=tostring(e.runtime_identity),
+ observed=todouble(datetime_diff('millisecond',TimeGenerated,datetime(1970-01-01)))/1000,
+ run_id=tostring(e.run_id), operation_id=tostring(e.operation_id), caller=tostring(e.caller),
+ method=tostring(e.method), target=tostring(e.target), event_id=tostring(e.event_id), facts=e.facts),
 (ContainerAppConsoleLogs_CL | where TimeGenerated between (begin .. end)
  | extend e=parse_json(Log_s) | where e.schema == 'citadel.telemetry.v1'
- | project source='application', request_id=tostring(e.request_id),
+ | project source='console', request_id=tostring(e.request_id),
  status_code=toint(e.status_code), runtime_identity=tostring(e.runtime_identity),
  observed=todouble(datetime_diff('millisecond',TimeGenerated,datetime(1970-01-01)))/1000,
  run_id=tostring(e.run_id), operation_id=tostring(e.operation_id), caller=tostring(e.caller),

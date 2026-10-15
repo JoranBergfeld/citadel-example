@@ -38,6 +38,10 @@ class ControlOracleTests(unittest.TestCase):
             with self.subTest(records=records):
                 self.assertEqual(evaluate_control(denial(), records)["status"], "blocked")
 
+    def test_console_records_cannot_be_declared_a_required_proof_source(self):
+        records = [row | {"source": "console"} for row in evidence()]
+        self.assertEqual(evaluate_control(denial() | {"sources": ["console"]}, records)["status"], "blocked")
+
     def test_unrelated_request_identity_time_or_status_cannot_supply_correlation(self):
         for field, value in (("request_id", "unrelated"), ("runtime_identity", "d" * 64),
                              ("observed", 900), ("status_code", 200)):
