@@ -60,6 +60,13 @@ rotation retirement and denied-bypass continuation cannot pass through placehold
   actual client/server correlation, authorized APIM/application controls and
   unchanged independently observed business products. Transport failures and
   missing ingress request IDs remain inconclusive, never passing denials.
+- `DirectModelProbe` has a tested actual-MI, one-shot HTTPX2 provider using the
+  cognitive-services token scope, fixed v1 inference path, bounded nonprivate
+  prompt and 2,000-output-token maximum. It exports no token or response prose.
+  **It is not yet dispatched by the full suite:** asserted control IDs cannot
+  enable a worker model mode without integrated global admission and working
+  APIM controls. Normal delegated model grants have not been expanded to hide
+  that missing orchestration.
 
 ## Evidence and human review
 

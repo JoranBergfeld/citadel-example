@@ -47,3 +47,9 @@ class WorkerTests(unittest.TestCase):
             with self.assertRaises((ValueError, RuntimeError)):
                 validate_request(request | {"storage": bad}, enabled=True,
                                  workload=request["workload"], client_id=request["client_id"])
+
+    def test_direct_model_dispatch_requires_integrated_global_admission_not_an_asserted_control_id(self):
+        request = self.request() | {"mode": "model-boundary", "control_id": "suite1",
+                                   "model_origin": "https://allocated.openai.azure.com"}
+        with self.assertRaises(ValueError):
+            validate_request(request, enabled=True, workload=request["workload"], client_id=request["client_id"])
