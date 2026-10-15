@@ -6,7 +6,7 @@ import time
 import tomllib
 from pathlib import Path
 from types import SimpleNamespace
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from citadel.evidence import ReferenceData
 from citadel.evidence.manifests import sha256
@@ -42,7 +42,14 @@ def fingerprints(lifecycle):
     result = {"software": software, "configuration": sha256(lifecycle.config),
               "manifest": actual, "image": [image.split("@", 1)[1] for image in images],
               "protocols": pins["protocols"], "model": pins["model"],
-              "inputs": {"bundle": actual, **{key: sha256(value) for key, value in provenance.items()}}}
+              "inputs": {"bundle": actual, **{key: sha256(value) for key, value in provenance.items()}},
+              "runtime_identities": {
+                  app["app"].split("/")[-1].removeprefix(lifecycle.id + "-"):
+                      hashlib.sha256(str(UUID(app["identityPrincipalId"])).encode()).hexdigest()
+                  for app in lifecycle.value["outputs"]["appInventory"]},
+              "subscription_bindings": {
+                  resource.rsplit("/", 1)[-1]: hashlib.sha256(resource.lower().encode()).hexdigest()
+                  for resource in lifecycle.value["outputs"]["inventory"]["gateway"]["subscriptions"]}}
     return result | {"fingerprint": sha256(result)}
 
 

@@ -25,10 +25,12 @@ before_count after_count evidence evidence_sha256 artifacts sha256 count version
 software configuration image manifest protocols model inputs limits lifecycle_refs
 acceptance automated_status human_status coverage optional_not_exercised
 collection_deadline
+runtime_identities subscription_bindings credential_sha256
 name region sku version_upgrade_option verification a2a a2a_binding mcp mcp_transport
 model_path blob_data_api key_vault_data_api
 """.split())
-DYNAMIC = {"scenarios", "human_reviews", "limits", "protocols", "inputs", "lifecycle_refs"}
+DYNAMIC = {"scenarios", "human_reviews", "limits", "protocols", "inputs", "lifecycle_refs",
+           "runtime_identities", "subscription_bindings"}
 
 
 def sanitize(value, *, dynamic=False):
@@ -61,6 +63,7 @@ def confirm_narrative(report, scenario, product_sha256, *, supported, gaps_visib
 
 def automated_status(report):
     from .coverage import required_checks
+    from .proof_gate import evaluate_check
     if not isinstance(report, dict):
         return "blocked"
     required, checks = report.get("required_checks", []), report.get("checks", [])
@@ -91,14 +94,22 @@ def automated_status(report):
                 and record["request_id"] and type(record.get("status_code")) is int
                 and 100 <= record["status_code"] <= 599}):
         return "blocked"
-    return "pass" if states == {"pass"} else "blocked"
+    verified = {evaluate_check(check, report)["status"] for check in checks if check["status"] == "pass"}
+    if "fail" in verified:
+        return "fail"
+    return "pass" if states == {"pass"} and verified == {"pass"} else "blocked"
 
 
 def reviewed_status(report):
-    from .scenarios import FIXTURES
     status = automated_status(report)
     if status != "pass":
         return status
+    return narrative_status(report)
+
+
+def narrative_status(report):
+    """Human decisions do not certify automation or a pair of cloud attempts."""
+    from .scenarios import FIXTURES
     scenarios, reviews = report.get("scenarios", {}), report.get("human_reviews", {})
     if (not isinstance(scenarios, dict) or set(scenarios) != set(FIXTURES)
             or not isinstance(reviews, dict)

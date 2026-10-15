@@ -254,6 +254,8 @@ def evaluate_storage(observation, control, snapshots, evidence, identities):
                     for application in (False, True))):
         return blocked | {"status": "fail", "reason": "forbidden_storage_capability_succeeded"}
     control_actor = control.get("caller")
+    if not isinstance(control_actor, str):
+        return blocked
     grant = STORAGE.get(control_actor, {}).get(container)
     if (control.get("container") != container or control.get("action") != action
             or not observation.get("suite_id") or control.get("suite_id") != observation["suite_id"]

@@ -81,3 +81,14 @@ class CollectionTests(unittest.TestCase):
         console_query = query.split("(ContainerAppConsoleLogs_CL", 1)[1]
         self.assertIn("source='console'", console_query)
         self.assertNotIn("source='application'", console_query)
+
+    def test_gateway_query_preserves_allocated_credential_binding_without_exporting_resource_ids(self):
+        query = query_for_window(100, 101)
+        self.assertIn('caller=extract(@"([^/]+)$",1,tostring(SubscriptionId))', query)
+        self.assertIn("credential_sha256=hash_sha256(tolower(strcat(_ResourceId,'/subscriptions/',", query)
+        provider = QueryFixture()
+        provider.query = lambda query, timeout: {"tables": [{
+            "columns": [{"name": key} for key in
+                ("source", "request_id", "status_code", "runtime_identity", "observed", "credential_sha256")],
+            "rows": [["gateway", "actual-id", 200, "", 100.0, "a" * 64]]}]}
+        self.assertEqual(Collector(provider, started=100, finished=101).poll()[0]["credential_sha256"], "a" * 64)

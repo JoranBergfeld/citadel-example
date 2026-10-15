@@ -106,6 +106,11 @@ attempt breaks the pair. Local mode, missing checks or skipped checks cannot pas
 The required set is the shipped catalogue, not a report's self-declared subset.
 All four scenario products and application/gateway/storage evidence are mandatory;
 malformed identities, hashes or review records block before human confirmation.
+Report gates re-run independent storage/origin oracles using the fingerprinted
+workload identities and allocated-subscription hashes. Generic all-pass labels,
+even with application/gateway/storage rows, cannot certify acceptance. Check
+families without a registered independent oracle remain blocked. Human narrative
+decisions are independently inspectable but do not certify missing automation.
 
 Reports are immutable hash-named JSON and Markdown under private
 `STATE/acceptance/`, **outside every Git checkout**. Report directories inside a
@@ -129,6 +134,8 @@ The resource-specific storage table exposes `CorrelationId` and `ClientRequestId
 not `RequestIdHeader`. The former must match the actual response service ID;
 the latter remains a separate physical request binding. Targets are query-free
 URL hashes. That live storage-ID correspondence has not been observed locally.
+Gateway evidence retains a logical caller and a hash of its actual service-scoped
+subscription ID, separately from workload managed-identity hashes.
 
 **Console export is supplemental, not the required assigned-MI Application
 Insights exporter.** No SDK exporter exists in the approved application lock:

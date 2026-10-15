@@ -2,7 +2,7 @@ import copy
 import unittest
 
 from citadel.acceptance.coverage import required_checks
-from citadel.acceptance.reports import acceptance_status, automated_status, confirm_narrative, sanitize
+from citadel.acceptance.reports import acceptance_status, automated_status, confirm_narrative, narrative_status, sanitize
 from citadel.acceptance.scenarios import FIXTURES
 
 
@@ -25,17 +25,26 @@ def approve(value):
 
 
 class ReportTests(unittest.TestCase):
-    def test_complete_automation_stays_pending_until_exact_narrative_review(self):
+    def test_complete_catalogue_and_generic_service_rows_are_not_per_check_proof(self):
         value = report()
-        self.assertEqual(acceptance_status([value]), "pending_human")
+        self.assertEqual(automated_status(value), "blocked")
+        value["checks"] = [check | {"actual": {"status": "pass", "source": "application"}}
+                           for check in value["checks"]]
+        self.assertEqual(automated_status(value), "blocked")
+
+    def test_exact_narrative_review_never_certifies_unproven_automation(self):
+        value = report()
+        self.assertEqual(narrative_status(value), "pending_human")
         with self.assertRaises(ValueError):
             confirm_narrative(value, "comparison", "d" * 64, supported=True,
                               gaps_visible=True, fictional=True)
         approve(value)
-        self.assertEqual(acceptance_status([value]), "pending_second_pass")
+        self.assertEqual(narrative_status(value), "pass")
+        self.assertEqual(acceptance_status([value]), "blocked")
         second = report("run2")
         approve(second)
-        self.assertEqual(acceptance_status([value, second]), "pass")
+        self.assertEqual(narrative_status(second), "pass")
+        self.assertEqual(acceptance_status([value, second]), "blocked")
 
     def test_no_cherry_picking_fingerprints_reused_ids_or_missing_checks(self):
         first, second = report(), report("run2")
@@ -80,7 +89,8 @@ class ReportTests(unittest.TestCase):
         value = report()
         confirm_narrative(value, "comparison", "b" * 64, supported=False,
                           gaps_visible=True, fictional=True)
-        self.assertEqual(acceptance_status([value]), "fail")
+        self.assertEqual(narrative_status(value), "fail")
+        self.assertNotEqual(acceptance_status([value]), "pass")
 
     def test_sanitization_is_allowlisted_not_a_secret_name_blacklist(self):
         raw = {"run_id": "run1", "status": "pass", "private_notes": "secret",

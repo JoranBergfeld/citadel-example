@@ -10,7 +10,8 @@ from .oracle import SOURCES
 TABLES = {"AppRequests", "AppDependencies", "AppTraces", "StorageBlobLogs",
           "ApiManagementGatewayLogs", "ContainerAppConsoleLogs_CL"}
 ROW_FIELDS = {"source", "request_id", "status_code", "runtime_identity", "observed",
-              "run_id", "operation_id", "caller", "method", "target", "event_id", "facts", "client_request_id"}
+              "run_id", "operation_id", "caller", "method", "target", "event_id", "facts",
+              "client_request_id", "credential_sha256"}
 
 
 def verify_retention(workspace, tables):
@@ -56,7 +57,9 @@ union
 (ApiManagementGatewayLogs | where TimeGenerated between (begin .. end)
  | project source='gateway', request_id=tostring(CorrelationId),
  status_code=toint(ResponseCode), runtime_identity='', observed=todouble(datetime_diff('millisecond',TimeGenerated,datetime(1970-01-01)))/1000,
- caller=tostring(SubscriptionId), method=tostring(Method)),
+ caller=extract(@"([^/]+)$",1,tostring(SubscriptionId)), method=tostring(Method),
+ credential_sha256=hash_sha256(tolower(strcat(_ResourceId,'/subscriptions/',
+ extract(@"([^/]+)$",1,tostring(SubscriptionId)))))),
 (StorageBlobLogs | where TimeGenerated between (begin .. end)
  | project source='storage', request_id=tostring(CorrelationId), client_request_id=tostring(ClientRequestId),
  status_code=toint(StatusCode), runtime_identity=hash_sha256(tolower(tostring(RequesterObjectId))),

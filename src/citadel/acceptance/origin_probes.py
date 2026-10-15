@@ -136,7 +136,7 @@ class OriginProbe:
 
 
 def evaluate_origin(observation, control, snapshots, evidence, *,
-                    runtime_identity, observer_identity, subscription_id):
+                    runtime_identity, observer_identity, subscription_id=None, credential_sha256=None):
     from .storage_probes import _correlated
     blocked = {"check_id": observation.get("check_id"), "status": "blocked",
                "reason": "origin_service_control_or_no_effect_proof_missing"}
@@ -180,16 +180,21 @@ def evaluate_origin(observation, control, snapshots, evidence, *,
         return blocked
     capability = "initialize" if actor == "reference-data" else "discovery"
     caller = control.get("caller")
+    if credential_sha256 is not None:
+        gateway_bound = hash_value(credential_sha256) and matches(
+            control, "gateway", caller=caller, credential_sha256=credential_sha256)
+    else:
+        gateway_bound = (isinstance(caller, str) and isinstance(subscription_id, str)
+            and subscription_id.endswith("/" + caller)
+            and any(matches(control, "gateway", caller=value) for value in (subscription_id, caller)))
     if (not isinstance(caller, str) or caller not in INVOCATION_CALLERS[actor] or control.get("status_code") != 200
             or control.get("status") == "blocked"
             or control.get("check_id") != f"route.{caller}.{actor}.{capability}"
             or capability == "discovery" and control.get("actual") != "gateway_card"
             or control.get("request_id") == observation["request_id"]
-            or not isinstance(subscription_id, str) or not subscription_id.endswith("/" + caller)
             or not matches(control, "application", method=capability,
                            runtime_identity=runtime_identity, caller=caller)
-            or not any(matches(control, "gateway", caller=value)
-                       for value in (subscription_id, caller))):
+            or not gateway_bound):
         return blocked
     if (max(observation["finished"], control["finished"])
             - min(observation["started"], control["started"]) > 900):
