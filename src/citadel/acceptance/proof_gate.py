@@ -106,7 +106,8 @@ def evaluate_check(check, report):
         return (evaluate_version if versions else evaluate_release)(observation, control, source, snapshots, records,
             runtime_identity=identities[actor], reference_identity=identities["reference-data"],
             observer_identity=observer, subscription=report["subscription_bindings"].get(actor))
-    if check["check_id"].startswith("fault."):
+    from .admission_limits import ADMISSION_CHECKS, evaluate_admission
+    if check["check_id"].startswith("fault.") or check["check_id"] in ADMISSION_CHECKS:
         from .operation_oracle import evaluate_operation
         if (control.get("suite_id") != report.get("run_id")
                 or control.get("caller") != "operator" or control.get("container") != "planner-operations"
@@ -114,7 +115,15 @@ def evaluate_check(check, report):
                 or control["runtime_identity"] in identities.values()
                 or control.get("operation_id") not in operations):
             return blocked
-        return evaluate_operation(observation, control, records,
+        if check["check_id"] in ADMISSION_CHECKS:
+            nested = observation.get("actual")
+            slot = nested.get("slot") if isinstance(nested, dict) else None
+            if (not isinstance(slot, dict) or not isinstance(slot.get("steps"), list)
+                    or len(slot["steps"]) != 3 or any(not isinstance(step, dict)
+                        or step.get("operation_id") not in operations for step in slot["steps"])):
+                return blocked
+        return (evaluate_admission if check["check_id"] in ADMISSION_CHECKS else evaluate_operation)(
+            observation, control, records,
             runtime_identity=identities["candidate-planner"], observer_identity=control["runtime_identity"])
     if check["check_id"].startswith("storage."):
         before, after = actual.get("before"), actual.get("after")

@@ -123,6 +123,24 @@ requires its four independently verified, actually executed storage denials.
   altered state, unobserved source or incomplete driver cannot become pass.
   Root accounting accepts an optional **shorter** inherited probe deadline;
   omission retains 900 seconds and no argument can increase that ceiling.
+- `admission-limits` uses the actual Candidate Planner MI and Blob SDK, without
+  subscription-secret access or model calls. Production accounting admits twenty
+  fixed-purpose candidate labels and forty-two execution identities, then actually
+  rejects candidate twenty-one and execution forty-three. These are **budget
+  admissions**, not fabricated agent completions or an alternative airport fixture.
+  An overlapping accounting run is rejected without changing persisted state.
+  The same worker also exercises the real shared `active-run-slot.json` lease:
+  current-owner renewal succeeds, a different owner gets the actual service 409,
+  and current-owner renewal still succeeds. A failed initial ownership control
+  stops before attempting another acquisition. Each physical lease request has
+  its own service/client IDs, destination and measured window; the oracle requires
+  actual `LeaseBlob` correlation, not just the isolated budget's rejection.
+  The controller independently observes the closed isolated budget, exact counters,
+  unchanged business state and absent overlapping run. Model/token/read allowances
+  remain unused, control reads stay within their existing 512-ticket envelope, and
+  no pool is preallocated or refilled. Three limit checks are wired through the
+  full hook and re-evaluated after sanitization. Other numeric boundaries remain
+  incomplete; these checks do not assert model usage or actual executed agent work.
 - `release-faults` runs only as the actual Release Reviewer in its existing image
   and identity. The controller derives an exact draft reference from a genuine
   completed comparison finding. The worker reads that immutable source through
