@@ -14,14 +14,17 @@ from .oracle import hash_value
 from .revision import RevisionProbe
 from .storage_probes import StorageControls
 from .admission_limits import ADMISSION_CHECKS, admission_snapshot, evaluate_admission
+from .read_limit import read_snapshot, evaluate_read_boundary
 
 
 def _groups(mode):
+    if mode == "read-limit":
+        return {"limit.read_attempts_run": {"limit.read_attempts_run"}}
     if mode == "admission-limits":
         return {"limit.agent_executions": ADMISSION_CHECKS}
     if mode == "operation-faults":
         return OPERATION_CHECKS
-    raise ValueError("Only fixed operation and nonmodel admission modes are supported")
+    raise ValueError("Only fixed operation, read and nonmodel admission modes are supported")
 
 
 def bind_operation_result(result, *, run_id, principal, account, mode="operation-faults"):
@@ -45,6 +48,15 @@ def bind_operation_result(result, *, run_id, principal, account, mode="operation
                     f"{account}/planner-operations/acceptance/{run_id}/observations/{operation}.json".encode()).hexdigest()):
             raise Blocked("operation_worker_authority_or_target_conflict")
         ids.append(operation)
+        if mode == "read-limit":
+            steps = row["actual"].get("steps")
+            if (not isinstance(steps, list) or not 0 <= len(steps) <= 513
+                    or any(not isinstance(step, dict) or step.get("operation_id") != operation + f"-read{index:03}"
+                        or step.get("target") != hashlib.sha256(
+                            f"{account}/planner-operations/acceptance/{run_id}/ledger-v1.json".encode()).hexdigest()
+                        for index, step in enumerate(steps))):
+                raise Blocked("read_boundary_physical_binding_conflict")
+            ids.extend(identity(step["operation_id"]) for step in steps)
         if mode == "admission-limits":
             slot = row["actual"].get("slot")
             if (not isinstance(slot, dict) or slot.get("scope_sha256") != sha256("acceptance/" + run_id)
@@ -68,7 +80,7 @@ class FaultAcceptance:
     def execute(self, report, *, mode="operation-faults"):
         _groups(mode)
         admission = mode == "admission-limits"
-        phase_key = "admission_phase" if admission else "operation_phase"
+        phase_key = "read_phase" if mode == "read-limit" else "admission_phase" if admission else "operation_phase"
         if phase_key in report:
             raise Blocked("operation_probe_intent_requires_reconciliation")
         accounts = [resource for resource in self.lifecycle.value["inventory"]
@@ -110,6 +122,7 @@ class FaultAcceptance:
             report["operation_ids"].append(snapshot["operation_id"])
             for row in phase["observations"]:
                 phase["snapshots"][row["operation_id"]] = snapshot | (
+                    read_snapshot(document) if mode == "read-limit" else
                     admission_snapshot(document, row["actual"]) if admission else
                     operation_snapshot(document, "candidate-planner", row["actual"]))
             phase["state"] = "observed" if result["state"] == "complete" else "blocked"
@@ -124,7 +137,8 @@ class FaultAcceptance:
     def evaluate(report, evidence, *, mode="operation-faults"):
         groups = _groups(mode)
         admission = mode == "admission-limits"
-        phase = report.get("admission_phase" if admission else "operation_phase", {})
+        phase = report.get("read_phase" if mode == "read-limit" else
+                           "admission_phase" if admission else "operation_phase", {})
         snapshots = phase.get("snapshots", {})
         output = []
         for row in phase.get("observations", []):
@@ -138,9 +152,10 @@ class FaultAcceptance:
             snapshot = snapshot | {"runtime_identity": observer}
             for check in sorted(groups.get(row.get("probe_id"), set())):
                 observation = row | {"check_id": check}
-                result = (evaluate_admission if admission else evaluate_operation)(observation, snapshot, evidence,
+                evaluator = evaluate_read_boundary if mode == "read-limit" else evaluate_admission if admission else evaluate_operation
+                result = evaluator(observation, snapshot, evidence,
                     runtime_identity=report.get("runtime_identities", {}).get("candidate-planner"),
                     observer_identity=observer)
-                output.append(result | {"expected": "boundary" if admission else "fault",
+                output.append(result | {"expected": "boundary" if check.startswith("limit.") else "fault",
                     "actual": {"observation": observation, "control": snapshot}})
         return output

@@ -111,6 +111,17 @@ class OperationOracleTests(unittest.IsolatedAsyncioTestCase):
             with self.subTest(mode=mode):
                 self.assertEqual(evaluate_operation(observed, snapshot, evidence,
                     runtime_identity="a" * 64, observer_identity="c" * 64)["status"], "pass")
+                if mode == "exhaustion":
+                    limit = observed | {"check_id": "limit.safe_read_retries"}
+                    self.assertEqual(evaluate_operation(limit, snapshot, evidence,
+                        runtime_identity="a" * 64, observer_identity="c" * 64)["status"], "pass")
+                    report = {"run_id": "suite1", "operation_ids": ["worker1", "operation1", "observer1"],
+                        "runtime_identities": {"candidate-planner": "a" * 64, "reference-data": "d" * 64,
+                            "evidence-assessor": "e" * 64, "release-reviewer": "f" * 64, "briefing-author": "0" * 64},
+                        "evidence": evidence}
+                    check = {"check_id": "limit.safe_read_retries", "expected": "boundary", "status": "pass",
+                        "actual": {"observation": limit, "control": snapshot | {"suite_id": "suite1"}}}
+                    self.assertEqual(evaluate_check(sanitize(check), sanitize(report))["status"], "pass")
                 snapshot["budget_state"]["remaining_reads"] = 510
                 self.assertEqual(evaluate_operation(observed, snapshot, evidence,
                     runtime_identity="a" * 64, observer_identity="c" * 64)["status"], "fail")

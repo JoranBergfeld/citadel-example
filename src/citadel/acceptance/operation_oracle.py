@@ -16,7 +16,7 @@ OPERATION_CHECKS = {
     "fault.fenced-explicit-retry": {"fault.fenced-explicit-retry", "fault.stale-generation-denied"},
     "fault.deadline-no-late-effect": {"fault.deadline-no-late-effect"},
     "fault.safe-read-recovery": {"fault.safe-read-recovery"},
-    "fault.safe-read-exhaustion": {"fault.safe-read-exhaustion"},
+    "fault.safe-read-exhaustion": {"fault.safe-read-exhaustion", "limit.safe_read_retries"},
 }
 
 

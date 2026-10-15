@@ -107,7 +107,8 @@ def evaluate_check(check, report):
             runtime_identity=identities[actor], reference_identity=identities["reference-data"],
             observer_identity=observer, subscription=report["subscription_bindings"].get(actor))
     from .admission_limits import ADMISSION_CHECKS, evaluate_admission
-    if check["check_id"].startswith("fault.") or check["check_id"] in ADMISSION_CHECKS:
+    if (check["check_id"].startswith("fault.") or check["check_id"] in ADMISSION_CHECKS
+            or check["check_id"] in ("limit.read_attempts_run", "limit.safe_read_retries")):
         from .operation_oracle import evaluate_operation
         if (control.get("suite_id") != report.get("run_id")
                 or control.get("caller") != "operator" or control.get("container") != "planner-operations"
@@ -115,6 +116,15 @@ def evaluate_check(check, report):
                 or control["runtime_identity"] in identities.values()
                 or control.get("operation_id") not in operations):
             return blocked
+        if check["check_id"] == "limit.read_attempts_run":
+            from .read_limit import evaluate_read_boundary
+            nested = observation.get("actual")
+            steps = nested.get("steps") if isinstance(nested, dict) else None
+            if (not isinstance(steps, list) or len(steps) != 512 or any(not isinstance(step, dict)
+                    or step.get("operation_id") not in operations for step in steps)):
+                return blocked
+            return evaluate_read_boundary(observation, control, records,
+                runtime_identity=identities["candidate-planner"], observer_identity=control["runtime_identity"])
         if check["check_id"] in ADMISSION_CHECKS:
             nested = observation.get("actual")
             slot = nested.get("slot") if isinstance(nested, dict) else None

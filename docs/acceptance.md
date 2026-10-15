@@ -141,6 +141,17 @@ requires its four independently verified, actually executed storage denials.
   no pool is preallocated or refilled. Three limit checks are wired through the
   full hook and re-evaluated after sanitization. Other numeric boundaries remain
   incomplete; these checks do not assert model usage or actual executed agent work.
+- `read-limit` spends the existing 512-ticket pool on 512 actual SDK reads of
+  an isolated empty ledger, then observes refusal before request 513. Tickets
+  are consumed immediately before each read, never bulk-prepaid or refilled.
+  Each read has its own client/service IDs, hash and measured window. The oracle
+  requires all 512 matching service records, rejects an additional observed read,
+  and checks an independent operator snapshot for unchanged state. The mode uses
+  the Candidate Planner MI without a subscription secret or model call. Its
+  same-image controller persists intent, restores the normal revision and refuses
+  replay. The numeric two-retry obligation also reuses the genuine three-attempt
+  safe-read exhaustion driver and independent accounting proof, not a configured
+  constant. Normal workflow counts such as 400/402 are not invariants.
 - `release-faults` runs only as the actual Release Reviewer in its existing image
   and identity. The controller derives an exact draft reference from a genuine
   completed comparison finding. The worker reads that immutable source through
