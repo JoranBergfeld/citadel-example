@@ -81,6 +81,9 @@ class ReleaseAcceptance:
         self.lifecycle = lifecycle
 
     def execute(self, report, *, mode="release-faults"):
+        if mode == "immutable-versions":
+            from .immutable_harness import ImmutableAcceptance
+            return ImmutableAcceptance(self.lifecycle).execute(report)
         if mode not in ("release-faults", "draft-versions"):
             raise ValueError("Only fixed release and draft-version modes are supported")
         versions = mode == "draft-versions"
@@ -147,6 +150,10 @@ class ReleaseAcceptance:
 
     @staticmethod
     def evaluate(report, evidence, *, mode="release-faults"):
+        if mode == "immutable-versions":
+            from .immutable_harness import ImmutableAcceptance
+            return ImmutableAcceptance.evaluate(report, evidence,
+                version_results=ReleaseAcceptance.evaluate(report, evidence, mode="draft-versions"))
         if mode not in ("release-faults", "draft-versions"):
             raise ValueError("Only fixed release and draft-version modes are supported")
         versions = mode == "draft-versions"

@@ -17,6 +17,11 @@ def content_hash(draft):
                    if key not in ("artifact_id", "version", "run_id", "operation_id")})
 
 
+def public_content_hash(value):
+    return sha256({key: value.get(key) for key in (
+        "schema_version", "airport_ident", "evidence", "classification", "gap_reasons", "caveats", "provenance")})
+
+
 def version_snapshot(document, result):
     operation = result["operation_id"]
     identifiers = [operation + suffix for suffix in ("-v1", "-a", "-b")]
@@ -31,7 +36,7 @@ def version_snapshot(document, result):
             or any(not isinstance(row, dict) for row in versions.values())):
         raise ValueError("Persisted draft-version state is malformed")
     return {"drafts": [{"artifact_id": row["artifact_id"], "version": row["version"],
-        "sha256": sha256(row), "content_sha256": content_hash(row),
+        "sha256": sha256(row), "content_sha256": content_hash(row), "projection_sha256": public_content_hash(row),
         "operation_id": row["operation_id"], "run_id": row["run_id"]}
         for _, row in sorted(versions.items())],
         "artifact_count": sum(len(rows) for rows in document["drafts"].values()),

@@ -35,6 +35,7 @@ release_source draft draft_sha256 projection_sha256 reference_reads
 input_hashes run_ids deadlines result_hashes simultaneous_commits conditional_conflicts
 rejected_state rejected_operation_id rejected_draft_sha256 rejected_count rejected_sha256
 drafts attempts responses draft_read content_sha256 source_sha256 expected_input_hashes result_kinds
+version_proof versions draft_before draft_after findings source_run fields_sha256 reviewer
 runtime_identities subscription_bindings credential_sha256
 name region sku version_upgrade_option verification a2a a2a_binding mcp mcp_transport
 model_path blob_data_api key_vault_data_api

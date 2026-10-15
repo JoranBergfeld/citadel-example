@@ -62,6 +62,28 @@ class ReleaseHarnessTests(unittest.TestCase):
 
             async def execute(self, request):
                 rows = []
+                if request["mode"] == "immutable-versions":
+                    descriptor = request["versions"]
+                    version_drafts, ledger = MemoryLedger(clock=time.time), MemoryLedger(clock=time.time)
+                    version_drafts.document = json.loads(self.objects["drafts",
+                        f"acceptance/{descriptor['run_id']}/drafts/{descriptor['operation_id']}.json"])
+                    operation, started = "immutableprobe", time.time()
+                    actual = await ReleaseProbes(ledger, drafts=DraftReader(version_drafts), reference=data,
+                        workload=request["workload"], enabled=True, source_run=descriptor["run_id"],
+                        deadline=request["deadline"]).immutable_versions(descriptor["drafts"], operation_id=operation)
+                    check = "fault.immutable-versions"
+                    rows.append({"check_id": check, "probe_id": check, "run_id": request["run_id"],
+                        "operation_id": operation, "caller": request["workload"],
+                        "runtime_identity": hashlib.sha256(request["client_id"].encode()).hexdigest(), "actual": actual,
+                        "target": hashlib.sha256((account + "/reviewer-operations/acceptance/" + request["run_id"]
+                                                  + "/observations/" + operation + ".json").encode()).hexdigest(),
+                        "request_id": "external-immutable", "status_code": 201,
+                        "started": started, "finished": time.time()})
+                    self.objects["findings", f"acceptance/{request['run_id']}/releases/{operation}.json"] = (
+                        canonical_bytes((await ledger.read())[0]))
+                    self.summary = canonical_bytes({"schema_version": 1, "run_id": request["run_id"],
+                                                    "state": "complete", "observations": rows})
+                    return
                 if request["mode"] == "draft-versions":
                     from citadel.acceptance.version_probes import VersionProbes
                     ledger, operation, started = MemoryLedger(clock=time.time), "versionprobe", time.time()
@@ -154,3 +176,18 @@ class ReleaseHarnessTests(unittest.TestCase):
         with self.assertRaises(Blocked):
             ReleaseAcceptance(lifecycle).execute(report, mode="draft-versions")
         self.assertEqual(len(native.dispatches), 2)
+        lifecycle.value["outputs"]["appInventory"] = [app]
+        native.app["properties"]["template"]["containers"][0]["env"][1]["value"] = "reviewer-operations"
+        restored = copy.deepcopy(native.app)
+        ReleaseAcceptance(lifecycle).execute(report, mode="immutable-versions")
+        self.assertEqual(report["immutable_phase"]["state"], "observed")
+        self.assertEqual(report["immutable_phase"]["deadline"], report["version_phase"]["deadline"])
+        self.assertEqual(report["immutable_phase"]["source"]["draft_before"]["sha256"],
+                         report["immutable_phase"]["source"]["draft_after"]["sha256"])
+        self.assertEqual(report["operation_ids"].count("immutableprobe-v1"), 1)
+        self.assertEqual(report["operation_ids"].count("immutableprobe-v2"), 1)
+        self.assertEqual(native.app, restored)
+        self.assertNotIn("PRIVATE", str(report))
+        with self.assertRaises(Blocked):
+            ReleaseAcceptance(lifecycle).execute(report, mode="immutable-versions")
+        self.assertEqual(len(native.dispatches), 3)

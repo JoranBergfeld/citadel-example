@@ -138,8 +138,21 @@ requires its four independently verified, actually executed storage denials.
   Ambiguous responses block instead of being interpreted as expected conflicts.
   Independent operator reads verify source-content lineage, immutable hashes,
   exact operation/input/deadline bindings and one version-two winner. This
-  implements `fault.concurrent-version-conflict`; it does not yet prove both
-  versions released as immutable findings or actual process restart.
+  implements `fault.concurrent-version-conflict`.
+- `immutable-versions` hands those two exact, actually committed versions to the
+  Release Reviewer using its own MI/key and real MCP reference reads. The reviewer
+  can read but cannot write the assessor's isolated source ledger. It inherits
+  the original assessor deadline; neither controller nor worker can extend it.
+  Two real releases produce independently read public findings. The first finding's
+  exact hash remains unchanged after the second release. Independent before/after
+  reads bind the unchanged private source and normal business ledgers.
+  The per-check oracle and sanitized export gate re-evaluate the entire assessor
+  source proof, source/child operation membership, both runtime identities,
+  allocated subscriptions, exact draft and public projection hashes, permitted
+  finding fields and actual application/gateway/storage correlations. Missing or
+  unrelated source proof blocks. Changed content, extra findings or malformed
+  versions fail. Interrupted handoff cannot automatically replay. These providers
+  do not establish actual process-restart proof.
 - Writable workloads persist one-shot admission and finite 512-ticket read pools
   in their existing operations container. Candidate Planner also acquires its
   existing active-run slot. Failed probe admissions/results are retained; repair

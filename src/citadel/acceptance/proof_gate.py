@@ -30,6 +30,37 @@ def evaluate_check(check, report):
                 and observation.get("run_id") == report.get("run_id"))):
         return blocked
     from .release_probes import RELEASE_CHECKS, validate_source
+    if check["check_id"] == "fault.immutable-versions":
+        from .immutable_oracle import evaluate_immutable
+        source = actual.get("source")
+        if not isinstance(source, dict) or not isinstance(source.get("version_proof"), dict):
+            return blocked
+        version = {"check_id": "fault.concurrent-version-conflict", "expected": "fault",
+                   "actual": source["version_proof"]}
+        if evaluate_check(version, report)["status"] != "pass":
+            return blocked
+        nested, observer = observation.get("actual"), control.get("runtime_identity")
+        snapshot_rows = [control, source.get("draft_before"), source.get("draft_after")]
+        snapshots = {}
+        for side in ("before", "after"):
+            rows = actual.get(side)
+            if (not isinstance(rows, list) or len(rows) != 2
+                    or any(not isinstance(row, dict) or not isinstance(row.get("container"), str) for row in rows)
+                    or {row["container"] for row in rows} != {"drafts", "findings"}):
+                return blocked
+            snapshots[side] = {row["container"]: row for row in rows}
+            snapshot_rows.extend(rows)
+        if (not isinstance(nested, dict) or not isinstance(nested.get("operation_ids"), list)
+                or any(identifier not in operations for identifier in nested["operation_ids"])
+                or any(not isinstance(row, dict) or row.get("suite_id") != report.get("run_id")
+                       or row.get("caller") != "operator" or row.get("action") != "read"
+                       or row.get("operation_id") not in operations for row in snapshot_rows)
+                or control.get("container") != "findings"
+                or not isinstance(report.get("subscription_bindings"), dict)
+                or not hash_value(observer) or observer in identities.values()):
+            return blocked
+        return evaluate_immutable(observation, control, source, snapshots, records, identities=identities,
+            subscriptions=report["subscription_bindings"], observer_identity=observer)
     if check["check_id"] in RELEASE_CHECKS or check["check_id"] == "fault.concurrent-version-conflict":
         from citadel.operations import OperationError
         from .release_oracle import evaluate_release

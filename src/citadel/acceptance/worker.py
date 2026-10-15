@@ -34,16 +34,19 @@ def validate_request(request, *, enabled, workload, client_id):
         keys.add("routes")
     if isinstance(request, dict) and request.get("mode") in ("release-faults", "draft-versions"):
         keys.add("release")
+    if isinstance(request, dict) and request.get("mode") == "immutable-versions":
+        keys.add("versions")
     if (enabled is not True or not isinstance(request, dict)
             or request.keys() != keys
             or type(request["schema_version"]) is not int or request["schema_version"] != 1
             or request["workload"] != workload
             or workload not in AGENTS or str(UUID(request["client_id"])) != str(UUID(client_id))
             or request["mode"] not in ("gateway-matrix", "operation-faults", "release-faults",
-                                      "draft-versions", "storage-boundaries", "origin-boundary")
+                                      "draft-versions", "immutable-versions", "storage-boundaries", "origin-boundary")
             or request["mode"] == "operation-faults" and workload not in ("candidate-planner", "briefing-author")
             or request["mode"] == "release-faults" and workload != "release-reviewer"
             or request["mode"] == "draft-versions" and workload != "evidence-assessor"
+            or request["mode"] == "immutable-versions" and workload != "release-reviewer"
             or type(request["deadline"]) not in (float, int) or not math.isfinite(request["deadline"])
             or not time.time() < request["deadline"] <= time.time() + 900):
         raise ValueError("Disabled, unallocated or malformed fixed-purpose probe")
@@ -56,6 +59,11 @@ def validate_request(request, *, enabled, workload, client_id):
     if "release" in request:
         from .release_probes import validate_source
         validate_source(request["release"])
+    if "versions" in request:
+        from .release_probes import validate_versions
+        validate_versions(request["versions"])
+        if request["versions"]["run_id"] == request["run_id"]:
+            raise ValueError("Reviewer requires a fresh run distinct from its assessor source")
     if request["mode"] == "storage-boundaries":
         from .storage_probes import validate_storage_manifest
         validate_storage_manifest(request["storage"])
@@ -82,7 +90,7 @@ async def publish_operation(container, *, run_id, workload, principal_id, check_
     identity(run_id)
     operation = identity(actual["operation_id"])
     from .release_probes import RELEASE_CHECKS
-    if not (workload == "release-reviewer" and check_id in RELEASE_CHECKS) and not (
+    if not (workload == "release-reviewer" and check_id in RELEASE_CHECKS | {"fault.immutable-versions"}) and not (
             workload == "evidence-assessor" and check_id == "fault.concurrent-version-conflict") and (
             workload not in ("candidate-planner", "briefing-author") or check_id not in {
             "fault.dropped-committed-write", "fault.pending-incomplete", "fault.fenced-explicit-retry",
@@ -142,6 +150,11 @@ async def run_release_faults(config, request, credential, pool, container):
     from citadel.runtime.network import GatewayPeers
     from .release_probes import ReleaseProbes, RELEASE_CHECKS
     deadline, run_id = request["deadline"], request["run_id"]
+    immutable = request["mode"] == "immutable-versions"
+    source = ({"run_id": request["versions"]["run_id"], "draft": request["versions"]["drafts"][0]}
+              if immutable else request["release"])
+    source_name = (f"acceptance/{request['versions']['run_id']}/drafts/{request['versions']['operation_id']}.json"
+                   if immutable else "ledger-v1.json")
     options = dict(credential=credential, api_version="2026-10-06", retry_total=0,
                    retry_connect=0, retry_read=0, retry_status=0, connection_timeout=5, read_timeout=30)
     results, state, reference_reads = [], "complete", []
@@ -169,11 +182,18 @@ async def run_release_faults(config, request, credential, pool, container):
     try:
         with read_scope(pool, deadline=deadline), correlate(run_id, run_id, config.target):
             async with ContainerClient(config.blob, "drafts", **options) as drafts:
-                reader = DraftReader(ProbeLedger(
-                    AzureBlobLedger(drafts.get_blob_client("ledger-v1.json"), control_plane=True), pool, deadline))
-                ref = request["release"]["draft"]
+                source_ledger = ProbeLedger(
+                    AzureBlobLedger(drafts.get_blob_client(source_name), control_plane=True), pool, deadline)
+                reader = DraftReader(source_ledger)
+                if immutable:
+                    document, _ = await source_ledger.read()
+                    source_deadline = document["runs"][source["run_id"]]["deadline"]
+                    if (type(source_deadline) not in (float, int) or not math.isfinite(source_deadline)
+                            or deadline > source_deadline):
+                        raise ValueError("Reviewer cannot extend the assessor control's inherited deadline")
+                ref = source["draft"]
                 draft = await reader.get_draft(ref["artifact_id"], ref["version"], ref["sha256"])
-                if draft["run_id"] != request["release"]["run_id"]:
+                if draft["run_id"] != source["run_id"]:
                     raise ValueError("Observed draft belongs to another source run")
                 async with SecretClient(config.vault, credential, api_version="2025-07-01",
                         retry_total=0, connection_timeout=5, read_timeout=30) as vault:
@@ -196,7 +216,7 @@ async def run_release_faults(config, request, credential, pool, container):
                             overwrite=False, timeout=5)
                     return results
                 async with ContainerClient(config.blob, "findings", **options) as findings:
-                    for check in sorted(RELEASE_CHECKS):
+                    for check in (["fault.immutable-versions"] if immutable else sorted(RELEASE_CHECKS)):
                         operation, started = uuid4().hex, time.time()
                         with correlate(run_id, operation, config.target):
                             ledger = AzureBlobLedger(findings.get_blob_client(
@@ -206,8 +226,10 @@ async def run_release_faults(config, request, credential, pool, container):
                             await ledger.initialize()
                             probe = ReleaseProbes(ProbeLedger(ledger, pool, deadline),
                                 drafts=reader, reference=reference, workload=config.target, enabled=True,
-                                source_run=request["release"]["run_id"], deadline=deadline)
-                            if check == "fault.dropped-committed-release":
+                                source_run=source["run_id"], deadline=deadline)
+                            if immutable:
+                                actual = await probe.immutable_versions(request["versions"]["drafts"], operation_id=operation)
+                            elif check == "fault.dropped-committed-release":
                                 actual = await probe.committed_response_loss(ref, operation_id=operation)
                             elif check == "fault.draft-hash-binding":
                                 actual = await probe.hash_binding(ref, operation_id=operation)
@@ -243,7 +265,7 @@ async def run_gateway_matrix(config, request):
             if not await store.open_pool(scope, exclusive=config.target == "candidate-planner"):
                 raise ValueError("Existing probe admission cannot be replayed")
             pool = TicketPool(store, scope, 512)
-            if request["mode"] in ("release-faults", "draft-versions"):
+            if request["mode"] in ("release-faults", "draft-versions", "immutable-versions"):
                 return await run_release_faults(config, request, credential, pool, container)
             if request["mode"] == "storage-boundaries":
                 from .storage_probes import StorageProbe

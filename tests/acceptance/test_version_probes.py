@@ -31,6 +31,17 @@ class VersionProbeTests(unittest.IsolatedAsyncioTestCase):
             draft = await DraftReader(ledger).get_draft(ref["artifact_id"], ref["version"], ref["sha256"])
             self.assertEqual(draft["run_id"], "version-worker")
             self.assertEqual(draft["airport_ident"], "EB01")
+        from citadel.acceptance.release_probes import ReleaseProbes
+        released = MemoryLedger(clock=time.time)
+        versions = await ReleaseProbes(released, drafts=DraftReader(ledger), reference=data,
+            workload="release-reviewer", enabled=True, source_run="version-worker", deadline=time.time() + 120
+            ).immutable_versions(result["drafts"], operation_id="versions")
+        self.assertEqual(versions["states"], ["succeeded", "succeeded"])
+        self.assertEqual(versions["artifact_count"], 2)
+        self.assertEqual([ref["version"] for ref in versions["findings"]], [1, 2])
+        self.assertEqual(versions["before_sha256"], versions["after_sha256"])
+        self.assertEqual(versions["drafts"], result["drafts"])
+        self.assertNotIn("Never export this assessment", str(versions))
         for workload, enabled in (("release-reviewer", True), ("evidence-assessor", False)):
             with self.assertRaises(ValueError):
                 VersionProbes(ledger, reference=data, workload=workload, enabled=enabled,

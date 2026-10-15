@@ -48,7 +48,9 @@ class VersionWorkerTests(unittest.IsolatedAsyncioTestCase):
                 pass
             async def get_secret(self, name):
                 secret_names.append(name)
-                return SimpleNamespace(value="evidence-assessor")
+                if name not in ("caller-evidence-assessor", "caller-release-reviewer"):
+                    raise AssertionError("Unallocated test secret")
+                return SimpleNamespace(value=name.removeprefix("caller-"))
         class Wire(TicketWire):
             async def send(self, request, **options):
                 response = await super().send(request, **options)
@@ -85,17 +87,34 @@ class VersionWorkerTests(unittest.IsolatedAsyncioTestCase):
               redirect_stdout(io.StringIO())):
             async with app.app.router.lifespan_context(app.app):
                 rows = await run_gateway_matrix(config, request)
+                assessor_requests = list(wire.requests)
+                reviewer = SimpleNamespace(**(vars(config) | {"target": "release-reviewer",
+                    "client_id": "22222222-2222-2222-2222-222222222222",
+                    "operations_container": "reviewer-operations", "subscription_secret": "caller-release-reviewer"}))
+                version_request = {"schema_version": 1, "mode": "immutable-versions", "workload": reviewer.target,
+                    "client_id": reviewer.client_id, "run_id": "immutable-worker", "deadline": request["deadline"],
+                    "versions": {"run_id": request["run_id"], "operation_id": rows[0]["operation_id"],
+                                 "drafts": rows[0]["actual"]["drafts"]}}
+                with patch.dict(os.environ, {"AZURE_PRINCIPAL_ID": reviewer.client_id}):
+                    released = await run_gateway_matrix(reviewer, version_request)
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["check_id"], "fault.concurrent-version-conflict")
         self.assertEqual(rows[0]["actual"]["states"], ["running", "succeeded"])
         self.assertEqual(rows[0]["actual"]["artifact_count"], 2)
         self.assertGreaterEqual(rows[0]["actual"]["conditional_conflicts"], 1)
         self.assertEqual(len(rows[0]["actual"]["reference_reads"]), 3)
-        self.assertEqual(identities, [{"client_id": config.client_id}])
-        self.assertEqual(secret_names, ["caller-evidence-assessor"])
+        self.assertEqual(identities, [{"client_id": config.client_id}, {"client_id": reviewer.client_id}])
+        self.assertEqual(secret_names, ["caller-evidence-assessor", "caller-release-reviewer"])
         self.assertEqual(wire.blobs["/drafts/ledger-v1.json"], before)
         self.assertTrue(all("/findings/" not in row.url and "/reviewer-operations/" not in row.url
-                            for row in wire.requests))
+                            for row in assessor_requests))
+        self.assertTrue(all(row.method == "GET" for row in wire.requests[len(assessor_requests):] if "/drafts/" in row.url))
+        self.assertEqual(len(released), 1)
+        self.assertEqual(released[0]["check_id"], "fault.immutable-versions")
+        self.assertEqual(released[0]["actual"]["artifact_count"], 2)
+        self.assertEqual(released[0]["actual"]["before_sha256"], released[0]["actual"]["after_sha256"])
+        self.assertEqual(released[0]["actual"]["drafts"], rows[0]["actual"]["drafts"])
+        self.assertNotIn("PRIVATE ASSESSMENT", json.dumps(released))
         self.assertTrue(all(row.headers["x-ms-version"] == API_VERSION for row in wire.requests))
         self.assertNotIn("PRIVATE ASSESSMENT", json.dumps(rows))
         self.assertLessEqual(len([key for key in wire.blobs if "/read-tickets/" in key]), 512)

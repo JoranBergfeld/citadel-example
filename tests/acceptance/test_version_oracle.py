@@ -87,3 +87,80 @@ class VersionOracleTests(unittest.IsolatedAsyncioTestCase):
         tampered["operation_state"]["states"] = ["succeeded", "succeeded", "succeeded"]
         self.assertEqual(evaluate(control=tampered)["status"], "fail")
         self.assertNotIn("PRIVATE", str(snapshot))
+        from citadel.acceptance.immutable_oracle import immutable_snapshot, evaluate_immutable
+        from citadel.acceptance.release_probes import ReleaseProbes
+        from citadel.operations import DraftReader
+        released = MemoryLedger(clock=time.time)
+        immutable = await ReleaseProbes(released, drafts=DraftReader(ledger), reference=data,
+            workload="release-reviewer", enabled=True, source_run="worker",
+            deadline=snapshot["operation_state"]["deadlines"][0]
+            ).immutable_versions(actual["drafts"], operation_id="immutable")
+        base = now + 10
+        immutable["reference_reads"] = [receipt | {
+            "request_id": "new-" + receipt["method"], "run_id": "review-worker", "operation_id": "review-worker",
+            "started": base - .7, "finished": base - .5} for receipt in actual["reference_reads"]]
+        immutable_row = {"check_id": "fault.immutable-versions", "probe_id": "fault.immutable-versions",
+            "run_id": "review-worker", "operation_id": "immutable", "caller": "release-reviewer",
+            "runtime_identity": "2" * 64, "actual": immutable, "request_id": "immutable-publish",
+            "status_code": 201, "target": sha256("immutable-publication"), "started": base, "finished": base + 1}
+        immutable_state = read("immutable-state", "findings", base + 2, sha256("immutable-ledger")) | (
+            immutable_snapshot((await released.read())[0], immutable))
+        immutable_source = {"version_proof": exported["actual"],
+            "versions": {"run_id": "worker", "operation_id": "probe", "drafts": actual["drafts"]},
+            "draft_before": read("draft-before", "drafts", base - 1, sha256("isolated")),
+            "draft_after": read("draft-after", "drafts", base + 2, sha256("isolated"))}
+        business = {side: {container: read("immutable-" + side + container, container,
+            base - 2 if side == "before" else base + 2) for container in ("drafts", "findings")}
+            for side in ("before", "after")}
+        all_evidence = [*evidence,
+            {"source": "application", "method": "execution", "request_id": "immutable-publish", "status_code": 201,
+             "target": immutable_row["target"], "runtime_identity": "2" * 64, "caller": "release-reviewer",
+             "run_id": "review-worker", "operation_id": "immutable", "observed": base + 1,
+             "facts": {"sha256": sha256(immutable), "probe_id": "fault.immutable-versions"}},
+            {"source": "storage", "method": "PutBlob", "request_id": "immutable-publish", "status_code": 201,
+             "target": immutable_row["target"], "runtime_identity": "2" * 64, "client_request_id": "immutable",
+             "observed": base + 1}]
+        for row in [immutable_state, immutable_source["draft_before"], immutable_source["draft_after"],
+                    *business["before"].values(), *business["after"].values()]:
+            all_evidence.append({"source": "storage", "method": "GetBlob", "request_id": row["request_id"],
+                "status_code": 206, "target": row["target"], "runtime_identity": "b" * 64,
+                "client_request_id": row["operation_id"], "observed": row["started"]})
+        for receipt in immutable["reference_reads"]:
+            all_evidence.extend([
+                {"source": "gateway", "method": "POST", "caller": "release-reviewer",
+                 "request_id": receipt["request_id"], "status_code": 200, "target": receipt["target"],
+                 "credential_sha256": "7" * 64, "observed": base - .5},
+                {"source": "application", "method": receipt["method"], "caller": "release-reviewer",
+                 "request_id": receipt["request_id"], "status_code": 200, "runtime_identity": "c" * 64,
+                 "run_id": "review-worker", "operation_id": "review-worker", "observed": base - .5}])
+        def check_immutable(control=immutable_state, records=all_evidence, source_proof=immutable_source):
+            return evaluate_immutable(immutable_row, control, source_proof, business, records,
+                identities=report["runtime_identities"], subscriptions={"evidence-assessor": "d" * 64,
+                    "release-reviewer": "7" * 64}, observer_identity="b" * 64)
+        self.assertEqual(check_immutable()["status"], "pass")
+        malformed_version = copy.deepcopy(immutable_state)
+        malformed_version["findings"][0]["version"] = True
+        self.assertEqual(check_immutable(control=malformed_version)["status"], "fail")
+        self.assertEqual(check_immutable(control=immutable_state | {"artifact_count": 3})["status"], "fail")
+        changed_source = copy.deepcopy(immutable_source)
+        changed_source["draft_after"]["sha256"] = "8" * 64
+        self.assertEqual(check_immutable(source_proof=changed_source)["status"], "fail")
+        self.assertEqual(check_immutable(records=[row for row in all_evidence
+            if not str(row.get("request_id", "")).startswith("new-")])["status"], "blocked")
+        self.assertNotIn("PRIVATE", str(immutable_state))
+        immutable_export = {"check_id": "fault.immutable-versions", "status": "pass", "expected": "fault",
+            "actual": {"observation": immutable_row, "control": immutable_state, "source": immutable_source,
+                **{side: list(rows.values()) for side, rows in business.items()}}}
+        immutable_report = report | {"evidence": all_evidence,
+            "subscription_bindings": {"evidence-assessor": "d" * 64, "release-reviewer": "7" * 64},
+            "operation_ids": [*report["operation_ids"], "review-worker", "immutable", *immutable["operation_ids"],
+                "immutable-state", "draft-before", "draft-after",
+                *[row["operation_id"] for rows in business.values() for row in rows.values()]]}
+        self.assertEqual(evaluate_check(sanitize(immutable_export), sanitize(immutable_report))["status"], "pass")
+        for missing in ("draft-before", "draft-after", "immutable-v1", "probe-a", "source-draft"):
+            self.assertEqual(evaluate_check(sanitize(immutable_export), sanitize(immutable_report | {
+                "operation_ids": [name for name in immutable_report["operation_ids"] if name != missing]
+            }))["status"], "blocked")
+        forged_source = copy.deepcopy(immutable_export)
+        forged_source["actual"]["source"]["version_proof"]["source"]["release_source"]["run_id"] = "unrelated"
+        self.assertEqual(evaluate_check(sanitize(forged_source), sanitize(immutable_report))["status"], "blocked")

@@ -28,6 +28,21 @@ def validate_source(value):
     return value
 
 
+def validate_versions(value):
+    if (not isinstance(value, dict) or value.keys() != {"run_id", "operation_id", "drafts"}
+            or not isinstance(value["drafts"], list) or len(value["drafts"]) != 2):
+        raise ValueError("Exactly two observed versions from one assessor control are required")
+    identity(value["run_id"])
+    identity(value["operation_id"])
+    for version, ref in enumerate(value["drafts"], 1):
+        validate_source({"run_id": value["run_id"], "draft": ref})
+        if ref["artifact_id"] != value["operation_id"] or ref["version"] != version:
+            raise ValueError("Version references differ from the fixed assessor source")
+    if value["drafts"][0]["sha256"] == value["drafts"][1]["sha256"]:
+        raise ValueError("Distinct immutable version hashes required")
+    return value
+
+
 class _ConcurrentCommits:
     def __init__(self, ledger, deadline):
         self.ledger, self.deadline = ledger, deadline
@@ -57,6 +72,39 @@ class ReleaseProbes:
             raise ValueError("Only a bounded, explicitly enabled actual reviewer may run release faults")
         self.ledger, self.drafts, self.reference = ledger, drafts, reference
         self.run_id, self.deadline = identity(source_run), deadline
+
+    async def immutable_versions(self, references, *, operation_id=None):
+        if (not isinstance(references, list) or len(references) != 2
+                or any(not isinstance(row, dict) for row in references)
+                or [row.get("version") for row in references] != [1, 2]
+                or references[0].get("artifact_id") != references[1].get("artifact_id")):
+            raise ValueError("Two exact versions of the same actual draft are required")
+        for ref in references:
+            validate_source({"run_id": self.run_id, "draft": ref})
+        if references[0]["sha256"] == references[1]["sha256"] or time.time() >= self.deadline:
+            raise ValueError("Distinct immutable hashes and an unexpired deadline are required")
+        operation = identity(operation_id or uuid4().hex)
+        identifiers = [identity(operation + suffix) for suffix in ("-v1", "-v2")]
+        reviewer = Operations(self.ledger, workload="release-reviewer")
+        findings, states, before = [], [], None
+        for identifier, ref in zip(identifiers, references):
+            await reviewer.accept("evidence-assessor", "release", identifier, {"draft": ref},
+                                  run_id=self.run_id, deadline=self.deadline)
+            owner = await reviewer.claim("evidence-assessor", "release", identifier,
+                                         worker=uuid4().hex, lease_seconds=180)
+            status = await reviewer.release(owner, ref, drafts=self.drafts, reference=self.reference)
+            result = status["result"]
+            finding = await reviewer.get_finding(result["artifact_id"], result["version"])
+            findings.append({"artifact_id": result["artifact_id"], "version": result["version"], "sha256": sha256(finding)})
+            states.append(status["state"])
+            if before is None:
+                before = sha256(finding)
+        first = await reviewer.get_finding(findings[0]["artifact_id"], findings[0]["version"])
+        document, _ = await self.ledger.read()
+        return {"operation_id": operation, "operation_ids": identifiers, "states": states,
+            "source_run": self.run_id, "drafts": references, "findings": findings,
+            "artifact_count": sum(len(rows) for rows in document["findings"].values()),
+            "before_sha256": before, "after_sha256": sha256(first)}
 
     async def hash_binding(self, draft_ref, *, operation_id=None):
         validate_source({"run_id": self.run_id, "draft": draft_ref})
