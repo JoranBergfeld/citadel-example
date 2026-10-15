@@ -32,6 +32,7 @@ MODES = ("missing-certificate", "unrelated-certificate", "forged-context")
 def unrelated_certificate():
     """Ephemeral unrelated key, never the gateway key; private files always removed."""
     directory = Path(".build") / ("acceptance-certificate-" + uuid4().hex)
+    directory.parent.mkdir(mode=0o700, exist_ok=True)
     directory.mkdir(mode=0o700)
     keyfile, certfile = directory / "key.pem", directory / "certificate.pem"
     try:

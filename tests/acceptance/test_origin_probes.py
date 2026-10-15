@@ -1,8 +1,12 @@
 import hashlib
 import json
+import os
+import shutil
 import ssl
 import time
 import unittest
+from pathlib import Path
+from uuid import uuid4
 
 import httpx
 
@@ -75,3 +79,22 @@ class OriginProbeTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(OperationError):
             await probe.observe("missing-certificate")
         self.assertEqual(self.requests, [])
+
+    async def test_unrelated_certificate_files_are_private_and_removed_from_a_fresh_working_directory(self):
+        previous = Path.cwd()
+        root = previous / ".build" / ("cold-origin-" + uuid4().hex)
+        root.mkdir(parents=True)
+        try:
+            os.chdir(root)
+
+            def client(**options):
+                certificates = list(Path(".").rglob("*.pem"))
+                self.assertEqual(len(certificates), 2)
+                self.assertTrue(all(path.stat().st_mode & 0o777 == 0o600 for path in certificates))
+                return self.client(**options)
+
+            await self.probe(client_factory=client).observe("unrelated-certificate")
+            self.assertEqual(list(Path(".").rglob("*.pem")), [])
+        finally:
+            os.chdir(previous)
+            shutil.rmtree(root)
