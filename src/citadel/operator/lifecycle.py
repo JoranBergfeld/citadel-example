@@ -62,6 +62,9 @@ class Lifecycle:
         self.groups = {team: f"citadel-{self.id}-{team}" for team in TEAMS}
 
     def command(self, args):
+        if args.command == "record-plan-observation":
+            from .plan import record_observation
+            return record_observation(self, args.observation, args.evidence)
         if args.command == "acceptance":
             from .scenarios import acceptance_hook
             return acceptance_hook(self, "full-acceptance", args.run_id)
@@ -165,6 +168,8 @@ class Lifecycle:
         return result
 
     def arm(self, action, *, runtime=False):
+        if runtime:
+            self.require_plan_observation()
         parameters = {"parameters": {key: {"value": value} for key, value in self.parameters(runtime).items()}}
         with self.native.document(parameters) as path:
             result = self.native.az(
@@ -179,7 +184,6 @@ class Lifecycle:
 
     def preflight(self):
         self.check()
-        self.native.verify_plan_read_contract()
         account = self.native.az("account", "show", "--subscription", self.config["subscriptionId"])
         if (account["id"] != self.config["subscriptionId"] or account["tenantId"] != self.config["tenantId"]
                 or account["state"] != "Enabled"):
@@ -279,6 +283,7 @@ class Lifecycle:
         self.capture_outputs(self.arm("create"))
         self.value["phase"] = "foundation_pending_runtime"
         self.state.save()
+        self.require_plan_observation()
         self.bootstrap()
         self.build(wheelhouse)
         self.arm("validate", runtime=True)
@@ -478,6 +483,10 @@ class Lifecycle:
                 "ageWarning24h": (now() - datetime.fromisoformat(self.value["created"])).total_seconds() >= 86400,
                 "automaticDeletion": False, "monetaryCeiling": None}
 
+    def require_plan_observation(self):
+        from .plan import require_observation
+        return require_observation(self)
+
     def verify_inventory(self):
         self.inventory()
         capabilities = self.value["outputs"]["inventory"]["capabilities"]
@@ -527,10 +536,7 @@ class Lifecycle:
             raise Blocked("findings_host_environment_mismatch")
         self.value["inventoryMetadataVerified"] = True
         self.state.save()
-        # The approved 2024-03-01 GET schema has no plan/SKU field either.
-        # An empty properties object must not be turned into "Free". A separately
-        # approved actual plan-read interface is required before live acceptance.
-        raise Blocked("api_center_plan_read_contract_unresolved")
+        self.require_plan_observation()
 
     def collect(self):
         deadline = time.monotonic() + 600
@@ -542,7 +548,9 @@ class Lifecycle:
             self.native.deadline = previous
 
     def collect_with_deadline(self, deadline):
+        from .plan import observation_summary
         self.inventory()
+        plan = observation_summary(self)
         telemetry = []
         workspaces = [r for r in self.value["inventory"] if "/Microsoft.OperationalInsights/workspaces/" in r
                       and "/tables/" not in r]
@@ -562,6 +570,7 @@ class Lifecycle:
                   "runs": self.value["runs"],
                   "configuredImages": sorted({app["image"] for app in self.value.get("applications", {}).values()}),
                   "bootstrapVerifiedCount": sum(v == "verified" for v in self.value["bootstrap"].values()),
+                  "apiCenterPlan": plan,
                   "acceptance": "blocked", "required": ["task20_harness", "live_correlation",
                       "rotation_proof", "operator_prose_signoff", "two_consecutive_passes",
                       "fresh_deployment", "manual_teardown"],
@@ -585,7 +594,8 @@ class Lifecycle:
                    f"Phase: `{report['phase']}`. Active resources: {report['activeCount']}. "
                    f"Recorded runs: {len(report['runs'])}.\n\n"
                    "**Acceptance: blocked.** Lifecycle export is not live authorization, "
-                   "model inference, correlation, Free-plan, rotation or prose-signoff proof. "
+                   "model inference, correlation, rotation or prose-signoff proof. "
+                   "The separately recorded human portal observation is not automated plan verification. "
                    "See evidence.json and retained prior exports for measured data and remaining gates.\n\n"
                    "No monetary ceiling. Review all warm/model/telemetry/probe/failed-run and residual costs. "
                    "Teardown is manual; deletion does not establish immediate erasure.\n")

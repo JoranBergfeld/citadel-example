@@ -38,10 +38,10 @@ class LifecycleTests(test_cli.CliCase):
         self.assertEqual((code, result["code"]), (2, "resource_group_ownership_conflict"))
         self.assertFalse(any("delete" in call for call in fixture.calls))
 
-    def test_acceptance_hook_is_honestly_blocked_not_a_canned_pass(self):
+    def test_acceptance_requires_actual_foundation_before_any_provider(self):
         self.initialize()
         code, result = self.cli("acceptance", "--state-dir", str(self.state), adapter=CloudFixture())
-        self.assertEqual((code, result["code"]), (2, "task20_acceptance_harness_required"))
+        self.assertEqual((code, result["code"]), (2, "api_center_foundation_required"))
 
     def test_rotation_cannot_retire_credentials_without_live_control_evidence(self):
         self.initialize()

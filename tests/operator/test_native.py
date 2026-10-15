@@ -42,11 +42,19 @@ class NativeTests(unittest.TestCase):
                 raise RuntimeError("fixture")
         self.assertFalse(Path(filename).exists())
 
-    def test_production_plan_gate_blocks_instead_of_inventing_service_sku(self):
-        native = Native({"tools": {"azurePython": "/locked/azure/bin/python"}}, self.directory)
-        with self.assertRaises(Blocked) as caught:
-            native.verify_plan_read_contract()
-        self.assertEqual(caught.exception.code, "api_center_plan_read_contract_unresolved")
+    def test_service_get_uses_pinned_api_and_never_synthesizes_plan_metadata(self):
+        calls = []
+        resource = "/subscriptions/private-target/resourceGroups/owned/providers/Microsoft.ApiCenter/services/actual"
+        response = {"id": resource, "systemData": {"createdAt": "2026-01-01T00:00:00Z"},
+                    "properties": {"provisioningState": "Succeeded"}}
+        def process(args, **kwargs):
+            calls.append((args, json.loads(kwargs["input"])))
+            return subprocess.CompletedProcess(args, 0, json.dumps(response).encode(), b"")
+        native = Native({"tools": {"azurePython": "/locked/azure/bin/python"}},
+                        self.directory, process=process)
+        self.assertEqual(native.rest("get", resource, "2024-03-01"), response)
+        self.assertNotIn(resource, str(calls[0][0]))
+        self.assertIn("https://management.azure.com" + resource + "?api-version=2024-03-01", calls[0][1])
 
     def test_cloud_driver_uses_private_local_context_and_never_changes_host_config(self):
         calls = []

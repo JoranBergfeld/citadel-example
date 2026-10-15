@@ -23,6 +23,10 @@ def parser():
     initialize = commands.add_parser("init")
     initialize.add_argument("--config", required=True)
     initialize.add_argument("--state-dir", required=True)
+    observation = commands.add_parser("record-plan-observation")
+    observation.add_argument("--state-dir", required=True)
+    observation.add_argument("--observation", required=True)
+    observation.add_argument("--evidence", required=True)
     for name in ("check", "preflight", "deploy", "inventory", "collect", "teardown", "acceptance"):
         command = commands.add_parser(name)
         command.add_argument("--state-dir", required=True)
@@ -78,7 +82,13 @@ def main(argv=None, *, stdout=None, adapter=None):
         print(json.dumps(result, sort_keys=True), file=stdout)
         return 1 if result.get("status") == "teardown_partial" else 0
     except Blocked as exc:
-        print(json.dumps({"status": "blocked", "code": exc.code}), file=stdout)
+        result = {"status": "blocked", "code": exc.code}
+        if exc.code == "api_center_portal_observation_required":
+            result["nextStep"] = (
+                "Open portalUrl in private STATE/api-center-plan-request.json; observe the actual plan, "
+                "save private evidence, then use record-plan-observation. Resume deploy explicitly afterwards."
+            )
+        print(json.dumps(result), file=stdout)
         return 2
     except EvidenceError as exc:
         print(json.dumps({"status": "fail", "code": exc.code}), file=stdout)

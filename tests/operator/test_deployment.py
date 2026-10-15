@@ -1,9 +1,12 @@
 import copy
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
+import hashlib
 import json
 import os
 from pathlib import Path
+import sys
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
@@ -27,6 +30,7 @@ class AzureFixture:
         self.registry = self.platform + "Microsoft.ContainerRegistry/registries/actualcreated"
         self.workspace = self.platform + "Microsoft.OperationalInsights/workspaces/citadel-test19-logs"
         self.center = self.platform + "Microsoft.ApiCenter/services/inventory"
+        self.center_created = "2026-01-01T00:00:00Z"
         self.gateway = "https://actual-gateway.azure-api.net"
         self.outputs = {
             "inventory": {"deploymentId": "test19", "platform": {"resources": [self.registry, self.center, self.workspace]},
@@ -47,10 +51,6 @@ class AzureFixture:
     def document(self, value):
         with Native(self.config, self.directory).document(value) as path:
             yield path
-
-    def verify_plan_read_contract(self):
-        # Exercise downstream command contracts, not actual Free-plan proof.
-        return None
 
     def run(self, args, **kwargs):
         self.calls.append(tuple(args))
@@ -105,6 +105,9 @@ class AzureFixture:
                 self.outputs["inventory"]["groups"] = [g["id"] for g in self.groups]
                 if params["deployRuntime"]:
                     self.runtime(params)
+                else:
+                    self.outputs["appInventory"] = []
+                    self.outputs["inventory"]["capabilities"] = {"state": "not_configured"}
                 for group in self.groups:
                     self.resources.setdefault(group["name"], [])
                 result = {k: {"value": copy.deepcopy(v)} for k, v in self.outputs.items()}
@@ -137,6 +140,10 @@ class AzureFixture:
         raise AssertionError("Unexpected Azure command " + str(args[:3]))
 
     def runtime(self, params):
+        self.outputs["inventory"]["capabilities"] = {
+            "service": self.center, "workspace": self.center + "/workspaces/default",
+            "restCapabilities": [self.center + "/workspaces/default/apis/released-findings",
+                                 self.center + "/workspaces/default/apis/released-findings/deployments/gateway"]}
         self.outputs["appInventory"] = []
         self.environments = []
         teams = {"reference-data": "reference", "evidence-assessor": "evidence", "release-reviewer": "evidence",
@@ -171,7 +178,10 @@ class AzureFixture:
     def rest(self, method, resource, api, body=None):
         self.calls.append(("rest", method, resource, api))
         if resource == self.center:
-            return {"properties": {"provisioningState": "Succeeded"}}
+            return {"id": self.center, "location": "westeurope",
+                    "tags": {"citadel-deployment": "test19"},
+                    "systemData": {"createdAt": self.center_created},
+                    "properties": {"provisioningState": "Succeeded"}}
         if resource == self.workspace:
             return {"properties": {"customerId": "fixture-workspace"}}
         if resource.endswith("/apis/released-findings"):
@@ -207,18 +217,203 @@ class DeploymentTests(test_cli.CliCase):
     def deploy(self):
         return self.cli("deploy", "--state-dir", str(self.state), "--confirm-paid", adapter=self.fixture)
 
-    def assert_deployed_blocked_on_plan(self):
+    def record_observation(self, **changes):
+        request = json.loads((self.state / "api-center-plan-request.json").read_text())
+        evidence = self.directory / "portal-capture.txt"
+        evidence.write_bytes(b"TEST FIXTURE ONLY: operator observed Free in the actual resource portal")
+        evidence.chmod(0o600)
+        observation = {k: request[k] for k in ("requestId", "deploymentId", "resourceId", "resourceCreatedAt")}
+        observation.update(observedAt=datetime.now(timezone.utc).isoformat(), observedPlan="Free",
+                           evidenceSha256=hashlib.sha256(evidence.read_bytes()).hexdigest())
+        observation.update(changes)
+        path = self.directory / "portal-observation.json"
+        path.write_text(json.dumps(observation))
+        path.chmod(0o600)
+        return self.cli("record-plan-observation", "--state-dir", str(self.state),
+                        "--observation", str(path), "--evidence", str(evidence), adapter=self.fixture)
+
+    def test_matching_recorded_portal_evidence_allows_explicit_same_id_resume(self):
+        self.assertEqual(self.deploy()[0], 2)
+        before = len(self.fixture.parameters)
+        code, report = self.record_observation()
+        self.assertEqual((code, report.get("status")), (0, "api_center_free_observation_recorded"), report)
+        self.assertEqual(len(self.fixture.parameters), before, "recording must not deploy automatically")
+        for name in ("api-center-plan-proof.json", "api-center-plan-evidence.bin"):
+            self.assertEqual((self.state / name).stat().st_mode & 0o777, 0o600)
+        self.assertNotIn(self.values["subscriptionId"], json.dumps(report))
+        self.assertNotIn(self.fixture.center, json.dumps(report))
         code, report = self.deploy()
-        self.assertEqual((code, report.get("code")), (2, "api_center_plan_read_contract_unresolved"), report)
+        self.assertEqual((code, report.get("status")), (0, "deployed_unverified"), report)
+        creates = [p for action, p in self.fixture.parameters if action == "create"]
+        self.assertEqual([p["deployRuntime"] for p in creates], [False, False, True])
+        self.assertEqual(len(self.fixture.blobs), 15)
+
+    def test_wrong_non_free_or_unbound_observations_never_unlock_runtime(self):
+        self.assertEqual(self.deploy()[0], 2)
+        for changes in (
+            {"deploymentId": "another"},
+            {"resourceId": self.fixture.center + "-foreign"},
+            {"resourceCreatedAt": "2026-01-02T00:00:00+00:00"},
+            {"requestId": "previous-request"},
+            {"observedPlan": "Standard"},
+            {"observedPlan": True},
+            {"observedAt": "2025-01-01T00:00:00Z"},
+            {"observedAt": "2099-01-01T00:00:00Z"},
+            {"observedAt": "2026-01-01T00:00:00"},
+            {"evidenceSha256": "0" * 64},
+        ):
+            with self.subTest(changes=changes):
+                code, report = self.record_observation(**changes)
+                self.assertEqual(code, 2, report)
+        code, report = self.deploy()
+        self.assertEqual((code, report.get("code")), (2, "api_center_portal_observation_required"))
+        self.assertFalse(any(p["deployRuntime"] for _, p in self.fixture.parameters))
+
+    def test_acceptance_provider_cannot_run_without_current_incarnation_proof(self):
+        self.assertEqual(self.deploy()[0], 2)
+        calls = []
+        def acceptance(**kwargs):
+            calls.append(kwargs["check_id"])
+            return {"status": "pass", "run_id": kwargs["run_id"], "evidence_sha256": "f" * 64}
+        args = ("acceptance", "--state-dir", str(self.state), "--run-id", "fixture-acceptance")
+        with patch.dict(sys.modules, {"citadel.acceptance.operator_hooks": SimpleNamespace(run=acceptance)}):
+            code, report = self.cli(*args, adapter=self.fixture)
+            self.assertEqual((code, report.get("code")), (2, "api_center_portal_observation_required"), report)
+            self.assertEqual(calls, [])
+            self.assertEqual(self.record_observation()[0], 0)
+            self.assertEqual(self.deploy()[0], 0)
+            self.assertEqual(self.cli(*args, adapter=self.fixture)[0], 0)
+            self.fixture.center_created = "2026-01-02T00:00:00Z"
+            code, report = self.cli(*args, adapter=self.fixture)
+            self.assertEqual((code, report.get("code")), (2, "api_center_portal_observation_required"))
+            self.assertEqual(calls, ["full-acceptance"])
+            self.assertEqual(self.deploy()[0], 2)
+            self.assertEqual(self.record_observation()[0], 0)
+            self.assertEqual(self.deploy()[0], 0)
+            self.assertEqual(self.cli(*args, adapter=self.fixture)[0], 0)
+            self.assertEqual(calls, ["full-acceptance", "full-acceptance"])
+
+    def test_recreation_during_image_build_blocks_runtime_arm_activation(self):
+        self.assertEqual(self.deploy()[0], 2)
+        self.assertEqual(self.record_observation()[0], 0)
+        original = self.fixture.run
+        def recreate(args, **kwargs):
+            result = original(args, **kwargs)
+            if args[:2] == ["docker", "build"]:
+                self.fixture.center_created = "2026-01-02T00:00:00Z"
+            return result
+        self.fixture.run = recreate
+        code, report = self.deploy()
+        self.assertEqual((code, report.get("code")), (2, "api_center_portal_observation_required"), report)
+        self.assertFalse(any(p["deployRuntime"] for _, p in self.fixture.parameters),
+                         "runtime validate/create must recheck the live incarnation immediately before ARM")
+
+    def test_export_records_only_plan_evidence_hashes_not_private_capture_or_resource_id(self):
+        self.observe_fixture_plan()
+        code, result = self.cli("collect", "--state-dir", str(self.state), adapter=self.fixture)
+        self.assertEqual(code, 0, result)
+        report = json.loads((self.state / "evidence.json").read_text())
+        self.assertEqual(report.get("apiCenterPlan", {}).get("status"), "human_observed_free")
+        self.assertEqual(report["apiCenterPlan"]["evidenceSha256"],
+                         hashlib.sha256((self.state / "api-center-plan-evidence.bin").read_bytes()).hexdigest())
+        self.assertNotIn(self.values["subscriptionId"], json.dumps(report))
+        self.assertNotIn("TEST FIXTURE ONLY", json.dumps(report))
+        self.assertNotIn(self.fixture.center, json.dumps(report))
+
+    def test_recreated_resource_rejects_prior_observation_even_with_same_arm_id(self):
+        self.observe_fixture_plan()
+        old = json.loads((self.state / "api-center-plan-request.json").read_text())
+        self.fixture.center_created = "2026-01-02T00:00:00Z"
+        code, report = self.cli("record-plan-observation", "--state-dir", str(self.state),
+            "--observation", str(self.directory / "portal-observation.json"),
+            "--evidence", str(self.directory / "portal-capture.txt"), adapter=self.fixture)
+        self.assertEqual((code, report.get("code")), (2, "api_center_observation_resource_mismatch"))
+        current = json.loads((self.state / "api-center-plan-request.json").read_text())
+        self.assertEqual(current["resourceId"], old["resourceId"])
+        self.assertNotEqual(current["requestId"], old["requestId"])
+        self.assertNotEqual(current["resourceCreatedAt"], old["resourceCreatedAt"])
+        self.assertEqual(self.deploy()[0], 2)
+        self.assertFalse(any(p["deployRuntime"] for _, p in self.fixture.parameters))
+        self.assertEqual(self.record_observation()[0], 0)
+        self.assertEqual(self.deploy()[0], 0)
+
+    def test_missing_or_changed_private_proof_cannot_activate_runtime(self):
+        self.observe_fixture_plan()
+        for filename in ("api-center-plan-proof.json", "api-center-plan-evidence.bin"):
+            path = self.state / filename
+            original = path.read_bytes()
+            for problem in ("missing", "changed", "public"):
+                with self.subTest(filename=filename, problem=problem):
+                    if problem == "missing":
+                        path.unlink()
+                    elif problem == "changed":
+                        path.write_bytes(b'{"status":"Free"}')
+                    else:
+                        path.chmod(0o644)
+                    code, report = self.deploy()
+                    self.assertEqual(code, 2, report)
+                    self.assertFalse(any(p["deployRuntime"] for _, p in self.fixture.parameters))
+                    path.write_bytes(original)
+                    path.chmod(0o600)
+        self.assertEqual(self.deploy()[0], 0)
+
+    def test_non_free_reobservation_revokes_previous_free_gate(self):
+        self.observe_fixture_plan()
+        code, report = self.record_observation(observedPlan="Standard")
+        self.assertEqual((code, report.get("code")), (2, "api_center_observed_plan_not_free"))
+        code, report = self.deploy()
+        self.assertEqual((code, report.get("code")), (2, "api_center_portal_observation_required"))
+        self.assertFalse(any(p["deployRuntime"] for _, p in self.fixture.parameters))
+
+    def test_missing_creation_identity_cannot_be_replaced_with_a_local_timestamp(self):
+        self.fixture.center_created = None
+        code, report = self.deploy()
+        self.assertEqual((code, report.get("code")), (2, "api_center_creation_identity_unavailable"))
+        self.assertFalse((self.state / "api-center-plan-request.json").exists())
+        self.assertFalse(any(p["deployRuntime"] for _, p in self.fixture.parameters))
+
+    def test_unobserved_partial_foundation_can_export_and_teardown_with_partial_failure(self):
+        self.assertEqual(self.deploy()[0], 2)
+        self.fixture.fail_delete = "citadel-test19-evidence"
+        args = ("teardown", "--state-dir", str(self.state), "--confirm-deployment", "test19")
+        code, report = self.cli(*args, adapter=self.fixture)
+        self.assertEqual((code, report.get("status")), (1, "teardown_partial"), report)
+        self.assertEqual(report["failedDeletions"], ["evidence"])
+        exported = json.loads((self.state / "evidence.json").read_text())
+        self.assertEqual(exported["apiCenterPlan"]["code"], "api_center_portal_observation_required")
+        self.assertFalse((self.state / "api-center-plan-proof.json").exists())
+        self.fixture.fail_delete = None
+        code, report = self.cli(*args, adapter=self.fixture)
+        self.assertEqual((code, report.get("status")), (0, "deleted_recoverable"), report)
+        self.assertEqual(report["activeCount"], 0)
+
+    def test_deployed_lifecycle_is_complete_while_missing_task20_provider_remains_blocked(self):
+        self.assert_deployed()
+        code, report = self.cli("acceptance", "--state-dir", str(self.state), adapter=self.fixture)
+        self.assertEqual((code, report.get("code")), (2, "task20_acceptance_harness_required"))
+
+    def observe_fixture_plan(self):
+        code, report = self.deploy()
+        self.assertEqual((code, report.get("code")), (2, "api_center_portal_observation_required"), report)
+        code, report = self.record_observation()
+        self.assertEqual(code, 0, report)
+
+    def assert_deployed(self):
+        if not (self.state / "api-center-plan-proof.json").exists():
+            self.observe_fixture_plan()
+        code, report = self.deploy()
+        self.assertEqual((code, report.get("status")), (0, "deployed_unverified"), report)
 
     def test_foundation_actual_created_registry_digest_runtime_and_fifteen_bootstrap_objects(self):
+        self.observe_fixture_plan()
         code, result = self.deploy()
-        self.assertEqual((code, result["code"]), (2, "api_center_plan_read_contract_unresolved"))
+        self.assertEqual((code, result["status"]), (0, "deployed_unverified"))
         creates = [p for action, p in self.fixture.parameters if action == "create"]
         self.assertFalse(creates[0]["deployRuntime"])
-        self.assertTrue(creates[1]["deployRuntime"])
-        self.assertEqual(len(creates[1]["applications"]), 5)
-        for application in creates[1]["applications"].values():
+        self.assertFalse(creates[1]["deployRuntime"])
+        self.assertTrue(creates[2]["deployRuntime"])
+        self.assertEqual(len(creates[2]["applications"]), 5)
+        for application in creates[2]["applications"].values():
             self.assertEqual(application["image"], "actualcreated.azurecr.io/citadel/runtime@sha256:" + "a" * 64)
             self.assertEqual(application["command"], ["python", "-m", "citadel.runtime"])
             self.assertEqual(application["modelTokensPerMinute"], 1000)
@@ -228,16 +423,16 @@ class DeploymentTests(test_cli.CliCase):
         self.assertNotIn(self.values["subscriptionId"], json.dumps(result))
 
     def test_same_identity_repair_preserves_live_ledgers_and_reconciles_foundation(self):
-        self.assert_deployed_blocked_on_plan()
+        self.assert_deployed()
         key = next(k for k in self.fixture.blobs if k[1] == "planner-operations" and k[2] == "ledger-v1.json")
         ledger = json.loads(self.fixture.blobs[key])
         ledger["operations"]["live-fixture"] = {"state": "running"}
         changed = json.dumps(ledger).encode()
         self.fixture.blobs[key] = changed
-        self.assert_deployed_blocked_on_plan()
+        self.assert_deployed()
         self.assertEqual(self.fixture.blobs[key], changed)
         creates = [p for action, p in self.fixture.parameters if action == "create"]
-        self.assertEqual(len(creates), 4, "repair must really reconcile foundation, not skip it")
+        self.assertEqual(len(creates), 5, "repair must really reconcile foundation, not skip it")
 
     def test_nominal_arm_success_without_outputs_is_not_deployment_success(self):
         self.fixture.false_success = True
@@ -246,7 +441,7 @@ class DeploymentTests(test_cli.CliCase):
         self.assertEqual(self.fixture.blobs, {})
 
     def test_missing_preinitialized_live_state_is_never_reset_on_repair(self):
-        self.assert_deployed_blocked_on_plan()
+        self.assert_deployed()
         key = next(k for k in self.fixture.blobs if k[2] == "active-run-slot.json")
         del self.fixture.blobs[key]
         code, result = self.deploy()
@@ -254,7 +449,7 @@ class DeploymentTests(test_cli.CliCase):
         self.assertNotIn(key, self.fixture.blobs)
 
     def test_manual_teardown_reports_partial_failure_and_preserves_foreign_resources(self):
-        self.assert_deployed_blocked_on_plan()
+        self.assert_deployed()
         self.fixture.fail_delete = "citadel-test19-evidence"
         code, result = self.cli("teardown", "--state-dir", str(self.state),
             "--confirm-deployment", "test19", adapter=self.fixture)
@@ -265,7 +460,7 @@ class DeploymentTests(test_cli.CliCase):
         self.assertTrue((self.state / "evidence.md").read_text().startswith("# Citadel lifecycle evidence"))
 
     def test_new_foreign_resource_prevents_group_deletion(self):
-        self.assert_deployed_blocked_on_plan()
+        self.assert_deployed()
         group = "citadel-test19-planning"
         self.fixture.resources[group] = [{"id": self.fixture.root +
             "planning/providers/Microsoft.Storage/storageAccounts/unrelated", "tags": {}}]
@@ -287,6 +482,7 @@ class DeploymentTests(test_cli.CliCase):
         self.assertEqual(self.fixture.parameters, [])
 
     def test_existing_image_tag_without_owned_push_state_cannot_be_overwritten(self):
+        self.observe_fixture_plan()
         original = self.fixture.az
         def existing(*args, **kwargs):
             if args[:3] == ("acr", "repository", "list"):
@@ -301,7 +497,7 @@ class DeploymentTests(test_cli.CliCase):
         self.assertFalse(any(c[:2] == ("docker", "build") for c in self.fixture.calls))
 
     def test_staged_operator_key_rotation_preserves_old_key_until_live_proof(self):
-        self.assert_deployed_blocked_on_plan()
+        self.assert_deployed()
         original = json.loads((self.state / "credentials.json").read_text())
         args = ("rotate", "subscription", "--target", "operator", "--stage", "prepare",
                 "--state-dir", str(self.state))
@@ -317,13 +513,28 @@ class DeploymentTests(test_cli.CliCase):
                                 "--state-dir", str(self.state), adapter=self.fixture)
         self.assertEqual((code, report["code"]), (2, "task20_acceptance_harness_required"))
 
-    def test_production_plan_gate_stops_before_target_lookup_and_any_paid_effect(self):
-        self.fixture.verify_plan_read_contract = Native(self.values, self.state).verify_plan_read_contract
+    def test_foundation_stops_for_private_portal_observation_before_bootstrap_or_runtime(self):
         code, report = self.deploy()
-        self.assertEqual((code, report["code"]), (2, "api_center_plan_read_contract_unresolved"))
-        self.assertFalse(any(c[:2] in (("account", "show"), ("deployment", "sub")) for c in self.fixture.calls))
+        self.assertEqual((code, report["code"]), (2, "api_center_portal_observation_required"))
+        creates = [p for action, p in self.fixture.parameters if action == "create"]
+        self.assertEqual(len(creates), 1)
+        self.assertFalse(creates[0]["deployRuntime"])
+        self.assertEqual(self.fixture.blobs, {})
+        request_path = self.state / "api-center-plan-request.json"
+        request = json.loads(request_path.read_text())
+        self.assertEqual(request["resourceId"], self.fixture.center)
+        self.assertEqual(request["deploymentId"], "test19")
+        self.assertEqual(request["portalUrl"], "https://portal.azure.com/#@"
+                         + self.values["tenantId"] + "/resource" + self.fixture.center + "/overview")
+        self.assertEqual(request_path.stat().st_mode & 0o777, 0o600)
+        state = json.loads((self.state / "state.json").read_text())
+        self.assertIn(self.fixture.center, state["inventory"])
+        self.assertEqual(state["phase"], "foundation_pending_runtime")
+        self.assertFalse((self.state / "api-center-plan-proof.json").exists())
+        self.assertNotIn(self.values["subscriptionId"], json.dumps(report))
 
     def test_missing_native_protocol_metadata_never_passes_inventory_validation(self):
+        self.observe_fixture_plan()
         original = self.fixture.runtime
         def incomplete(params):
             original(params)
@@ -333,7 +544,7 @@ class DeploymentTests(test_cli.CliCase):
         self.assertEqual((code, report["code"]), (2, "api_center_identity_or_gateway_metadata_mismatch"))
 
     def test_repair_does_not_accept_boolean_ledger_schema_version(self):
-        self.assert_deployed_blocked_on_plan()
+        self.assert_deployed()
         key = next(k for k in self.fixture.blobs if k[2] == "ledger-v1.json")
         ledger = json.loads(self.fixture.blobs[key])
         ledger["schema_version"] = True
@@ -346,7 +557,7 @@ class DeploymentTests(test_cli.CliCase):
     def test_generated_certificate_survives_small_clock_regression_with_exact_90_days(self):
         with patch("citadel.operator.rotation.datetime") as clock:
             clock.now.side_effect = lambda zone: datetime.now(zone) + timedelta(seconds=2)
-            self.assert_deployed_blocked_on_plan()
+            self.assert_deployed()
         credentials = json.loads((self.state / "credentials.json").read_text())
         metadata = credentials["gatewayCertificates"][0]
         self.assertEqual(datetime.fromisoformat(metadata["not_after"]) -

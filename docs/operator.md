@@ -1,15 +1,16 @@
 # Operator lifecycle — issue 19
 
 Run all commands from this checkout with the exact environment in [stack.md](stack.md).
-Public entrypoint: **`python -m citadel.operator`**. No GUI, hosted control plane,
-human-user creation, silent region/model replacement, or automatic cleanup.
+Public entrypoint: **`python -m citadel.operator`**. Deployment uses native CLI/Bicep;
+one approved human Azure portal observation verifies the actual API Center plan.
+No hosted control plane, human-user creation, silent region/model replacement,
+or automatic cleanup.
 Certificate generation declares `cryptography==50.0.2` directly; that exact version
 and all its artifacts were already in the accepted lock. No resolved version,
 image/tool pin, requirement hash, or wheelhouse artifact changed.
 
-## Current blocking contract: API Center plan verification
+## Approved manual gate: API Center plan verification
 
-**Paid provisioning is blocked before target/account queries or resource creation.**
 The approved API Center `2024-03-01` specification exposes only
 `properties.provisioningState` on its Service GET, not a read-only plan/SKU.
 There is no plan/SKU endpoint in that approved specification. A fake `sku: Free`
@@ -19,13 +20,18 @@ Primary evidence: [the approved immutable Service/ServiceProperties definitions]
 and the [stable template reference](https://learn.microsoft.com/en-us/azure/templates/microsoft.apicenter/2024-03-01/services).
 The published Free default/limits are not verification of an actual instance's plan.
 
-`preflight`, `deploy`, and `azd up` return blocked
-`api_center_plan_read_contract_unresolved`. **Do not remove this gate, grant wider
-rights, assume Free, or upgrade the API/plan.** The decision owner must approve
-an actual read interface and its verification contract. Implement that adapter,
-then exercise live provider acceptance. Local Azure fixtures deliberately bypass
-this one gate to exercise the downstream command graph; they do not prove it.
-There is no operator flag that bypasses the production gate.
+The owner approved **manual portal verification with recorded evidence**. That is
+approval of the process, **not proof that any resource exists or is Free**.
+Ordinary preflight and explicitly confirmed foundation creation may proceed.
+Deployment then stops with `api_center_portal_observation_required`, before data
+bootstrap, image build or runtime activation. No provider plan field is fabricated,
+and no API, SKU or policy is changed.
+
+The operator must observe the actual created resource, privately record the
+observation and supporting evidence, then explicitly resume the same deployment.
+There is no `--assume-free`/boolean bypass or automatic continuation. Local fixtures
+exercise this same public command graph with clearly synthetic evidence, never a
+production bypass. No real resource was created or observed during issue 19.
 
 All other documented cloud commands below are implemented, but were **not run
 against Azure** for issue 19. Deployment success must never be inferred from the
@@ -129,8 +135,6 @@ period is added to the signed interval.
 
 ## Preflight, deploy, repair
 
-After resolving the API Center read-contract gate:
-
 ```sh
 python -m citadel.operator preflight --state-dir "$CITADEL_STATE_DIR"
 python -m citadel.operator deploy --state-dir "$CITADEL_STATE_DIR" --confirm-paid \
@@ -156,25 +160,116 @@ The actual deployment graph is:
 1. Recheck local/target gates; validate resolved gateway inputs in memory.
 2. Deploy subscription Bicep with `deployRuntime=false`; retain all inventory outputs.
    This is explicitly **foundation pending runtime**, not readiness.
-3. Load the eight exact reference objects with conditional create; initialize
+3. Read the created API Center using the pinned API, verify exact resource/group
+   ownership, location and successful provisioning, and bind its actual read-only
+   `systemData.createdAt`. Stop for the human observation below if matching proof
+   is absent. Foundation resources remain inventoried, billable, and manually
+   deletable. This is not overall deployment failure cleanup or permission to
+   activate runtime.
+4. After explicit resume with valid proof, load the eight exact reference objects with conditional create; initialize
    six existing `ledger-v1.json` blobs and `planner-operations/active-run-slot.json`.
    On repair, preserve live ledger bytes/leases. Missing previously initialized
    state blocks; it is never cleared or recreated as proof of nonexecution.
-4. Build the real image, run the existing offline stack smoke suite, authenticate
+5. Build the real image, run the existing offline stack smoke suite, authenticate
    to the **created** ACR, push, compare remote digest to local RepoDigests, and
    lock image writes/deletes. Unrecorded existing tags conflict. Ambiguous pushes
    require matching recorded intent/local image/registry digest before adoption.
-5. Validate/deploy the same Bicep with all five exact digest images and
+6. Validate/deploy the same Bicep with all five exact digest images and
    `["python","-m","citadel.runtime"]`; pass each app the verified TPM.
    The existing template configures identities, runtime/data/gateway, inventory,
    secrets, telemetry and all fixed limits.
-6. Query actual workload identities/images and API Center environment/REST metadata.
+7. Query actual workload identities/images and API Center environment/REST metadata.
    Five environment entries and one genuine REST findings API are checked. No
-   native A2A/MCP inventory/import claim is made. Actual Free-plan proof remains blocked.
+   native A2A/MCP inventory/import claim is made. Recheck the human observation
+   against the current resource incarnation, never infer a plan from GET properties.
 
 The same `deploy` command repairs the same ID, including its foundation; it does
 not skip provisioning because a previous state file exists. Failures retain
 resources, diagnostic state and intent. There is no failure cleanup or crash replay.
+
+### Record the human observation; explicitly resume
+
+On the first foundation stop, open
+**`$CITADEL_STATE_DIR/api-center-plan-request.json` in a private editor**.
+Its `portalUrl` is the actual resource's Azure portal URL:
+`https://portal.azure.com/#@<configured-tenant>/resource<actual-resource-id>/overview`.
+The full target/URL is deliberately not printed by the CLI. The file also gives
+`requestId`, `deploymentId`, `resourceId`, `resourceCreatedAt` and `requestedAt`.
+These are actual inventory/provider bindings, not sample defaults.
+
+1. Open that URL using the intended existing Azure account. Confirm the resource
+   identity, then inspect its displayed pricing plan. Record **what is actually
+   displayed**, not the documented default. If absent, ambiguous or non-Free, stop;
+   do not change plan, grant rights or edit the proof to claim Free.
+2. Save a screenshot or other supporting capture showing the resource context and
+   displayed plan to a private file such as
+   `$CITADEL_STATE_DIR/portal-capture.png`. No keys, tokens, certificates or unrelated
+   account information. Capture is nonempty, at most 10 MiB, owned by you, mode 0600.
+   Resource IDs are allowed only in this approved **private** observation material,
+   not public logs, Git, shared lifecycle evidence or shell arguments.
+3. Compute the exact capture SHA-256, then write mode-0600
+   `$CITADEL_STATE_DIR/portal-observation.json` in the private editor:
+
+```sh
+chmod 600 "$CITADEL_STATE_DIR/portal-capture.png"
+sha256sum "$CITADEL_STATE_DIR/portal-capture.png"
+```
+
+```json
+{
+  "requestId": "<copy from private request>",
+  "deploymentId": "<copy from private request>",
+  "resourceId": "<copy exact actual ID from private request>",
+  "resourceCreatedAt": "<copy from private request>",
+  "observedAt": "<actual observation time, ISO-8601 with UTC offset>",
+  "observedPlan": "<actual displayed plan; only Free can unlock the gate>",
+  "evidenceSha256": "<64-character lowercase SHA-256 of the capture>"
+}
+```
+
+The observation must be after the request and actual creation time, not in the
+future. Do not auto-fill a current time in place of the actual observation time.
+There are no additional fields and no automatic Free confirmation.
+
+```sh
+chmod 600 "$CITADEL_STATE_DIR/portal-observation.json"
+python -m citadel.operator record-plan-observation --state-dir "$CITADEL_STATE_DIR" \
+  --observation "$CITADEL_STATE_DIR/portal-observation.json" \
+  --evidence "$CITADEL_STATE_DIR/portal-capture.png"
+# Recording performs ownership/incarnation reads only; it never deploys or starts runtime.
+# After successful recording, explicitly resume the SAME ID/state:
+python -m citadel.operator deploy --state-dir "$CITADEL_STATE_DIR" --confirm-paid \
+  --wheelhouse "$WHEELHOUSE"
+```
+
+The CLI copies validated proof/capture to private 0600
+`api-center-plan-proof.json` and `api-center-plan-evidence.bin`, recording the exact
+observation, source (`human-azure-portal`), observation/recording times and SHA-256.
+The locked state binds the proof hash. Capture contents are not printed/exported;
+sanitized lifecycle evidence includes only timestamps and binding/proof/capture hashes.
+
+Rechecks occur before bootstrap, each runtime ARM validation/create (including
+rotation), inventory completion, and every task-20 acceptance/control hook.
+Missing/tampered/public proof, wrong resource/deployment/request, non-Free, invalid
+time or mismatched capture hash fails closed. Rejected replacement observations
+invalidate prior authorization; an older proof file alone never unlocks deployment.
+Same-ID repair preserves a valid observation for the same actual incarnation.
+Deletion/recreation changes provider `createdAt`, rotates the request ID and requires
+a new human observation—even when the ARM resource ID is unchanged. New private
+deployment state cannot reuse another request's proof.
+
+If actual `systemData.createdAt` is absent, the CLI reports
+`api_center_creation_identity_unavailable`; do not substitute a local timestamp.
+The pinned API inherits this read-only field from its
+[common Resource schema](https://github.com/Azure/azure-rest-api-specs/blob/505d2b30d8ab3ac1d8d8bb262bae8945fe6631c0/specification/common-types/resource-management/v5/types.json).
+Provider acceptance and actual portal contents still require task 21 verification.
+The code cannot detect a later portal-only plan change; record a fresh observation
+after any such change. The gate prevents new activation/acceptance; it does not
+automatically shut down existing workloads or delete resources.
+
+`inventory`, `collect` and exact-ID manual `teardown` remain available for partial
+foundation resources without plan proof. Blocked plan evidence is reported, not
+turned into a teardown dependency.
 
 ## azd interface
 
@@ -281,7 +376,12 @@ arguments `lifecycle`, `check_id`, `run_id`. Fixed check IDs:
 `status: "pass"`, the exact `run_id`, and `evidence_sha256`; fail/blocked/missing
 hooks cannot pass. The lifecycle object exposes private state, exact inventory
 and native adapters to trusted repository code; it is not a public authority proxy.
-The separate API Center plan-read decision must be resolved before paid preflight.
+Before invoking any provider, task 19 rechecks the human plan proof against the
+current resource incarnation and requires deployed runtime. Trusted providers can
+call `lifecycle.require_plan_observation()` to obtain that validated private proof.
+This is an available downstream interface, not a dependency requiring task 20 to
+exist before task 19's lifecycle can be delivered. Unavailable task-20 hooks remain
+honestly blocked; no canned acceptance provider is included.
 
 Teardown exports evidence **before** cloud-source deletion, rechecks ownership
 before each group deletion, detects unrelated resources and role assignments,
@@ -302,6 +402,9 @@ delayed/residual charges still need review after deletion.
 
 - `state.json`: configuration/software/bundle fingerprints, deployment outputs,
   inventory, run intents/read counts, bootstrap status, sanitized event history.
+- `api-center-plan-request.json`: actual private portal URL/resource incarnation
+  and request binding; `api-center-plan-proof.json` / `api-center-plan-evidence.bin`:
+  validated private human observation/capture, never public raw evidence.
 - `credentials.json`, `rotation.json`, `rotation-<id>.json`: private recovery
   material, never evidence.
 - `template.json`: actual compiled Bicep; `request-<id>.json`: bounded-lived secure

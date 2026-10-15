@@ -28,11 +28,6 @@ class Native:
         self.tools = config["tools"]
         self.deadline = None
 
-    def verify_plan_read_contract(self):
-        # Approved service GET (2024-03-01) exposes provisioningState only.
-        # Do not spend on the foundation before the owner resolves this gate.
-        raise Blocked("api_center_plan_read_contract_unresolved")
-
     @contextmanager
     def document(self, value):
         path = self.directory / ("request-" + uuid4().hex + ".json")

@@ -21,6 +21,9 @@ FIXTURES = {"comparison": "base-source", "replacement": "missing-width-replaceme
 
 
 def acceptance_hook(lifecycle, check_id, run_id):
+    lifecycle.require_plan_observation()
+    if lifecycle.value["phase"] != "deployed_unverified":
+        raise Blocked("runtime_deployment_required")
     try:
         hook = importlib.import_module("citadel.acceptance.operator_hooks")
     except ModuleNotFoundError:
