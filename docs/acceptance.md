@@ -72,6 +72,9 @@ The hash must match the stored scenario product. Missing review is
 Two consecutive complete passes require the same pinned fingerprints, matching
 deterministic semantics and disjoint operation/run IDs. An intervening failed
 attempt breaks the pair. Local mode, missing checks or skipped checks cannot pass.
+The required set is the shipped catalogue, not a report's self-declared subset.
+All four scenario products and application/gateway/storage evidence are mandatory;
+malformed identities, hashes or review records block before human confirmation.
 
 Reports are immutable hash-named JSON and Markdown under private
 `STATE/acceptance/`, **outside every Git checkout**. Report directories inside a

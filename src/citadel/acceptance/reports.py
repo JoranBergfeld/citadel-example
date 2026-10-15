@@ -57,8 +57,23 @@ def confirm_narrative(report, scenario, product_sha256, *, supported, gaps_visib
 
 
 def automated_status(report):
+    from .coverage import required_checks
+    if not isinstance(report, dict):
+        return "blocked"
     required, checks = report.get("required_checks", []), report.get("checks", [])
-    if (not required or len(set(required)) != len(required)
+    records = report.get("evidence", [])
+    operations = report.get("operation_ids", [])
+    if (type(report.get("schema_version")) is not int or report["schema_version"] != 1
+            or not isinstance(report.get("run_id"), str)
+            or not re.fullmatch("[A-Za-z0-9_-]{1,64}", report["run_id"])
+            or not isinstance(operations, list) or not operations
+            or not all(isinstance(key, str) and re.fullmatch("[A-Za-z0-9_-]{1,128}", key)
+                       for key in operations) or len(set(operations)) != len(operations)
+            or not isinstance(required, list) or not all(isinstance(key, str) for key in required)
+            or not isinstance(checks, list)
+            or not all(isinstance(check, dict) and isinstance(check.get("check_id"), str)
+                       and isinstance(check.get("status"), str) for check in checks)
+            or set(required) != set(required_checks()) or len(set(required)) != len(required)
             or len({c.get("check_id") for c in checks}) != len(checks)
             or {c.get("check_id") for c in checks} != set(required)
             or report.get("mode") != "cloud" or not hash_value(report.get("fingerprint"))):
@@ -66,18 +81,31 @@ def automated_status(report):
     states = {check.get("status") for check in checks}
     if "fail" in states:
         return "fail"
+    if (not isinstance(records, list) or not all(isinstance(record, dict) for record in records)
+            or not {"application", "gateway", "storage"} <= {
+                record.get("source") for record in records
+                if isinstance(record.get("source"), str) and isinstance(record.get("request_id"), str)
+                and record["request_id"] and type(record.get("status_code")) is int
+                and 100 <= record["status_code"] <= 599}):
+        return "blocked"
     return "pass" if states == {"pass"} else "blocked"
 
 
 def reviewed_status(report):
+    from .scenarios import FIXTURES
     status = automated_status(report)
     if status != "pass":
         return status
     scenarios, reviews = report.get("scenarios", {}), report.get("human_reviews", {})
-    if not scenarios:
+    if (not isinstance(scenarios, dict) or set(scenarios) != set(FIXTURES)
+            or not isinstance(reviews, dict)
+            or not all(isinstance(product, dict) and hash_value(product.get("product_sha256"))
+                       and hash_value(product.get("semantics_sha256")) for product in scenarios.values())):
         return "blocked"
     for name, product in scenarios.items():
         review = reviews.get(name)
+        if review is not None and not isinstance(review, dict):
+            return "blocked"
         if not review or review.get("product_sha256") != product.get("product_sha256"):
             return "pending_human"
         if not all(review.get(key) is True for key in ("supported", "gaps_visible", "fictional")):

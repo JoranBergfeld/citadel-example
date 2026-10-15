@@ -144,7 +144,7 @@ class Harness:
     def _replace(report, check):
         for index, old in enumerate(report["checks"]):
             if old["check_id"] == check["check_id"]:
-                report["checks"][index] = check
+                report["checks"][index] = old | check
                 return
         raise ValueError("Unregistered required check")
 

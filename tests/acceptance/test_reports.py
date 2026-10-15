@@ -1,16 +1,27 @@
 import copy
 import unittest
 
-from citadel.acceptance.reports import acceptance_status, confirm_narrative, sanitize
+from citadel.acceptance.coverage import required_checks
+from citadel.acceptance.reports import acceptance_status, automated_status, confirm_narrative, sanitize
+from citadel.acceptance.scenarios import FIXTURES
 
 
 def report(run="run1"):
     return {"schema_version": 1, "run_id": run, "fingerprint": "a" * 64,
-            "mode": "cloud", "required_checks": ["comparison"], "checks": [
-                {"check_id": "comparison", "status": "pass"}],
-            "scenarios": {"comparison": {"product_sha256": "b" * 64,
-                                        "semantics_sha256": "c" * 64}},
+            "mode": "cloud", "required_checks": sorted(required_checks()), "checks": [
+                {"check_id": check, "expected": expected, "status": "pass"}
+                for check, expected in sorted(required_checks().items())],
+            "scenarios": {name: {"product_sha256": "b" * 64,
+                                "semantics_sha256": "c" * 64} for name in FIXTURES},
+            "evidence": [{"source": source, "request_id": source + "-request",
+                          "status_code": 200, "observed": 100.0, "run_id": run}
+                         for source in ("application", "gateway", "storage")],
             "operation_ids": [run], "human_reviews": {}}
+
+
+def approve(value):
+    for scenario in value["scenarios"]:
+        confirm_narrative(value, scenario, "b" * 64, supported=True, gaps_visible=True, fictional=True)
 
 
 class ReportTests(unittest.TestCase):
@@ -20,19 +31,16 @@ class ReportTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             confirm_narrative(value, "comparison", "d" * 64, supported=True,
                               gaps_visible=True, fictional=True)
-        confirm_narrative(value, "comparison", "b" * 64, supported=True,
-                          gaps_visible=True, fictional=True)
+        approve(value)
         self.assertEqual(acceptance_status([value]), "pending_second_pass")
         second = report("run2")
-        confirm_narrative(second, "comparison", "b" * 64, supported=True,
-                          gaps_visible=True, fictional=True)
+        approve(second)
         self.assertEqual(acceptance_status([value, second]), "pass")
 
     def test_no_cherry_picking_fingerprints_reused_ids_or_missing_checks(self):
         first, second = report(), report("run2")
         for value in (first, second):
-            confirm_narrative(value, "comparison", "b" * 64, supported=True,
-                              gaps_visible=True, fictional=True)
+            approve(value)
         for change in ({"mode": "local"}, {"fingerprint": "d" * 64},
                        {"operation_ids": ["run1"]}, {"checks": []},
                        {"required_checks": ["comparison", "storage-denial"]}):
@@ -41,6 +49,32 @@ class ReportTests(unittest.TestCase):
         failed = report("failed")
         failed["checks"][0]["status"] = "fail"
         self.assertNotEqual(acceptance_status([first, failed, second]), "pass")
+
+    def test_self_declared_reduced_coverage_cannot_remove_required_checks(self):
+        value = report()
+        value["checks"] = value["checks"][:1]
+        value["required_checks"] = [value["checks"][0]["check_id"]]
+        self.assertEqual(automated_status(value), "blocked")
+
+    def test_missing_scenario_cannot_avoid_human_review(self):
+        first, second = report(), report("run2")
+        for value in (first, second):
+            del value["scenarios"]["denied-bypass"]
+            approve(value)
+        self.assertEqual(acceptance_status([first, second]), "blocked")
+
+    def test_all_pass_labels_without_required_service_sources_still_block(self):
+        for records in ([], report()["evidence"][:2]):
+            with self.subTest(records=records):
+                self.assertEqual(automated_status(report() | {"evidence": records}), "blocked")
+
+    def test_malformed_proof_bindings_block_before_confirmation(self):
+        for changes in ({"schema_version": True}, {"operation_ids": ["run1", "run1"]},
+                        {"operation_ids": "run1"}, {"run_id": "../run1"},
+                        {"human_reviews": []},
+                        {"scenarios": {key: {} for key in FIXTURES}}):
+            with self.subTest(changes=changes):
+                self.assertEqual(acceptance_status([report() | changes]), "blocked")
 
     def test_rejected_prose_never_counts_as_human_approval(self):
         value = report()
