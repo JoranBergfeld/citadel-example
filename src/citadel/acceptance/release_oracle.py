@@ -18,18 +18,30 @@ def release_snapshot(document, result):
         raise ValueError("Bounded release operation identities required")
     records = [document["operations"].get(operation_key("evidence-assessor", "release", identifier), {})
                for identifier in identifiers]
+    if any(not isinstance(row, dict) or row.get("result") is not None
+           and not isinstance(row["result"], dict) for row in records):
+        raise ValueError("Persisted release operation is malformed")
     findings = [finding for versions in document["findings"].values() for finding in versions.values()]
     finding = findings[0] if len(findings) == 1 else {}
-    return {"operation_state": {
+    projection = {"operation_state": {
         "operation_ids": identifiers, "states": [row.get("state", "missing") for row in records],
         "input_hashes": [row.get("input_hash") for row in records],
         "deadlines": [row.get("deadline") for row in records],
         "run_ids": [row.get("run_id") for row in records],
-        "result_hashes": [row.get("result", {}).get("sha256") for row in records],
+        "result_hashes": [row["result"].get("sha256") if isinstance(row.get("result"), dict) else None
+                          for row in records],
         "count": len(document["operations"]), "artifact_count": len(findings),
         "sha256": sha256(document["findings"]), "product_sha256": sha256(finding),
         "draft_sha256": finding.get("draft", {}).get("sha256"),
         "projection_sha256": sha256({key: value for key, value in finding.items() if key != "operation_id"})}}
+    if "rejected_operation_id" in result:
+        rejected = document["operations"].get(
+            operation_key("evidence-assessor", "release", result["rejected_operation_id"]), {})
+        projection["rejected_state"] = {
+            key: rejected.get(key) for key in ("state", "run_id", "input_hash", "deadline", "operation_id")}
+        projection["rejected_state"]["result_sha256"] = (
+            sha256(rejected["result"]) if rejected.get("result") is not None else None)
+    return projection
 
 
 def evaluate_release(observation, snapshot, source, snapshots, evidence, *,
@@ -132,7 +144,8 @@ def evaluate_release(observation, snapshot, source, snapshots, evidence, *,
                 for deadline in state["deadlines"])
         and state.get("input_hashes") == [sha256({"inputs": {"draft": context["draft"]},
             "run_id": context["run_id"], "deadline": deadline}) for deadline in state["deadlines"]]
-        and state.get("count") == len(set(identifiers))
+        and type(state.get("count")) is int
+        and state["count"] == len(set(identifiers)) + int(check == "fault.draft-hash-binding")
         and type(actual.get("artifact_count")) is int and actual["artifact_count"] == 1
         and type(state.get("artifact_count")) is int and state["artifact_count"] == 1
         and actual.get("draft_sha256") == state.get("draft_sha256") == context["draft"]["sha256"]
@@ -145,6 +158,21 @@ def evaluate_release(observation, snapshot, source, snapshots, evidence, *,
     if check == "fault.dropped-committed-release":
         valid &= (actual.get("response") == "indeterminate" and actual.get("replay") == "conflict"
                   and actual.get("state") == "succeeded" and actual.get("sha256") == state.get("product_sha256"))
+    elif check == "fault.draft-hash-binding":
+        rejected = snapshot.get("rejected_state")
+        invalid = context["draft"] | {"sha256": actual.get("rejected_draft_sha256")}
+        valid = valid and (isinstance(rejected, dict) and hash_value(invalid["sha256"])
+            and invalid["sha256"] != context["draft"]["sha256"]
+            and actual.get("response") == "conflict" and actual.get("state") == "succeeded"
+            and actual.get("sha256") == state.get("product_sha256")
+            and type(actual.get("rejected_count")) is int and actual["rejected_count"] == 0
+            and actual.get("rejected_sha256") == actual.get("before_sha256") == sha256({})
+            and rejected.get("state") == "running" and rejected.get("result_sha256") is None
+            and rejected.get("operation_id") == actual.get("rejected_operation_id") == observation["operation_id"] + "-bad"
+            and rejected.get("run_id") == context["run_id"]
+            and rejected.get("deadline") == state["deadlines"][0]
+            and rejected.get("input_hash") == sha256({"inputs": {"draft": invalid},
+                "run_id": context["run_id"], "deadline": rejected["deadline"]}))
     else:
         valid &= (actual.get("states") == ["succeeded", "succeeded"]
             and actual.get("operation_ids") == identifiers and actual.get("result_hashes") == state.get("result_hashes")

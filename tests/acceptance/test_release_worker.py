@@ -21,7 +21,7 @@ from tests.runtime.test_storage import FixtureCredential
 
 
 class ReleaseWorkerTests(unittest.IsolatedAsyncioTestCase):
-    async def test_actual_reviewer_wire_runs_three_release_faults_with_read_only_source_and_allocated_key(self):
+    async def test_actual_reviewer_wire_runs_release_faults_with_read_only_source_and_allocated_key(self):
         runtime_tests = str(Path(__file__).resolve().parents[1] / "runtime")
         sys.path.insert(0, runtime_tests)
         try:
@@ -110,7 +110,9 @@ class ReleaseWorkerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(secrets, ["caller-release-reviewer"])
         self.assertEqual({row["check_id"] for row in observations}, {
             "fault.dropped-committed-release", "fault.concurrent-exact-draft-release",
-            "fault.concurrent-different-operation-release"})
+            "fault.concurrent-different-operation-release", "fault.draft-hash-binding"})
+        rejected = next(row["actual"] for row in observations if row["check_id"] == "fault.draft-hash-binding")
+        self.assertEqual((rejected["response"], rejected["rejected_count"]), ("conflict", 0))
         self.assertTrue(all(row["actual"]["artifact_count"] == 1 for row in observations))
         self.assertTrue(all(len(row["actual"]["reference_reads"]) == 3 for row in observations))
         self.assertTrue(all(receipt["request_id"] == "external-request"

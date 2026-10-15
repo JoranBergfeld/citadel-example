@@ -10,6 +10,20 @@ from tests.operations.test_operations import reference
 
 
 class ReleaseOracleTests(unittest.IsolatedAsyncioTestCase):
+    def test_missing_or_incomplete_persisted_result_is_observed_without_inventing_success(self):
+        from citadel.acceptance.release_oracle import release_snapshot
+        from citadel.operations import empty_ledger
+        document = empty_ledger()
+        document["operations"]["evidence-assessor/release/probe"] = {"state": "running", "result": None}
+        snapshot = release_snapshot(document, {"operation_id": "probe"})
+        self.assertEqual(snapshot["operation_state"]["states"], ["running"])
+        self.assertEqual(snapshot["operation_state"]["result_hashes"], [None])
+        self.assertEqual(snapshot["operation_state"]["artifact_count"], 0)
+        document["operations"]["evidence-assessor/release/probe"]["result"] = ["private-content"]
+        with self.assertRaises(ValueError) as error:
+            release_snapshot(document, {"operation_id": "probe"})
+        self.assertNotIn("private-content", str(error.exception))
+
     async def test_release_oracles_require_independent_state_no_business_change_and_all_service_correlations(self):
         from citadel.acceptance.release_oracle import evaluate_release, release_snapshot
         data, drafts = reference(), MemoryLedger(clock=time.time)
@@ -25,11 +39,12 @@ class ReleaseOracleTests(unittest.IsolatedAsyncioTestCase):
         identities = {"runtime_identity": "a" * 64, "observer_identity": "b" * 64,
                       "reference_identity": "c" * 64, "subscription": "d" * 64}
         for check in ("fault.dropped-committed-release", "fault.concurrent-exact-draft-release",
-                      "fault.concurrent-different-operation-release"):
+                      "fault.concurrent-different-operation-release", "fault.draft-hash-binding"):
             ledger = MemoryLedger(clock=time.time)
             probe = ReleaseProbes(ledger, drafts=DraftReader(drafts), reference=data,
                 workload="release-reviewer", enabled=True, source_run="comparison", deadline=time.time() + 120)
-            actual = (await probe.committed_response_loss(ref, operation_id="probe") if "dropped" in check else
+            actual = (await probe.hash_binding(ref, operation_id="probe") if "hash-binding" in check else
+                      await probe.committed_response_loss(ref, operation_id="probe") if "dropped" in check else
                       await probe.concurrent_release(ref, operation_id="probe",
                           distinct_operations="different" in check))
             document, _ = await ledger.read()
@@ -87,6 +102,7 @@ class ReleaseOracleTests(unittest.IsolatedAsyncioTestCase):
                 from citadel.acceptance.reports import sanitize
                 report = {"run_id": "suite", "operation_ids": list(dict.fromkeys([
                     "worker", "probe", "comparison", *actual.get("operation_ids", []), "source", "snapshot",
+                    *([actual["rejected_operation_id"]] if "rejected_operation_id" in actual else []),
                     *[row["operation_id"] for side in snapshots.values() for row in side.values()]])),
                     "runtime_identities": {"release-reviewer": "a" * 64, "reference-data": "c" * 64,
                         "candidate-planner": "1" * 64, "evidence-assessor": "2" * 64, "briefing-author": "3" * 64},
@@ -106,6 +122,10 @@ class ReleaseOracleTests(unittest.IsolatedAsyncioTestCase):
                 wrong = copy.deepcopy(snapshot)
                 wrong["operation_state"]["artifact_count"] = 2
                 self.assertEqual(evaluate(control=wrong)["status"], "fail")
+                if "hash-binding" in check:
+                    altered_rejection = copy.deepcopy(snapshot)
+                    altered_rejection["rejected_state"]["state"] = "succeeded"
+                    self.assertEqual(evaluate(control=altered_rejection)["status"], "fail")
                 modified = copy.deepcopy(snapshots)
                 modified["after"]["drafts"]["sha256"] = "1" * 64
                 self.assertEqual(evaluate(business=modified)["status"], "fail")

@@ -12,7 +12,8 @@ from .oracle import hash_value
 
 
 RELEASE_CHECKS = frozenset({"fault.dropped-committed-release",
-    "fault.concurrent-exact-draft-release", "fault.concurrent-different-operation-release"})
+    "fault.concurrent-exact-draft-release", "fault.concurrent-different-operation-release",
+    "fault.draft-hash-binding"})
 
 
 def validate_source(value):
@@ -56,6 +57,38 @@ class ReleaseProbes:
             raise ValueError("Only a bounded, explicitly enabled actual reviewer may run release faults")
         self.ledger, self.drafts, self.reference = ledger, drafts, reference
         self.run_id, self.deadline = identity(source_run), deadline
+
+    async def hash_binding(self, draft_ref, *, operation_id=None):
+        validate_source({"run_id": self.run_id, "draft": draft_ref})
+        if time.time() >= self.deadline:
+            raise OperationError("deadline", "Expired release control cannot dispatch")
+        operation = identity(operation_id or uuid4().hex)
+        rejected_operation = identity(operation + "-bad")
+        invalid = draft_ref | {"sha256": ("0" if draft_ref["sha256"][0] != "0" else "1") + draft_ref["sha256"][1:]}
+        reviewer = Operations(self.ledger, workload="release-reviewer")
+        before, _ = await self.ledger.read()
+        await reviewer.accept("evidence-assessor", "release", rejected_operation, {"draft": invalid},
+                              run_id=self.run_id, deadline=self.deadline)
+        owner = await reviewer.claim("evidence-assessor", "release", rejected_operation,
+                                     worker=uuid4().hex, lease_seconds=180)
+        response = await rejected(lambda: reviewer.release(
+            owner, invalid, drafts=self.drafts, reference=self.reference))
+        rejected_document, _ = await self.ledger.read()
+        await reviewer.accept("evidence-assessor", "release", operation, {"draft": draft_ref},
+                              run_id=self.run_id, deadline=self.deadline)
+        control = await reviewer.claim("evidence-assessor", "release", operation,
+                                       worker=uuid4().hex, lease_seconds=180)
+        status = await reviewer.release(control, draft_ref, drafts=self.drafts, reference=self.reference)
+        finding = await reviewer.get_finding(status["result"]["artifact_id"], status["result"]["version"])
+        after, _ = await self.ledger.read()
+        return {"operation_id": operation, "rejected_operation_id": rejected_operation,
+            "state": status["state"], "response": response, "sha256": sha256(finding),
+            "draft_sha256": finding["draft"]["sha256"], "rejected_draft_sha256": invalid["sha256"],
+            "rejected_count": sum(len(versions) for versions in rejected_document["findings"].values()),
+            "rejected_sha256": sha256(rejected_document["findings"]),
+            "artifact_count": sum(len(versions) for versions in after["findings"].values()),
+            "before_count": sum(len(versions) for versions in before["findings"].values()),
+            "before_sha256": sha256(before["findings"]), "after_sha256": sha256(after["findings"])}
 
     async def concurrent_release(self, draft_ref, *, operation_id=None, distinct_operations=False):
         if type(distinct_operations) is not bool or time.time() >= self.deadline:

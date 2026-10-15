@@ -63,12 +63,13 @@ class ReleaseHarnessTests(unittest.TestCase):
             async def execute(self, request):
                 rows = []
                 for n, check in enumerate(("fault.dropped-committed-release", "fault.concurrent-exact-draft-release",
-                                           "fault.concurrent-different-operation-release")):
+                                           "fault.concurrent-different-operation-release", "fault.draft-hash-binding")):
                     ledger, operation, started = MemoryLedger(clock=time.time), "probe" + str(n), time.time()
                     probe = ReleaseProbes(ledger, drafts=DraftReader(drafts), reference=data,
                         workload=request["workload"], enabled=True, source_run=request["release"]["run_id"],
                         deadline=request["deadline"])
-                    actual = (await probe.committed_response_loss(request["release"]["draft"], operation_id=operation)
+                    actual = (await probe.hash_binding(request["release"]["draft"], operation_id=operation) if n == 3
+                        else await probe.committed_response_loss(request["release"]["draft"], operation_id=operation)
                         if n == 0 else await probe.concurrent_release(request["release"]["draft"],
                             operation_id=operation, distinct_operations=n == 2))
                     rows.append({"check_id": check, "probe_id": check, "run_id": request["run_id"],
@@ -101,13 +102,14 @@ class ReleaseHarnessTests(unittest.TestCase):
                   "scenarios": {"comparison": {"operation_id": "comparison"}}}
         ReleaseAcceptance(lifecycle).execute(report)
         self.assertEqual(report["release_phase"]["state"], "observed")
-        self.assertEqual(len(report["release_phase"]["snapshots"]), 3)
+        self.assertEqual(len(report["release_phase"]["snapshots"]), 4)
         self.assertEqual(native.app, original)
         self.assertEqual(native.dispatches[0]["workload"], "release-reviewer")
         self.assertEqual(native.dispatches[0]["mode"], "release-faults")
         self.assertEqual(native.dispatches[0]["release"]["run_id"], "comparison")
         self.assertEqual(report["operation_ids"].count("probe2-a"), 1)
         self.assertEqual(report["operation_ids"].count("probe2-b"), 1)
+        self.assertEqual(report["operation_ids"].count("probe3-bad"), 1)
         self.assertTrue(saves)
         self.assertNotIn("PRIVATE", str(report))
         with self.assertRaises(Blocked):

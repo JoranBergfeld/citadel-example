@@ -111,10 +111,13 @@ requires its four independently verified, actually executed storage denials.
   completed comparison finding. The worker reads that immutable source through
   the reviewer's read-only draft authority and retrieves its reference evidence
   over real MCP/APIM using only the allocated reviewer subscription.
-  Three fixed drivers execute real conditional release writes in separate
+  Four fixed drivers execute real conditional release writes in separate
   same-container disposable ledgers: response loss after committed release,
   simultaneous same-operation release, and simultaneous different-operation
-  release. The race barrier delays dispatch; it never supplies provider results.
+  release, and wrong-draft-hash rejection followed by a working exact-hash release.
+  The hash-denial attempt happens before any finding exists; an existing version
+  cannot conceal a defective source-hash check. The race barrier delays dispatch;
+  it never supplies provider results.
   Both participants settle before a failed race can be reported. Normal drafts,
   findings, permissions and operation budgets are not modified.
 - Release evidence binds actual Blob publication receipts, a digest-bound reviewer
@@ -124,7 +127,7 @@ requires its four independently verified, actually executed storage denials.
   bindings, one immutable finding, matching released projection and definitive
   conditional conflicts. Sanitized exports are independently re-evaluated.
   Missing layers or source bindings block; changed business state fails.
-  These three drivers do **not** establish version-conflict, new-version or actual
+  These four drivers do **not** establish version-conflict, new-version or actual
   process-restart proof. Those requirements remain blocked pending their drivers.
 - Writable workloads persist one-shot admission and finite 512-ticket read pools
   in their existing operations container. Candidate Planner also acquires its

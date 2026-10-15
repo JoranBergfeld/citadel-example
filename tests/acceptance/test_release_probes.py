@@ -122,6 +122,16 @@ class ReleaseProbeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["draft_sha256"], sha256(draft))
         self.assertNotIn("private assessment", str(result))
         self.assertEqual((await source.read())[0]["drafts"]["actual-draft"]["1"], draft)
+        binding = ReleaseProbes(MemoryLedger(clock=time.time), drafts=DraftReader(source), reference=data,
+            workload="release-reviewer", enabled=True, source_run="actual-run", deadline=time.time() + 120)
+        checked = await binding.hash_binding(
+            {"artifact_id": "actual-draft", "version": 1, "sha256": sha256(draft)}, operation_id="binding")
+        self.assertEqual(checked["response"], "conflict")
+        self.assertEqual(checked["rejected_count"], 0)
+        self.assertEqual(checked["rejected_sha256"], checked["before_sha256"])
+        self.assertEqual(checked["state"], "succeeded")
+        self.assertEqual(checked["artifact_count"], 1)
+        self.assertNotEqual(checked["rejected_draft_sha256"], checked["draft_sha256"])
         with self.assertRaises(ValueError):
             ReleaseProbes(released, drafts=DraftReader(source), reference=data,
                 workload="candidate-planner", enabled=True, source_run="actual-run", deadline=time.time() + 120)

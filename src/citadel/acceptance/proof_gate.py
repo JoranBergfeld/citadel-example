@@ -57,6 +57,7 @@ def evaluate_check(check, report):
                 or context["run_id"] not in operations or not isinstance(nested, dict)
                 or not isinstance(nested.get("operation_ids", []), list)
                 or any(identifier not in operations for identifier in nested.get("operation_ids", []))
+                or check["check_id"] == "fault.draft-hash-binding" and nested.get("rejected_operation_id") not in operations
                 or any(row.get("suite_id") != report["run_id"] or row.get("caller") != "operator"
                        or row.get("action") != "read" or row.get("operation_id") not in operations
                        for row in snapshot_rows)

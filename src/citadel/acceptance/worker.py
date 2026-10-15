@@ -179,6 +179,8 @@ async def run_release_faults(config, request, credential, pool, container):
                                 source_run=request["release"]["run_id"], deadline=deadline)
                             if check == "fault.dropped-committed-release":
                                 actual = await probe.committed_response_loss(ref, operation_id=operation)
+                            elif check == "fault.draft-hash-binding":
+                                actual = await probe.hash_binding(ref, operation_id=operation)
                             else:
                                 actual = await probe.concurrent_release(ref, operation_id=operation,
                                     distinct_operations=check == "fault.concurrent-different-operation-release")

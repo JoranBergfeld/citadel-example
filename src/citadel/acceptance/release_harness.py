@@ -19,7 +19,7 @@ def bind_release_result(result, *, run_id, principal, account):
     if (not isinstance(result, dict) or type(result.get("schema_version")) is not int
             or result["schema_version"] != 1 or result.get("run_id") != run_id
             or result.get("state") not in ("complete", "blocked")
-            or not isinstance(result.get("observations"), list) or len(result["observations"]) > 3):
+            or not isinstance(result.get("observations"), list) or len(result["observations"]) > len(RELEASE_CHECKS)):
         raise Blocked("release_worker_result_shape_conflict")
     identifiers, checks = [], set()
     for row in result["observations"]:
@@ -39,6 +39,11 @@ def bind_release_result(result, *, run_id, principal, account):
             if row["actual"].get("operation_ids") != children:
                 raise Blocked("release_worker_child_identity_conflict")
             identifiers.extend(children)
+        if check == "fault.draft-hash-binding":
+            rejected = identity(operation + "-bad")
+            if row["actual"].get("rejected_operation_id") != rejected:
+                raise Blocked("release_worker_rejected_identity_conflict")
+            identifiers.append(rejected)
         checks.add(check)
     if len(identifiers) != len(set(identifiers)) or result["state"] == "complete" and checks != RELEASE_CHECKS:
         raise Blocked("release_worker_coverage_conflict")
