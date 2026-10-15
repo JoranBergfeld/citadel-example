@@ -67,7 +67,10 @@ class Lifecycle:
             return record_observation(self, args.observation, args.evidence)
         if args.command == "acceptance":
             from .scenarios import acceptance_hook
-            return acceptance_hook(self, "full-acceptance", args.run_id)
+            return acceptance_hook(self, "collect-evidence" if args.collect_only else "full-acceptance", args.run_id)
+        if args.command == "review-acceptance":
+            from citadel.acceptance.operator_hooks import review
+            return review(lifecycle=self, run_id=args.run_id, confirmation=read_private(args.review))
         if args.command == "deploy" and not args.confirm_paid:
             raise Blocked("explicit_paid_provisioning_confirmation_required")
         if args.command == "check":

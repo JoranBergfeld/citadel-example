@@ -7,6 +7,7 @@ import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Mapping
+from citadel.acceptance.telemetry import correlate, emit, opaque
 
 
 INVOCATION_CALLERS = {
@@ -141,7 +142,26 @@ class GatewayTrust:
         async def replay():
             return messages.pop(0) if messages else await receive()
 
-        await self.app(scope, replay, send)
+        method = action
+        if action in ("invoke", "status") and scope["method"] == "POST":
+            method = json.loads(body)["method"]
+        elif action == "mcp":
+            payload = json.loads(body) if body else {}
+            method = (payload["params"]["name"] if payload.get("method") == "tools/call"
+                      else payload.get("method", "mcp." + scope["method"]))
+        try:
+            run_id = opaque(headers.get("x-citadel-run-id", request_id))
+            operation_id = opaque(headers.get("x-citadel-operation-id", request_id))
+        except ValueError:
+            run_id = operation_id = request_id
+
+        async def observed_send(message):
+            if message["type"] == "http.response.start":
+                emit(method, request_id=request_id, status_code=message["status"])
+            await send(message)
+
+        with correlate(run_id, operation_id, caller):
+            await self.app(scope, replay, observed_send)
 
     def _authorize(self, caller, method, path, body):
         target = self.configuration.target

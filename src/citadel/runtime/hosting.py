@@ -18,6 +18,8 @@ from .tickets import AzureTicketStore
 
 @asynccontextmanager
 async def application(config):
+    from citadel.acceptance.telemetry import configure
+    configure(config.target, os.environ["AZURE_PRINCIPAL_ID"])
     async with AsyncExitStack() as stack:
         if config.target == "reference-data":
             from .storage import download_reference_bundle

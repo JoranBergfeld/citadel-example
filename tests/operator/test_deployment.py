@@ -387,10 +387,10 @@ class DeploymentTests(test_cli.CliCase):
         self.assertEqual((code, report.get("status")), (0, "deleted_recoverable"), report)
         self.assertEqual(report["activeCount"], 0)
 
-    def test_deployed_lifecycle_is_complete_while_missing_task20_provider_remains_blocked(self):
+    def test_deployed_lifecycle_cannot_export_acceptance_inside_a_checkout(self):
         self.assert_deployed()
         code, report = self.cli("acceptance", "--state-dir", str(self.state), adapter=self.fixture)
-        self.assertEqual((code, report.get("code")), (2, "task20_acceptance_harness_required"))
+        self.assertEqual((code, report.get("code")), (2, "evidence_directory_must_be_outside_vcs"))
 
     def observe_fixture_plan(self):
         code, report = self.deploy()
@@ -511,7 +511,9 @@ class DeploymentTests(test_cli.CliCase):
         self.assertEqual(self.cli(*args, adapter=self.fixture)[0], 0)
         code, report = self.cli("rotate", "subscription", "--target", "operator", "--stage", "finalize",
                                 "--state-dir", str(self.state), adapter=self.fixture)
-        self.assertEqual((code, report["code"]), (2, "task20_acceptance_harness_required"))
+        self.assertEqual((code, report["code"]), (2, "evidence_directory_must_be_outside_vcs"))
+        self.assertEqual(json.loads((self.state / "credentials.json").read_text()), current)
+        self.assertEqual(json.loads((self.state / "rotation.json").read_text())["phase"], "staged")
 
     def test_foundation_stops_for_private_portal_observation_before_bootstrap_or_runtime(self):
         code, report = self.deploy()

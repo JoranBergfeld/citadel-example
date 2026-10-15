@@ -25,6 +25,7 @@ from citadel.operations import DraftReader, OperationError, Operations, identity
 from citadel.operations.limits import Accounting
 from citadel.gateway import GatewayTrust
 from citadel.gateway.trust import INVOCATION_CALLERS
+from citadel.acceptance.telemetry import correlate, emit
 from .model import INSTRUCTIONS
 from .state import ScopedLedger, read_scope, snapshots
 from .tickets import CAPACITY, TicketPool
@@ -338,6 +339,7 @@ class TrustedContext(ServerCallContextBuilder):
     def build(self, request):
         return ServerCallContext(state={"caller": request.scope["citadel.caller"],
                                         "action": request.scope["citadel.action"],
+                                        "request_id": request.scope["citadel.request_id"],
                                         "headers": {"a2a-version": request.headers.get("a2a-version", "")}})
 
 
@@ -354,9 +356,12 @@ class DurableHandler(RequestHandler):
                 if len(parts) != 1 or not parts[0].text:
                     raise OperationError("invalid_input", "One structured text message is required")
                 payload = json.loads(parts[0].text)
-                status = await self.runtime.accept(
-                    context.state["caller"], payload,
-                    recover=MessageToDict(params.metadata).get("citadel_recovery") is True)
+                with correlate(payload["run_id"], payload["operation_id"], context.state["caller"]):
+                    status = await self.runtime.accept(
+                        context.state["caller"], payload,
+                        recover=MessageToDict(params.metadata).get("citadel_recovery") is True)
+                    emit("SendMessage", request_id=context.state["request_id"], status_code=200,
+                         facts={"business_state": status["state"], "deadline": status["deadline"]})
                 if status["state"] != "pending":
                     return await self.runtime.task_status(context.state["caller"], status["operation_id"],
                                                           incoming=False)

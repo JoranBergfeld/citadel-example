@@ -28,6 +28,7 @@ module platformRoles 'app-platform-roles.bicep' = {
 }
 var baseEnvironment = [
   { name: 'AZURE_CLIENT_ID', value: identity.properties.clientId }
+  { name: 'AZURE_PRINCIPAL_ID', value: identity.properties.principalId }
   { name: 'CITADEL_TARGET', value: workload.name }
   { name: 'CITADEL_DEPLOYMENT_ID', value: deploymentId }
   { name: 'CITADEL_GATEWAY_URL', value: gatewayUrl }

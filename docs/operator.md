@@ -369,7 +369,7 @@ The full task 20 oracle must still correlate identities/protocol/storage/model
 facts and collect every required check, followed by operator narrative signoff.
 Two complete consecutive cloud passes and fresh-deployment proof belong to task 21.
 
-Task 20 interface: implement `citadel.acceptance.operator_hooks.run`, keyword
+Task 20 interface: `citadel.acceptance.operator_hooks.run`, keyword
 arguments `lifecycle`, `check_id`, `run_id`. Fixed check IDs:
 `full-acceptance`, `denied-bypass-controls`, `rotation-new-material-allowed`,
 `rotation-old-material-denied`. Return a versioned evidence-backed dictionary with
@@ -379,9 +379,13 @@ and native adapters to trusted repository code; it is not a public authority pro
 Before invoking any provider, task 19 rechecks the human plan proof against the
 current resource incarnation and requires deployed runtime. Trusted providers can
 call `lifecycle.require_plan_observation()` to obtain that validated private proof.
-This is an available downstream interface, not a dependency requiring task 20 to
-exist before task 19's lifecycle can be delivered. Unavailable task-20 hooks remain
-honestly blocked; no canned acceptance provider is included.
+The partial harness, collection-resume and explicit per-product human-review
+interfaces are documented in [acceptance.md](acceptance.md). Task 20 is not yet
+complete: missing deployed probes, assigned-MI ingestion and no-effect/correlation
+proof remain blocked. No canned acceptance provider or automatic prose approval
+is included. `acceptance --collect-only` resumes evidence collection without
+replaying the run or resetting its 600-second collection allowance;
+`review-acceptance --review PRIVATE_FILE` records the human's explicit answers.
 
 Teardown exports evidence **before** cloud-source deletion, rechecks ownership
 before each group deletion, detects unrelated resources and role assignments,

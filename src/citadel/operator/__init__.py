@@ -27,6 +27,10 @@ def parser():
     observation.add_argument("--state-dir", required=True)
     observation.add_argument("--observation", required=True)
     observation.add_argument("--evidence", required=True)
+    review = commands.add_parser("review-acceptance")
+    review.add_argument("--state-dir", required=True)
+    review.add_argument("--run-id", required=True)
+    review.add_argument("--review", required=True)
     for name in ("check", "preflight", "deploy", "inventory", "collect", "teardown", "acceptance"):
         command = commands.add_parser(name)
         command.add_argument("--state-dir", required=True)
@@ -37,6 +41,7 @@ def parser():
             command.add_argument("--confirm-deployment")
         if name == "acceptance":
             command.add_argument("--run-id", default="full-acceptance")
+            command.add_argument("--collect-only", action="store_true")
     for name in ("demo", "status"):
         command = commands.add_parser(name)
         command.add_argument("--state-dir", required=True)
@@ -80,7 +85,9 @@ def main(argv=None, *, stdout=None, adapter=None):
                     state.event(args.command, exc.code)
                     raise
         print(json.dumps(result, sort_keys=True), file=stdout)
-        return 1 if result.get("status") == "teardown_partial" else 0
+        if result.get("status") in ("blocked", "pending_human", "pending_second_pass"):
+            return 2
+        return 1 if result.get("status") in ("teardown_partial", "fail") else 0
     except Blocked as exc:
         result = {"status": "blocked", "code": exc.code}
         if exc.code == "api_center_portal_observation_required":

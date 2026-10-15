@@ -20,6 +20,7 @@ from azure.storage.blob.aio import BlobClient
 
 from citadel.evidence.manifests import canonical_bytes
 from . import OperationError, empty_ledger
+from citadel.acceptance.telemetry import storage_response
 
 MAX_LEDGER_BYTES = 4 * 1024 * 1024
 API_VERSION = "2026-10-06"
@@ -92,6 +93,7 @@ class AzureBlobLedger:
             sent = True
 
         def block_blob(response):
+            storage_response(response)
             if response.http_response.status_code < 400:
                 headers = response.http_response.headers
                 if headers.get("x-ms-blob-type") != "BlockBlob":
@@ -125,6 +127,7 @@ class AzureBlobLedger:
 
         def received(response):
             nonlocal server_date
+            storage_response(response)
             headers = response.http_response.headers
             value = headers.get("Date") or headers.get("date")
             if value:
@@ -143,6 +146,7 @@ class AzureBlobLedger:
                 committed = await self.client.upload_blob(
                     content, overwrite=True, etag=etag, match_condition=MatchConditions.IfNotModified,
                     lease=lease, max_concurrency=1, timeout=15,
+                    raw_response_hook=storage_response,
                 )
                 return committed.get("etag") if committed else None
         except (AzureError, TimeoutError) as exc:

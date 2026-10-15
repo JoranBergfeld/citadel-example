@@ -29,7 +29,9 @@ def acceptance_hook(lifecycle, check_id, run_id):
     except ModuleNotFoundError:
         raise Blocked("task20_acceptance_harness_required") from None
     result = hook.run(lifecycle=lifecycle, check_id=check_id, run_id=run_id)
-    if (not isinstance(result, dict) or result.get("status") != "pass"
+    statuses = ({"pass", "blocked", "fail", "pending_human", "pending_second_pass"}
+                if check_id in ("full-acceptance", "collect-evidence") else {"pass"})
+    if (not isinstance(result, dict) or result.get("status") not in statuses
             or result.get("run_id") != run_id
             or not re.fullmatch(r"[a-f0-9]{64}", str(result.get("evidence_sha256", "")))):
         raise Blocked("required_live_control_evidence_incomplete")

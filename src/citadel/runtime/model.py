@@ -11,6 +11,7 @@ from agent_framework_openai import OpenAIChatCompletionClient
 from openai import AsyncOpenAI
 
 from citadel.operations import OperationError
+from citadel.acceptance.telemetry import correlation_headers, emit
 
 
 INSTRUCTIONS = {
@@ -53,6 +54,7 @@ class GovernedModel:
         self.owns_http = http_client is None
         self.http = http_client or httpx2.AsyncClient(follow_redirects=False, timeout=60)
         self.http.event_hooks.setdefault("request", []).append(self._before_request)
+        self.http.event_hooks.setdefault("response", []).append(self._response)
         self.client = AsyncOpenAI(
             api_key="gateway-subscription-only", base_url=gateway_url.rstrip("/") + "/openai/v1/",
             default_headers={"Ocp-Apim-Subscription-Key": subscription_key},
@@ -71,6 +73,12 @@ class GovernedModel:
         if payload.get("max_completion_tokens") != 2000 or payload.get("tools"):
             raise OperationError("forbidden", "Model cannot select network tools or raise output bound")
         admission["sent"] = True
+        request.headers.update(correlation_headers())
+
+    async def _response(self, response):
+        emit("chat.completions",
+             request_id=response.headers.get("apim-request-id") or response.headers.get("x-request-id"),
+             status_code=response.status_code)
 
     async def explain(self, accounting, budget_id, execution_id, evidence):
         prompt = json.dumps(evidence, sort_keys=True, ensure_ascii=False, allow_nan=False)
@@ -99,5 +107,6 @@ class GovernedModel:
 
     async def close(self):
         self.http.event_hooks["request"].remove(self._before_request)
+        self.http.event_hooks["response"].remove(self._response)
         if self.owns_http:
             await self.client.close()

@@ -17,6 +17,7 @@ from citadel.evidence import EvidenceError
 from citadel.evidence.manifests import sha256
 from citadel.operations import OperationError
 from citadel.operations.limits import EDGES
+from citadel.acceptance.telemetry import correlation_headers
 from .reference import RetrievedReference
 from .state import reads
 
@@ -53,6 +54,7 @@ class GatewayPeers:
                 raise OperationError("exhausted", "Safe read requires prepaid admission")
             await allowance.admit()
         request.headers["Ocp-Apim-Subscription-Key"] = self.key
+        request.headers.update(correlation_headers())
 
     async def exchange(self, target, deadline, callback, *, invoke=False):
         timeout = 180 if invoke else 30
