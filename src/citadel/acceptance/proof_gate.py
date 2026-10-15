@@ -27,6 +27,16 @@ def evaluate_check(check, report):
             or observation.get("operation_id") not in operations
             or observation.get("run_id") not in operations):
         return blocked
+    if check["check_id"].startswith("fault."):
+        from .operation_oracle import evaluate_operation
+        if (control.get("suite_id") != report.get("run_id")
+                or control.get("caller") != "operator" or control.get("container") != "planner-operations"
+                or control.get("action") != "read" or not hash_value(control.get("runtime_identity"))
+                or control["runtime_identity"] in identities.values()
+                or control.get("operation_id") not in operations):
+            return blocked
+        return evaluate_operation(observation, control, records,
+            runtime_identity=identities["candidate-planner"], observer_identity=control["runtime_identity"])
     if check["check_id"].startswith("storage."):
         before, after = actual.get("before"), actual.get("after")
         if (not isinstance(before, dict) or not isinstance(after, dict)

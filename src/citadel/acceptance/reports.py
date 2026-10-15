@@ -26,6 +26,9 @@ software configuration image manifest protocols model inputs limits lifecycle_re
 acceptance automated_status human_status coverage optional_not_exercised
 collection_deadline
 collection_windows collection_attempts last_collection
+state states completed_states remaining_reads identical_input response replay fenced stale retried
+completed missing_operation_id operation_state input_hash missing_state budget_state closed
+business_sha256 steps
 runtime_identities subscription_bindings credential_sha256
 name region sku version_upgrade_option verification a2a a2a_binding mcp mcp_transport
 model_path blob_data_api key_vault_data_api

@@ -127,6 +127,10 @@ class Harness:
                 StorageAcceptance(self.lifecycle).execute(report)
                 report["finished"] = time.time()
                 self.save(report)
+                from .operation_harness import FaultAcceptance
+                FaultAcceptance(self.lifecycle).execute(report)
+                report["finished"] = time.time()
+                self.save(report)
                 from .origin_harness import BoundaryAcceptance
                 for observed in BoundaryAcceptance(self.lifecycle).execute(report):
                     if observed.get("check_id") in required_checks():
@@ -185,6 +189,9 @@ class Harness:
             report["evidence"] = collector.poll()
             from .storage_harness import StorageAcceptance
             for result in StorageAcceptance.evaluate(report, report["evidence"]):
+                self._replace(report, result)
+            from .operation_harness import FaultAcceptance
+            for result in FaultAcceptance.evaluate(report, report["evidence"]):
                 self._replace(report, result)
             from .origin_harness import BoundaryAcceptance
             for result in BoundaryAcceptance(self.lifecycle).evaluate(report, report["evidence"]):

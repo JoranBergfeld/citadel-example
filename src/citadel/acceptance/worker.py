@@ -2,6 +2,7 @@
 
 import asyncio
 import base64
+import hashlib
 import json
 import math
 import os
@@ -13,7 +14,7 @@ from azure.identity.aio import ManagedIdentityCredential
 from azure.keyvault.secrets.aio import SecretClient
 from azure.storage.blob.aio import ContainerClient
 
-from citadel.evidence.manifests import canonical_bytes
+from citadel.evidence.manifests import canonical_bytes, sha256
 from citadel.gateway.trust import INVOCATION_CALLERS
 from citadel.operations import identity, OperationError
 from citadel.runtime.configuration import Configuration
@@ -60,6 +61,42 @@ class ProbeLedger:
 
     async def commit(self, document, etag, *, deadline):
         return await self.ledger.commit(document, etag, deadline=min(deadline, self.deadline))
+
+
+async def publish_operation(container, *, run_id, workload, principal_id, check_id, actual, started, deadline):
+    identity(run_id)
+    operation = identity(actual["operation_id"])
+    if workload not in ("candidate-planner", "briefing-author") or check_id not in {
+            "fault.dropped-committed-write", "fault.pending-incomplete", "fault.fenced-explicit-retry",
+            "fault.safe-read-recovery", "fault.safe-read-exhaustion", "fault.deadline-no-late-effect"}:
+        raise ValueError("Only fixed durable-operation observations may be published")
+    blob = container.get_blob_client(f"acceptance/{run_id}/observations/{operation}.json")
+    row = {"check_id": check_id, "probe_id": check_id, "run_id": run_id, "operation_id": operation,
+        "caller": workload, "runtime_identity": hashlib.sha256(str(UUID(principal_id)).encode()).hexdigest(),
+        "target": hashlib.sha256(blob.url.encode()).hexdigest(), "started": started, "actual": actual}
+    sent = False
+
+    def once(request):
+        nonlocal sent
+        if sent or time.time() >= deadline:
+            raise OperationError("deadline", "Late or repeated fault-publication dispatch refused")
+        sent = True
+        request.http_request.headers["x-ms-client-request-id"] = operation
+
+    def received(response):
+        row.update(request_id=response.http_response.headers.get("x-ms-request-id"),
+                   status_code=response.http_response.status_code)
+
+    async with asyncio.timeout(max(0, min(30, deadline - time.time()))):
+        await blob.upload_blob(canonical_bytes(row), overwrite=False, timeout=5,
+                               raw_request_hook=once, raw_response_hook=received)
+    row["finished"] = time.time()
+    with correlate(run_id, operation, workload):
+        emit("execution", request_id=row.get("request_id"), status_code=row.get("status_code", 0),
+             target=row["target"], facts={"sha256": sha256(actual), "probe_id": check_id,
+                 "business_state": actual.get("state", "incomplete"),
+                 "artifact_count": actual.get("artifact_count", 0)})
+    return row
 
 
 async def run_gateway_matrix(config, request):
@@ -148,25 +185,37 @@ async def run_gateway_matrix(config, request):
                 bounded = ProbeLedger(ledger, pool, request["deadline"])
                 faults = OperationProbes(bounded, workload=config.target, enabled=True,
                     run_id=request["run_id"], deadline=request["deadline"])
-                results = []
+                results, state = [], "complete"
                 with read_scope(pool, deadline=request["deadline"]):
-                    for name, callback in (
+                    callbacks = [
                         ("fault.dropped-committed-write", faults.committed_response_loss),
                         ("fault.pending-incomplete", faults.identity_and_incomplete_status),
                         ("fault.fenced-explicit-retry", faults.fenced_retry),
-                    ):
+                        ("fault.deadline-no-late-effect", faults.deadline_no_late_effect),
+                    ]
+                    if config.target == "candidate-planner":
+                        callbacks += [
+                            ("fault.safe-read-recovery", faults.safe_read_recovery),
+                            ("fault.safe-read-exhaustion", faults.safe_read_exhaustion),
+                        ]
+                    for name, callback in callbacks:
                         operation = uuid4().hex
-                        with correlate(request["run_id"], operation, config.target):
-                            result = await callback(operation_id=operation)
-                            emit("execution", facts={"business_state": result.get("state", "incomplete"),
-                                                     "artifact_count": result.get("artifact_count", 0)})
-                        results.append({"check_id": name, "actual": result, "run_id": request["run_id"],
-                                        "operation_id": operation})
-                if config.target == "candidate-planner":
+                        started = time.time()
+                        try:
+                            with correlate(request["run_id"], operation, config.target):
+                                result = await callback(operation_id=operation)
+                                observed = await publish_operation(container, run_id=request["run_id"],
+                                    workload=config.target, principal_id=os.environ["AZURE_PRINCIPAL_ID"],
+                                    check_id=name, actual=result, started=started, deadline=request["deadline"])
+                            results.append(observed)
+                        except (OperationError, ValueError, TimeoutError):
+                            state = "blocked"
+                            break
+                if config.target == "candidate-planner" and state == "complete":
                     await store.release_run(scope)
                 await container.get_blob_client(scope + "/observations.json").upload_blob(
                     canonical_bytes({"schema_version": 1, "run_id": request["run_id"],
-                                     "observations": results}), overwrite=False, timeout=5)
+                                     "state": state, "observations": results}), overwrite=False, timeout=5)
                 return results
             async with SecretClient(config.vault, credential, api_version="2025-07-01",
                     retry_total=0, connection_timeout=5, read_timeout=30) as vault:

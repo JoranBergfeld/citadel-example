@@ -84,17 +84,21 @@ class Accounting:
             "grants": [], "tokens_per_minute": self.tokens_per_minute,
         }
 
-    async def start_run(self, run_id):
+    async def start_run(self, run_id, *, deadline=None):
         if self.workload != "candidate-planner":
             raise OperationError("forbidden", "Only Candidate Planner owns root run admission")
         identity(run_id)
+        if deadline is not None and (type(deadline) not in (int, float)
+                or not math.isfinite(deadline) or deadline <= self.clock()):
+            raise OperationError("deadline", "Invalid inherited root deadline")
         document, etag = await self.ledger.read()
         if run_id in document["budgets"] or any(
             not value["closed"] and value["deadline"] > self.clock()
             for value in document["budgets"].values()
         ):
             raise OperationError("conflict", "One logical run at a time; no restart replay")
-        record = self._new(run_id, self.clock() + 900, CEILINGS)
+        record = self._new(run_id, min(deadline if deadline is not None else float("inf"),
+                                       self.clock() + 900), CEILINGS)
         bind_run(document, run_id, record["deadline"])
         document["budgets"][run_id] = record
         await self._save(document, etag, record)

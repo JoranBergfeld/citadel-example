@@ -40,10 +40,26 @@ requires its four independently verified, actually executed storage denials.
   accessing any SDK. It obtains only its allocated Key Vault subscription secret
   using explicit `ManagedIdentityCredential`; no operator fallback.
 - `gateway-matrix` runs four-agent discovery/forbidden-invocation, MCP
-  initialization and all three reference-tool probes. `operation-faults` runs committed-product response loss,
-  pending/running/indeterminate/missing status, changed-input conflict and fenced
-  explicit retry against a disposable real Blob ledger. These are **not** complete
-  release/concurrency/accounting probes.
+  initialization and all three reference-tool probes.
+- The full suite dispatches `operation-faults` under Candidate Planner's actual
+  identity against an isolated real Blob ledger. Six fixed drivers cover committed
+  response loss/identical-input reuse; pending/running/indeterminate/missing and
+  partial-not-completed states; changed-input conflict; fenced explicit retry and
+  stale-generation refusal; actual safe-read response drops with recovery/exhaustion;
+  and an actual delayed post-deadline commit attempt. They produce thirteen
+  independently evaluated obligations, **not** release/concurrency/restart proof.
+  Read faults discard actual successful provider responses; they never manufacture
+  successful responses or authorization outcomes. Real one-/two-second backoffs
+  and the three-target-read ceiling are checked separately from the shared durable
+  512-ticket control envelope. The deadline probe waits on the real clock.
+- Each fault publishes its metadata once through the actual Blob SDK; its service
+  receipt, physical client-request ID and hash-bound application record correlate
+  with storage logs. The operator independently reads the persisted ledger and
+  exports only bounded status/count/hash metadata. Report gates re-evaluate all
+  thirteen obligations after sanitization. A missing publication, wrong identity,
+  altered state, unobserved source or incomplete driver cannot become pass.
+  Root accounting accepts an optional **shorter** inherited probe deadline;
+  omission retains 900 seconds and no argument can increase that ceiling.
 - Writable workloads persist one-shot admission and finite 512-ticket read pools
   in their existing operations container. Candidate Planner also acquires its
   existing active-run slot. Failed probe admissions/results are retained; repair
@@ -132,7 +148,7 @@ attempt breaks the pair. Local mode, missing checks or skipped checks cannot pas
 The required set is the shipped catalogue, not a report's self-declared subset.
 All four scenario products and application/gateway/storage evidence are mandatory;
 malformed identities, hashes or review records block before human confirmation.
-Report gates re-run independent storage/origin oracles using the fingerprinted
+Report gates re-run independent storage/origin/durable-fault oracles using the fingerprinted
 workload identities and allocated-subscription hashes. Generic all-pass labels,
 even with application/gateway/storage rows, cannot certify acceptance. Check
 families without a registered independent oracle remain blocked. Human narrative
@@ -190,9 +206,9 @@ complete per-check correlations remain unverified locally.
    Reference Data execution; establish pre-application ingress-denial evidence,
    and complete direct-model probes, all route
    capabilities and credential/certificate/context rotation proof.
-3. Complete all deployed accounting/time boundaries, safe-read retry probes,
+3. Complete all remaining deployed accounting/time boundaries,
    release-response loss, cross-operation release uniqueness, incompatible version
-   updates, inherited deadline/post-effect and actual restart probes.
+   updates, draft/hash/immutable-version checks and actual process-restart probes.
 4. Connect validated independent service correlations/no-effect proofs to each
    required check. The partial harness intentionally cannot produce a complete
    pass merely because its available probes ran.

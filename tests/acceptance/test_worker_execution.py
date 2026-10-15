@@ -17,6 +17,55 @@ from tests.runtime.test_storage import FixtureCredential
 
 
 class WorkerExecutionTests(unittest.IsolatedAsyncioTestCase):
+    async def test_all_fault_drivers_execute_real_blob_sdk_and_restore_admission_only_after_results(self):
+        from citadel.acceptance.operation_harness import bind_operation_result
+        runtime_tests = str(Path(__file__).resolve().parents[1] / "runtime")
+        sys.path.insert(0, runtime_tests)
+        try:
+            from test_ticket_storage import TicketWire
+        finally:
+            sys.path.remove(runtime_tests)
+
+        class Wire(TicketWire):
+            async def send(self, request, **options):
+                response = await super().send(request, **options)
+                response.headers["x-ms-request-id"] = "fixture-service-" + str(len(self.requests))
+                return response
+
+        class Credential(FixtureCredential):
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                pass
+
+        wire = Wire(clock=time.time)
+        wire.blobs["/planner-operations/active-run-slot.json"] = b"{}"
+        wire.etags["/planner-operations/active-run-slot.json"] = 1
+        config = SimpleNamespace(target="candidate-planner",
+            client_id="11111111-1111-1111-1111-111111111111",
+            blob="https://allocated.blob.core.windows.net", operations_container="planner-operations")
+        request = {"schema_version": 1, "mode": "operation-faults", "workload": config.target,
+            "client_id": config.client_id, "run_id": "fault-worker", "deadline": time.time() + 180}
+        with (patch.dict(os.environ, {"CITADEL_ACCEPTANCE_ENABLED": "true",
+                                     "AZURE_PRINCIPAL_ID": config.client_id}),
+              patch("citadel.acceptance.worker.ManagedIdentityCredential", lambda **kw: Credential()),
+              patch("citadel.acceptance.worker.ContainerClient",
+                    lambda *args, **kw: ContainerClient(*args, transport=wire, **kw)),
+              patch("citadel.acceptance.worker.SecretClient",
+                    side_effect=AssertionError("Fault probes must not fetch subscription secrets"))):
+            observations = await run_gateway_matrix(config, request)
+        result = json.loads(wire.blobs["/planner-operations/acceptance/fault-worker/observations.json"])
+        self.assertEqual(result["state"], "complete")
+        self.assertEqual(len(observations), 6)
+        self.assertEqual(len(bind_operation_result(result, run_id=request["run_id"],
+            principal=observations[0]["runtime_identity"], account=config.blob)), 6)
+        self.assertEqual(len({row["request_id"] for row in observations}), 6)
+        self.assertTrue(all(row["status_code"] == 201 for row in observations))
+        self.assertLessEqual(len([path for path in wire.blobs if "/read-tickets/" in path]), 512)
+        self.assertNotIn("/planner-operations/active-run-slot.json", wire.leases)
+        self.assertTrue(all("/planner-operations/" in request.url for request in wire.requests))
+
     async def test_origin_worker_uses_allocated_mi_tickets_and_no_subscription_secret(self):
         runtime_tests = str(Path(__file__).resolve().parents[1] / "runtime")
         sys.path.insert(0, runtime_tests)

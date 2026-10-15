@@ -193,6 +193,19 @@ class StorageControls:
     def snapshot(self):
         return {container: self._read(container, self.name)[0] for container in CONTAINERS}
 
+    def operation_state(self, run_id):
+        record, content = self._read("planner-operations",
+                                     f"acceptance/{identity(run_id)}/ledger-v1.json")
+        try:
+            document = json.loads(content)
+            if (not isinstance(document, dict) or document.get("schema_version") != 1
+                    or any(not isinstance(document.get(key), dict)
+                           for key in ("operations", "drafts", "findings", "budgets", "runs"))):
+                raise ValueError()
+        except (ValueError, UnicodeError):
+            raise OperationError("data_integrity", "Disposable operation state is malformed") from None
+        return record, document
+
     def products(self):
         records = {}
         for container in ("drafts", "findings"):
