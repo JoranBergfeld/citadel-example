@@ -40,6 +40,9 @@ def evaluate_check(check, report):
     if check["check_id"] == "telemetry.retention-and-unsampled":
         from .retention import evaluate_retention
         return evaluate_retention(check, report)
+    if check["check_id"] in ("telemetry.storage-correlation", "telemetry.gateway-correlation"):
+        from .service_correlation import evaluate_correlation
+        return evaluate_correlation(check, report)
     observation, control = actual.get("observation"), actual.get("control")
     operations = report.get("operation_ids", [])
     if (not isinstance(observation, dict) or not isinstance(control, dict)

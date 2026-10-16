@@ -494,9 +494,19 @@ queried application event prefixes and actual exporter loss counters; configurat
 or export acknowledgement alone cannot pass. These ARM reads share the original
 600-second collection deadline. Local REST fixtures do not establish cloud settings.
 
-1. Finish complete telemetry health/count proof evaluation and deployed validation
-   of the approved exporter. Dependency approval is settled; no existing pin was
-   changed and no cloud delivery is inferred from local SDK wire tests.
+The gateway/storage correlation aggregates independently re-evaluate all 110
+route controls (including model, MCP and owner-scoped reads) and all 90 storage
+matrix controls. Their summaries count and hash distinct actual service receipts,
+including allowed controls and storage observer reads. Exact request/target/status,
+subscription or principal, method, time window and backend dispatch must agree;
+conflicting duplicate service receipts block. Pass labels or unrelated source rows
+cannot supply either census. Other canonical scenario/fault checks separately
+require their own service receipts.
+
+1. Perform deployed validation of the implemented telemetry configuration,
+   application ingestion counts and gateway/storage correlation proofs.
+   Dependency approval is settled; no existing pin was changed and no cloud
+   delivery is inferred from local SDK wire tests.
 2. Execute/verify the implemented storage/origin providers and read-only
    Reference Data execution; observe the implemented pre-application ingress evidence path,
    and collect deployed proof for the implemented direct-model/model-route controls.

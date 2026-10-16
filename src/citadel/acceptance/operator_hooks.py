@@ -278,6 +278,9 @@ class Harness:
             from .telemetry_proof import collect_application
             self._replace(report, collect_application(report))
             self._replace(report, retention | evaluate_retention(retention, report))
+            from .service_correlation import collect_correlations
+            for result in collect_correlations(report):
+                self._replace(report, result)
             # No repeated polling can turn an unimplemented/absent required control into pass.
         except (Blocked, ValueError, TimeoutError):
             self._set(report, "telemetry.application-ingestion", "blocked",
