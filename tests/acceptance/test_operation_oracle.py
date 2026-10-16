@@ -36,12 +36,19 @@ class OperationOracleTests(unittest.IsolatedAsyncioTestCase):
         observed.update(probe_id="fault.pending-incomplete", actual=result)
         snapshot.update(sha256=sha256(document), **operation_snapshot(document, "candidate-planner", result))
         evidence[0]["facts"] = {"sha256": sha256(result), "probe_id": "fault.pending-incomplete"}
+        report = {"run_id": "suite1", "operation_ids": ["worker1", "operation1", "observer1", result["missing_operation_id"]],
+            "runtime_identities": {"candidate-planner": "a" * 64, "reference-data": "d" * 64,
+                "evidence-assessor": "e" * 64, "release-reviewer": "f" * 64, "briefing-author": "0" * 64},
+            "evidence": evidence}
         for check in ("pending-incomplete", "running-incomplete", "indeterminate-incomplete",
                       "missing-incomplete", "changed-input-conflict", "partial-not-completed"):
             observed["check_id"] = "fault." + check
             with self.subTest(check=check):
                 self.assertEqual(evaluate_operation(observed, snapshot, evidence,
                     runtime_identity="a" * 64, observer_identity="c" * 64)["status"], "pass")
+                exported = {"check_id": observed["check_id"], "expected": "fault", "status": "pass",
+                    "actual": {"observation": observed, "control": snapshot | {"suite_id": "suite1"}}}
+                self.assertEqual(evaluate_check(sanitize(exported), sanitize(report))["status"], "pass")
         snapshot["operation_state"]["artifact_count"] = 1
         self.assertEqual(evaluate_operation(observed, snapshot, evidence,
             runtime_identity="a" * 64, observer_identity="c" * 64)["status"], "fail")

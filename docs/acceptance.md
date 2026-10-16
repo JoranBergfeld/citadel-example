@@ -122,6 +122,8 @@ requires its four independently verified, actually executed storage denials.
   exports only bounded status/count/hash metadata. Report gates re-evaluate all
   thirteen obligations after sanitization. A missing publication, wrong identity,
   altered state, unobserved source or incomplete driver cannot become pass.
+  Incomplete-state exports retain the fixed changed-input conflict outcome,
+  never the changed input itself, so their published observation hash stays valid.
   Root accounting accepts an optional **shorter** inherited probe deadline;
   omission retains 900 seconds and no argument can increase that ceiling.
 - `admission-limits` uses the actual Candidate Planner MI and Blob SDK, without

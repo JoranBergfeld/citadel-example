@@ -26,7 +26,7 @@ software configuration image manifest protocols model inputs limits lifecycle_re
 acceptance automated_status human_status coverage optional_not_exercised
 collection_deadline
 collection_windows collection_attempts last_collection
-state states completed_states remaining_reads identical_input response replay fenced stale retried
+state states completed_states remaining_reads identical_input changed_input response replay fenced stale retried
 completed missing_operation_id operation_state input_hash missing_state budget_state closed
 business_sha256 steps
 agents models reads remaining candidates agents_sha256 candidates_sha256
