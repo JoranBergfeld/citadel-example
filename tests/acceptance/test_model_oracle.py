@@ -6,6 +6,53 @@ from citadel.acceptance.model_probes import INPUT_BOUND, OUTPUT_BOUND
 
 
 class ModelOracleTests(unittest.TestCase):
+    def test_allowed_model_route_requires_actual_usage_and_allocated_backend_dispatch(self):
+        from citadel.acceptance.model_oracle import evaluate_allowed_model
+        _, control, _, evidence = self.fixture()
+        row = control["allowed"] | {"check_id": "route.evidence-assessor.model.inference"}
+        evaluate = lambda records: evaluate_allowed_model(
+            row, records, runtime_identity="a" * 64, subscription="d" * 64)
+        self.assertEqual(evaluate(evidence)["status"], "pass")
+        self.assertEqual(evaluate(evidence[:1] + evidence[2:])["status"], "blocked")
+        self.assertEqual(evaluate(evidence[:2] + evidence[3:])["status"], "blocked")
+        self.assertEqual(evaluate_allowed_model(row | {"caller": "operator"}, evidence,
+            runtime_identity="a" * 64, subscription="d" * 64)["status"], "blocked")
+
+    def test_operator_model_denial_requires_own_subscription_zero_backend_and_unchanged_products(self):
+        from citadel.acceptance.model_oracle import evaluate_operator_model
+        observation, control, snapshots, evidence = self.fixture()
+        observation = {key: value for key, value in observation.items() if key != "runtime_identity"} | {
+            "check_id": "route.operator.model.inference", "caller": "operator",
+            "reason": "model_caller_denied", "target": control["allowed"]["target"]}
+        evidence[0] = observation | {"source": "gateway", "method": "POST",
+            "observed": 100.5, "credential_sha256": "4" * 64, "facts": {"backend_dispatched": False}}
+        options = dict(identities={"evidence-assessor": "a" * 64},
+            subscriptions={"operator": "4" * 64, "evidence-assessor": "d" * 64}, observer_identity="f" * 64)
+        self.assertEqual(evaluate_operator_model(observation, control, snapshots, evidence, **options)["status"], "pass")
+        for index in range(len(evidence)):
+            with self.subTest(missing=index):
+                self.assertEqual(evaluate_operator_model(observation, control, snapshots,
+                    evidence[:index] + evidence[index + 1:], **options)["status"], "blocked")
+        for change in ({"credential_sha256": "3" * 64}, {"facts": {"backend_dispatched": True}}):
+            self.assertEqual(evaluate_operator_model(observation, control, snapshots,
+                [evidence[0] | change, *evidence[1:]], **options)["status"], "blocked")
+        from citadel.acceptance.coverage import STORAGE
+        from citadel.acceptance.proof_gate import evaluate_check
+        from citadel.acceptance.reports import sanitize
+        identities = {actor: str(index + 3) * 64 for index, actor in enumerate(STORAGE)}
+        identities["evidence-assessor"] = "a" * 64
+        for side in snapshots.values():
+            for row in side.values():
+                row["caller"] = "operator"
+        check = {"check_id": observation["check_id"], "expected": "deny", "status": "pass",
+            "actual": {"observation": observation, "control": control | {"runtime_identity": "f" * 64},
+                      "before": list(snapshots["before"].values()), "after": list(snapshots["after"].values())}}
+        report = {"run_id": "suite1", "runtime_identities": identities,
+            "subscription_bindings": options["subscriptions"], "evidence": evidence,
+            "operation_ids": ["phase1", "direct1", "comparison1", "assess1", "acquire1", "release1",
+                              "beforedrafts", "beforefindings", "afterdrafts", "afterfindings"]}
+        self.assertEqual(evaluate_check(sanitize(check), sanitize(report))["status"], "pass")
+
     def fixture(self):
         observation = {"check_id": "model.evidence-assessor.direct-denied", "caller": "evidence-assessor",
             "run_id": "phase1", "operation_id": "direct1", "runtime_identity": "a" * 64,
@@ -100,5 +147,9 @@ class ModelOracleTests(unittest.TestCase):
                               "beforedrafts", "beforefindings", "afterdrafts", "afterfindings"],
             "evidence": evidence}
         self.assertEqual(evaluate_check(sanitize(check), sanitize(report))["status"], "pass")
+        allowed = control["allowed"] | {"check_id": "route.evidence-assessor.model.inference"}
+        route = {"check_id": allowed["check_id"], "expected": "allow", "status": "pass",
+                 "actual": {"observation": allowed, "control": {}}}
+        self.assertEqual(evaluate_check(sanitize(route), sanitize(report))["status"], "pass")
         report["evidence"] = evidence[1:]
         self.assertEqual(evaluate_check(sanitize(check), sanitize(report))["status"], "blocked")

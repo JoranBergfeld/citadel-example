@@ -29,8 +29,16 @@ def evaluate_check(check, report):
                 check["check_id"].startswith("route.operator.")
                 and observation.get("run_id") == report.get("run_id"))):
         return blocked
-    if check["check_id"].startswith("model."):
-        from .model_oracle import evaluate_model
+    operator_model = check["check_id"] == "route.operator.model.inference"
+    if check["check_id"].startswith("route.") and check["check_id"].endswith(".model.inference") and not operator_model:
+        from .model_oracle import evaluate_allowed_model
+        bindings, caller = report.get("subscription_bindings"), observation.get("caller")
+        if not isinstance(bindings, dict) or not isinstance(caller, str):
+            return blocked
+        return evaluate_allowed_model(observation, records,
+            runtime_identity=identities.get(caller), subscription=bindings.get(caller))
+    if check["check_id"].startswith("model.") or operator_model:
+        from .model_oracle import evaluate_model, evaluate_operator_model
         allowed, slot = control.get("allowed"), control.get("slot")
         observer = control.get("runtime_identity")
         bindings = report.get("subscription_bindings")
@@ -50,6 +58,9 @@ def evaluate_check(check, report):
                     or {row["container"] for row in rows} != {"drafts", "findings"}):
                 return blocked
             snapshots[side] = {row["container"]: row for row in rows}
+        if operator_model:
+            return evaluate_operator_model(observation, control, snapshots, records, identities=identities,
+                subscriptions=bindings, observer_identity=observer)
         return evaluate_model(observation, control, snapshots, records, identities=identities,
             subscription=bindings.get(allowed["caller"]), observer_identity=observer)
     from .release_probes import RELEASE_CHECKS, validate_source

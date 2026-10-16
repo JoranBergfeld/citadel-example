@@ -32,7 +32,7 @@ class ModelAdmission:
     def reserve(self, workload, *, operation_id):
         operation = identity(operation_id)
         phase, now = self.phase, self.clock()
-        if workload not in STORAGE:
+        if workload not in (*STORAGE, "operator"):
             raise OperationError("forbidden", "Only actual allocated workload controls")
         if now >= phase["deadline"]:
             raise OperationError("deadline", "Control window expired")
@@ -69,6 +69,8 @@ class ModelAdmission:
                 or type(observation.get("status_code")) is not int
                 or not (
                     observation["status_code"] in (401, 403) and observation.get("reason") in AUTH_ERRORS
+                    or permit["caller"] == "operator" and observation["status_code"] == 403
+                    and observation.get("reason") == "model_caller_denied"
                     or observation["status_code"] == 200
                     and observation.get("reason") == "unauthorized_model_succeeded")
                 or any(type(observation.get(key)) not in (int, float)

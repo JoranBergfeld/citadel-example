@@ -52,7 +52,8 @@ requires its four independently verified, actually executed storage denials.
   A denial needs the gateway's explicit `route_denied` response metadata and
   explicit no-backend-dispatch evidence, not just HTTP 403. Null/unknown backend
   fields remain blocked. These gates cover all 85 caller/read-capability obligations.
-  Model-route obligations still need their complete independent proofs.
+  Model routes have separate receipt/usage oracles, including the operator's
+  forbidden inference route under its own allocated subscription.
 - Invocation controls come from actual successful normal-workflow `SendMessage`
   responses, not additional probe invocations or manufactured accepted tasks.
   The actual SDK response must contain the matching protocol task/run identity.
@@ -263,9 +264,20 @@ requires its four independently verified, actually executed storage denials.
   inference fails. Exports independently re-evaluate all five obligations.
   Normal Agent Framework responses export only actual token counts, request
   destination hash and measured times; no prompt, response prose or credentials.
-  These are queried application/APIM/storage correlations, **not** a claim of
-  separate model-account diagnostic ingestion. Standalone model-route checks
-  and the remaining numeric model-boundary obligations are still unfinished.
+  The four allowed model-route obligations independently reuse genuine normal
+  Agent Framework/APIM receipts and exact usage, without extra paid requests or
+  altered normal grants. These are queried application/APIM/storage correlations,
+  **not** a claim of separate model-account diagnostic ingestion. Remaining
+  numeric model-boundary obligations are unfinished.
+- The same globally excluded phase reserves a separate operator model control.
+  Its fixed-purpose provider reads only the operator's allocated subscription;
+  it never supplies that credential to a runtime actor or claims a runtime MI.
+  A conclusive denial needs the actual `model_caller_denied` gateway response,
+  queried operator subscription/request/target correlation, explicit zero backend
+  dispatch, a working normal model control and independently unchanged products.
+  Successful unauthorized inference fails; ambiguity retains the lease/ticket.
+  All ten model route/direct-origin obligations now have executable providers
+  and independent exported-proof evaluators, not asserted cloud passes.
 - `ConsoleProbe` selects only the inventoried Reference Data app's actual ready
   revision/replica/container, pinned image and assigned identity. Its CLI 2.91.0
   process uses a real PTY and the approved console-only ARM `2025-07-01` exception.

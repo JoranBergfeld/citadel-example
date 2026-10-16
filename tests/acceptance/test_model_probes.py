@@ -11,6 +11,36 @@ from tests.acceptance.test_storage_probes import Credential
 
 
 class ModelProbeTests(unittest.IsolatedAsyncioTestCase):
+    async def test_operator_model_denial_uses_only_its_own_subscription_and_retains_gateway_receipt(self):
+        from types import SimpleNamespace
+        from citadel.acceptance.model_probes import OperatorModelProbe
+        requests = []
+
+        async def provider(request):
+            requests.append(request)
+            return httpx2.Response(403, headers={
+                "apim-request-id": "actual-operator-model-denial",
+                "x-citadel-denial": "model_caller_denied"}, content=b"not exported")
+
+        lifecycle = SimpleNamespace(value={"outputs": {"gatewayUrl": "https://gateway.example"}},
+            credentials=lambda: {"callerStates": {"operator": "active"},
+                "callerKeys": {"operator": {"primary": "only-operator-key"}}})
+        probe = OperatorModelProbe(lifecycle, enabled=True, run_id="phase1",
+            operation_id="operator1", deadline=time.time() + 60, admit=self.admit,
+            client_factory=lambda **kw: httpx2.AsyncClient(transport=httpx2.MockTransport(provider), **kw))
+        result = await probe.observe()
+        self.assertEqual(result["state"], "observed")
+        self.assertEqual(result["check_id"], "route.operator.model.inference")
+        self.assertEqual(result["request_id"], "actual-operator-model-denial")
+        self.assertEqual(result["operation_id"], "operator1")
+        self.assertEqual(requests[0].headers["Ocp-Apim-Subscription-Key"], "only-operator-key")
+        self.assertNotIn("Authorization", requests[0].headers)
+        self.assertNotIn("runtime_identity", result)
+        self.assertNotIn("only-operator-key", str(result))
+        with self.assertRaises(OperationError):
+            await probe.observe()
+        self.assertEqual(len(requests), 1)
+
     async def asyncSetUp(self):
         self.requests, self.admissions, self.credential = [], 0, Credential()
 

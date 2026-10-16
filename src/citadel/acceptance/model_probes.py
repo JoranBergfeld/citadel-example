@@ -13,7 +13,7 @@ from azure.core.exceptions import AzureError
 from citadel.gateway.trust import INVOCATION_CALLERS
 from citadel.operations import OperationError, identity
 from citadel.runtime.configuration import endpoint
-from .telemetry import correlate, emit, opaque
+from .telemetry import correlate, emit, gateway_request_id, opaque
 
 
 PROMPT = "Reply with exactly OK for a fictional connectivity check."
@@ -109,6 +109,61 @@ class DirectModelProbe:
                                         "output_tokens": OUTPUT_BOUND, "reason": result["reason"]})
         except (AzureError, httpx2.HTTPError, TimeoutError, ValueError, OperationError):
             # No retry or admission release on an ambiguous provider outcome.
+            pass
+        result["finished"] = time.time()
+        return result
+
+
+class OperatorModelProbe:
+    def __init__(self, lifecycle, *, enabled, run_id, operation_id, deadline, admit, client_factory=None):
+        if (enabled is not True or not callable(admit)
+                or type(deadline) not in (int, float) or not math.isfinite(deadline)
+                or not time.time() < deadline <= time.time() + 900):
+            raise ValueError("An explicit bounded operator model control is required")
+        self.run_id, self.operation = identity(run_id), identity(operation_id)
+        credentials = lifecycle.credentials()
+        if credentials["callerStates"]["operator"] != "active":
+            raise ValueError("Operator model control requires its own active subscription")
+        self.key = credentials["callerKeys"]["operator"]["primary"]
+        self.url = endpoint(lifecycle.value["outputs"]["gatewayUrl"]) + "/openai/v1/chat/completions"
+        self.deadline, self.admit, self.sent = deadline, admit, False
+        self.client = client_factory or httpx2.AsyncClient
+
+    async def observe(self):
+        if self.sent or time.time() >= self.deadline:
+            raise OperationError("conflict", "Late or repeated operator model dispatch refused")
+        self.sent = True
+        await self.admit()
+        result = {"check_id": "route.operator.model.inference", "caller": "operator",
+            "run_id": self.run_id, "operation_id": self.operation, "started": time.time(),
+            "target": hashlib.sha256(self.url.encode()).hexdigest(), "state": "indeterminate",
+            "reason": "operator_model_outcome_unverified", "model_attempts": 1,
+            "input_tokens": INPUT_BOUND, "output_tokens": OUTPUT_BOUND}
+        try:
+            async with asyncio.timeout(max(0, min(60, self.deadline - time.time()))):
+                async with self.client(timeout=60, follow_redirects=False, trust_env=False) as client:
+                    async with client.stream("POST", self.url, headers={
+                            "Ocp-Apim-Subscription-Key": self.key, "x-citadel-run-id": self.run_id,
+                            "x-citadel-operation-id": self.operation}, json={
+                                "model": "citadel-gpt-41-mini", "stream": False,
+                                "messages": [{"role": "user", "content": PROMPT}],
+                                "max_completion_tokens": OUTPUT_BOUND}) as response:
+                        content = bytearray()
+                        async for chunk in response.aiter_bytes():
+                            content.extend(chunk)
+                            if len(content) > 1024 * 1024:
+                                raise OperationError("result_limit", "Operator model response exceeds bound")
+                        result.update(status_code=int(response.status_code),
+                                      request_id=gateway_request_id(response.headers))
+                        if response.status_code == 403 and response.headers.get("x-citadel-denial") == "model_caller_denied":
+                            result.update(state="observed", reason="model_caller_denied")
+                        elif response.status_code == 200:
+                            document = json.loads(content)
+                            usage = document.get("usage") if isinstance(document, dict) else None
+                            if isinstance(usage, dict) and all(type(usage.get(key)) is int and 0 <= usage[key] <= bound
+                                    for key, bound in (("prompt_tokens", INPUT_BOUND), ("completion_tokens", OUTPUT_BOUND))):
+                                result.update(state="observed", reason="unauthorized_model_succeeded")
+        except (httpx2.HTTPError, TimeoutError, ValueError, OperationError):
             pass
         result["finished"] = time.time()
         return result

@@ -1,5 +1,6 @@
 """Globally excluded direct-model controls, with no workload authority substitution."""
 
+import asyncio
 import hashlib
 import re
 import time
@@ -135,7 +136,7 @@ class ModelAcceptance:
                 phase["snapshots"]["before"] = controls.products()
                 report["operation_ids"].extend(row["operation_id"] for row in phase["snapshots"]["before"].values())
                 self.lifecycle.state.save()
-                for workload in STORAGE:
+                for workload in (*STORAGE, "operator"):
                     worker_id = uuid4().hex
                     while True:
                         try:
@@ -147,14 +148,25 @@ class ModelAcceptance:
                             self.sleep(min(5, max(0, phase["deadline"] - time.time())))
                     report["operation_ids"].append(worker_id)
                     self.lifecycle.state.save()
-                    driver = ConsoleProbe if workload == "reference-data" else RevisionProbe
-                    result = driver(self.lifecycle, admit=admit).execute(
-                        apps[workload], workload, worker_id, mode="direct-model",
-                        model={"run_id": run_id, "origin": origin, "deployment": "citadel-gpt-41-mini"},
-                        deadline=phase["deadline"])
-                    row = bind_model_result(result, workload=workload, worker_id=worker_id, run_id=run_id,
-                        origin=origin, principal=hashlib.sha256(
-                            str(UUID(apps[workload]["identityPrincipalId"])).encode()).hexdigest())
+                    if workload == "operator":
+                        from .model_probes import OperatorModelProbe
+
+                        async def admitted():
+                            if time.time() >= phase["deadline"]:
+                                raise OperationError("deadline", "Reserved operator model control expired")
+
+                        row = asyncio.run(OperatorModelProbe(self.lifecycle, enabled=True,
+                            run_id=run_id, operation_id=worker_id, deadline=phase["deadline"],
+                            admit=admitted).observe())
+                    else:
+                        driver = ConsoleProbe if workload == "reference-data" else RevisionProbe
+                        result = driver(self.lifecycle, admit=admit).execute(
+                            apps[workload], workload, worker_id, mode="direct-model",
+                            model={"run_id": run_id, "origin": origin, "deployment": "citadel-gpt-41-mini"},
+                            deadline=phase["deadline"])
+                        row = bind_model_result(result, workload=workload, worker_id=worker_id, run_id=run_id,
+                            origin=origin, principal=hashlib.sha256(
+                                str(UUID(apps[workload]["identityPrincipalId"])).encode()).hexdigest())
                     phase["observations"].append(row)
                     self.lifecycle.state.save()
                     admission.settle(permit, row)
@@ -174,7 +186,7 @@ class ModelAcceptance:
 
     @staticmethod
     def evaluate(report, evidence):
-        from .model_oracle import evaluate_model
+        from .model_oracle import evaluate_allowed_model, evaluate_model, evaluate_operator_model
         from .oracle import hash_value
         phase = report.get("model_phase", {})
         snapshots = phase.get("snapshots", {})
@@ -188,7 +200,7 @@ class ModelAcceptance:
         results = []
         for observation in phase.get("observations", []):
             caller = observation["caller"]
-            allowed_caller = "candidate-planner" if caller == "reference-data" else caller
+            allowed_caller = "candidate-planner" if caller in ("reference-data", "operator") else caller
             candidates = [row for row in evidence if row.get("source") == "application"
                 and row.get("method") == "chat.completions" and row.get("caller") == allowed_caller
                 and row.get("status_code") == 200 and row.get("run_id") in report["operation_ids"]
@@ -204,12 +216,24 @@ class ModelAcceptance:
             if latest and allowed["operation_id"] not in report["operation_ids"]:
                 report["operation_ids"].append(allowed["operation_id"])
             control = {"allowed": allowed, "slot": phase.get("slot", []), "runtime_identity": observer}
-            result = evaluate_model(observation, control, snapshots, evidence,
-                identities=report.get("runtime_identities", {}),
-                subscription=report.get("subscription_bindings", {}).get(allowed_caller),
-                observer_identity=observer)
+            if caller == "operator":
+                result = evaluate_operator_model(observation, control, snapshots, evidence,
+                    identities=report.get("runtime_identities", {}),
+                    subscriptions=report.get("subscription_bindings", {}), observer_identity=observer)
+            else:
+                result = evaluate_model(observation, control, snapshots, evidence,
+                    identities=report.get("runtime_identities", {}),
+                    subscription=report.get("subscription_bindings", {}).get(allowed_caller),
+                    observer_identity=observer)
             results.append(result | {"expected": "deny", "actual": {
                 "observation": observation, "control": control,
                 "before": list(snapshots.get("before", {}).values()),
                 "after": list(snapshots.get("after", {}).values())}})
+            if caller not in ("reference-data", "operator") and latest:
+                route = allowed | {"check_id": f"route.{caller}.model.inference"}
+                result = evaluate_allowed_model(route, evidence,
+                    runtime_identity=report.get("runtime_identities", {}).get(caller),
+                    subscription=report.get("subscription_bindings", {}).get(caller))
+                results.append(result | {"expected": "allow",
+                                        "actual": {"observation": route, "control": {}}})
         return results
