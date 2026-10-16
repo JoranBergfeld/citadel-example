@@ -2,6 +2,7 @@
 
 import asyncio
 import time
+from contextlib import nullcontext
 from uuid import uuid4
 
 from citadel.evidence.manifests import sha256
@@ -60,11 +61,22 @@ class OperationProbes:
     async def safe_read_exhaustion(self, operation_id=None):
         return await self._safe_read(operation_id, dropped=3)
 
-    async def _safe_read(self, operation_id, *, dropped):
+    async def safe_read_timeout(self, operation_id=None):
+        return await self._safe_read(operation_id, dropped=3, timeout=True)
+
+    async def _safe_read(self, operation_id, *, dropped, timeout=False):
         if self.workload != "candidate-planner":
             raise OperationError("forbidden", "Only the allocated planner can admit a root probe")
         operation = identity(operation_id or uuid4().hex)
-        accounting = Accounting(self.ledger, workload=self.workload, clock=self.clock)
+        permits = []
+
+        class ObservedAdmission(Accounting):
+            async def safe_read(self, budget_id, *, retry=0):
+                permit = await super().safe_read(budget_id, retry=retry)
+                permits.append(permit)
+                return permit
+
+        accounting = ObservedAdmission(self.ledger, workload=self.workload, clock=self.clock)
         budget = await accounting.start_run(operation, deadline=self.deadline)
         document, _ = await self.ledger.read()
 
@@ -77,12 +89,27 @@ class OperationProbes:
         async def read():
             started = self.clock()
             monotonic_started = time.monotonic()
-            observed, _ = await self.ledger.read()
+            from .telemetry import correlate
+            step_id = operation + f"-read{len(steps)}"
+            with correlate(self.run_id, step_id, self.workload) if timeout else nullcontext():
+                observed, _ = await self.ledger.read()
             monotonic_finished = time.monotonic()
             discarded = len(steps) < dropped
-            steps.append({"started": started, "finished": self.clock(), "sha256": business_hash(observed),
-                          "monotonic_started": monotonic_started, "monotonic_finished": monotonic_finished,
-                          "state": "dropped" if discarded else "received"})
+            step = {"started": started, "finished": self.clock(), "sha256": business_hash(observed),
+                    "monotonic_started": monotonic_started, "monotonic_finished": monotonic_finished,
+                    "state": "dropped" if discarded else "received"}
+            steps.append(step)
+            if timeout:
+                permit = permits[-1]
+                step.update(operation_id=step_id, accepted=permit["started"],
+                            deadline=permit["deadline"], received=self.clock())
+                try:
+                    await asyncio.sleep(max(0, permit["deadline"] - self.clock()) + 30)
+                except asyncio.CancelledError:
+                    step["state"] = "timed_out"
+                    raise
+                finally:
+                    step.update(finished=self.clock(), monotonic_finished=time.monotonic())
             if discarded:
                 raise OperationError("unavailable", "Acceptance discarded a successful read response")
             return observed

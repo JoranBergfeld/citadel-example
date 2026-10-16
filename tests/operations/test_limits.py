@@ -119,6 +119,7 @@ class LimitsTests(unittest.IsolatedAsyncioTestCase):
         self.store.before_commit = slow_commit
         read = await self.planner.safe_read("run1")
         self.assertEqual(read["deadline"], 1030)
+        self.assertEqual(read["started"], 1000)
         self.store.before_commit = None
         model = await self.planner.model("run1", "agent1", input_tokens=16000, output_tokens=2000)
         self.now += 50

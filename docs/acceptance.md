@@ -553,9 +553,18 @@ actual accepted invocation and each preceding poll response. Missing peer receip
 cannot be replaced by successful operator timing alone. The fixed provider retains
 the original run deadline and the existing 64-read operator allowance.
 
-Implemented providers currently cover 269 of 278 canonical checks; this is not
-a cloud pass count. Nine still need actual drivers: the three rotation families,
-process restart, and the 10/30/60/180/900-second acceptance/read/model/A2A/workflow
+The 30-second safe-read control obtains three successful real Blob reads but
+withholds each callback until the unchanged production timer expires. Its public
+gate requires all three actual application/Blob receipts, queried timer-expiry
+records, exact scheduled deadlines, 1/2-second backoff, independently observed
+509 remaining reads, and unchanged business state. Wall timestamps correlate
+service observations; actual event-loop deadlines prove expiry even when wall
+and monotonic clocks diverge. No deadline is reset after backoff, no timer is
+increased, and missing expiry/service evidence blocks.
+
+Implemented providers currently cover 270 of 278 canonical checks; this is not
+a cloud pass count. Eight still need actual drivers: the three rotation families,
+process restart, and the 10/60/180/900-second acceptance/model/A2A/workflow
 boundaries. These implementation gaps keep the full gate blocked.
 
 1. Perform deployed validation of the implemented telemetry configuration,

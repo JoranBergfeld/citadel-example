@@ -32,7 +32,7 @@ method event_id facts certificate_sha256 generation read_attempts agent_executio
 backend_target backend_method backend_status
 model_attempts input_tokens output_tokens tokens deadline retry artifact_count probe_id
 started finished observed status_code control_status before_sha256 after_sha256
-monotonic_started monotonic_finished
+monotonic_started monotonic_finished monotonic_deadline accepted received
 before_count after_count evidence evidence_sha256 artifacts sha256 count version
 software configuration image manifest protocols model inputs limits lifecycle_refs
 acceptance automated_status human_status coverage optional_not_exercised

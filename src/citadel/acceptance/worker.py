@@ -105,6 +105,7 @@ async def publish_operation(container, *, run_id, workload, principal_id, check_
             workload == "evidence-assessor" and check_id == "fault.concurrent-version-conflict") and not (
             workload == "candidate-planner" and check_id in (
                 "limit.agent_executions", "limit.read_attempts_run", "limit.input_tokens_attempt",
+                "limit.safe_read_timeout_seconds",
                 *COUNTER_CHECKS.values())) and (
             workload not in ("candidate-planner", "briefing-author") or check_id not in {
             "fault.dropped-committed-write", "fault.pending-incomplete", "fault.fenced-explicit-retry",
@@ -473,6 +474,7 @@ async def run_gateway_matrix(config, request):
                         callbacks += [
                             ("fault.safe-read-recovery", faults.safe_read_recovery),
                             ("fault.safe-read-exhaustion", faults.safe_read_exhaustion),
+                            ("limit.safe_read_timeout_seconds", faults.safe_read_timeout),
                         ]
                     for name, callback in callbacks:
                         operation = uuid4().hex

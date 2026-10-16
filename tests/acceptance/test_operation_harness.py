@@ -13,17 +13,19 @@ class OperationHarnessTests(unittest.TestCase):
              "caller": "candidate-planner", "runtime_identity": "a" * 64,
              "target": hashlib.sha256(("https://allocated.blob.core.windows.net/planner-operations/"
                  f"acceptance/worker1/observations/op{index}.json").encode()).hexdigest(),
-             "actual": {"operation_id": "op" + str(index)}}
+             "actual": {"operation_id": "op" + str(index), **(
+                 {"steps": [{"operation_id": f"op{index}-read{retry}"} for retry in range(3)]}
+                 if check == "limit.safe_read_timeout_seconds" else {})}}
             for index, check in enumerate(("fault.dropped-committed-write", "fault.pending-incomplete",
                 "fault.fenced-explicit-retry", "fault.deadline-no-late-effect",
-                "fault.safe-read-recovery", "fault.safe-read-exhaustion"))]}
+                "fault.safe-read-recovery", "fault.safe-read-exhaustion", "limit.safe_read_timeout_seconds"))]}
 
     def bind(self, result):
         return bind_operation_result(result, run_id="worker1", principal="a" * 64,
                                      account="https://allocated.blob.core.windows.net")
 
     def test_worker_fault_results_bind_all_fixed_drivers_and_actual_identity_targets(self):
-        self.assertEqual(len(self.bind(self.result())), 6)
+        self.assertEqual(len(self.bind(self.result())), 10)
         for change in ({"caller": "operator"}, {"runtime_identity": "b" * 64},
                        {"run_id": "other"}, {"target": "b" * 64}, {"actual": {"operation_id": "other"}}):
             result = self.result()

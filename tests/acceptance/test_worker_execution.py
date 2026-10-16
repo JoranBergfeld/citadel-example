@@ -206,6 +206,7 @@ class WorkerExecutionTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_all_fault_drivers_execute_real_blob_sdk_and_restore_admission_only_after_results(self):
         from citadel.acceptance.operation_harness import bind_operation_result
+        from citadel.acceptance.telemetry import Telemetry
         runtime_tests = str(Path(__file__).resolve().parents[1] / "runtime")
         sys.path.insert(0, runtime_tests)
         try:
@@ -234,8 +235,10 @@ class WorkerExecutionTests(unittest.IsolatedAsyncioTestCase):
             blob="https://allocated.blob.core.windows.net", operations_container="planner-operations")
         request = {"schema_version": 1, "mode": "operation-faults", "workload": config.target,
             "client_id": config.client_id, "run_id": "fault-worker", "deadline": time.time() + 180}
+        output = io.StringIO()
         with (patch.dict(os.environ, {"CITADEL_ACCEPTANCE_ENABLED": "true",
                                      "AZURE_PRINCIPAL_ID": config.client_id}),
+              patch("citadel.acceptance.telemetry._exporter", Telemetry(config.target, config.client_id, output=output)),
               patch("citadel.acceptance.worker.ManagedIdentityCredential", lambda **kw: Credential()),
               patch("citadel.acceptance.worker.ContainerClient",
                     lambda *args, **kw: ContainerClient(*args, transport=wire, **kw)),
@@ -244,10 +247,25 @@ class WorkerExecutionTests(unittest.IsolatedAsyncioTestCase):
             observations = await run_gateway_matrix(config, request)
         result = json.loads(wire.blobs["/planner-operations/acceptance/fault-worker/observations.json"])
         self.assertEqual(result["state"], "complete", result)
-        self.assertEqual(len(observations), 6)
+        self.assertEqual(len(observations), 7)
         self.assertEqual(len(bind_operation_result(result, run_id=request["run_id"],
-            principal=observations[0]["runtime_identity"], account=config.blob)), 6)
-        self.assertEqual(len({row["request_id"] for row in observations}), 6)
+            principal=observations[0]["runtime_identity"], account=config.blob)), 10)
+        self.assertEqual(len({row["request_id"] for row in observations}), 7)
+        records = [json.loads(line) for line in output.getvalue().splitlines()]
+        timers = [row for row in records if row["method"] == "safe_read.timeout"]
+        self.assertEqual(len(timers), 3)
+        self.assertEqual([row["facts"]["retry"] for row in timers], [0, 1, 2])
+        for row in timers:
+            timer = row["facts"]
+            self.assertGreaterEqual(timer["monotonic_finished"], timer["monotonic_deadline"])
+            self.assertAlmostEqual(timer["monotonic_deadline"] - timer["monotonic_started"],
+                                   timer["deadline"] - timer["started"], places=6)
+        timeout = next(row for row in observations if row["check_id"] == "limit.safe_read_timeout_seconds")
+        for step in timeout["actual"]["steps"]:
+            receipts = [row for row in records if row["method"] == "storage.read"
+                        and row["operation_id"] == step["operation_id"]]
+            self.assertEqual(len(receipts), 1)
+            self.assertIn(receipts[0]["status_code"], (200, 206))
         self.assertTrue(all(row["status_code"] == 201 for row in observations))
         self.assertLessEqual(len([path for path in wire.blobs if "/read-tickets/" in path]), 512)
         self.assertNotIn("/planner-operations/active-run-slot.json", wire.leases)

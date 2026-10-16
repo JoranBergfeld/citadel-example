@@ -1,13 +1,42 @@
 import unittest
 import time
+import io
+import json
+from unittest.mock import patch
 
 from citadel.acceptance.faults import OperationProbes
 from citadel.operations.testing import MemoryLedger
 from citadel.operations import OperationError
 from citadel.operations.limits import Accounting
+from citadel.acceptance.telemetry import Telemetry
 
 
 class FaultTests(unittest.IsolatedAsyncioTestCase):
+    async def test_actual_safe_read_timeouts_exhaust_only_three_charged_reads_without_business_effects(self):
+        probe = OperationProbes(MemoryLedger(), workload="candidate-planner",
+            enabled=True, run_id="timeouts", deadline=time.time() + 300)
+        output = io.StringIO()
+        telemetry = Telemetry("candidate-planner", "11111111-1111-1111-1111-111111111111", output=output)
+        with patch("citadel.acceptance.telemetry._exporter", telemetry):
+            result = await probe.safe_read_timeout(operation_id="thirty-seconds")
+        self.assertEqual(result["state"], "unavailable")
+        self.assertEqual(result["read_attempts"], 3)
+        self.assertEqual(result["retry"], 2)
+        self.assertEqual(result["remaining_reads"], 509)
+        self.assertEqual(result["before_sha256"], result["after_sha256"])
+        self.assertEqual([step["state"] for step in result["steps"]], ["timed_out"] * 3)
+        timers = [row["facts"] for row in map(json.loads, output.getvalue().splitlines())
+                  if row["method"] == "safe_read.timeout"]
+        self.assertEqual(len(timers), 3)
+        for step, timer in zip(result["steps"], timers, strict=True):
+            self.assertEqual(step["deadline"] - step["accepted"], 30)
+            self.assertLess(step["received"], step["deadline"])
+            self.assertLessEqual(timer["monotonic_started"], step["monotonic_started"])
+            self.assertGreaterEqual(step["monotonic_finished"], timer["monotonic_deadline"])
+            self.assertGreaterEqual(timer["monotonic_finished"], step["monotonic_finished"])
+            self.assertAlmostEqual(timer["monotonic_deadline"] - timer["monotonic_started"],
+                                   timer["deadline"] - timer["started"], places=6)
+
     async def test_fault_waits_observe_wall_deadlines_when_sleep_clock_advances_faster(self):
         for method in ("fenced_retry", "deadline_no_late_effect"):
             with self.subTest(method=method):

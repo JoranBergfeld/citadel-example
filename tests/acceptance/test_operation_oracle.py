@@ -11,6 +11,78 @@ from citadel.operations.testing import MemoryLedger
 
 
 class OperationOracleTests(unittest.IsolatedAsyncioTestCase):
+    async def test_read_timeout_gate_requires_actual_timer_expiry_three_service_reads_and_independent_budget(self):
+        observed, snapshot, evidence = await self.fixture()
+        name, base = "limit.safe_read_timeout_seconds", time.time()
+        steps = []
+        for index in range(3):
+            accepted = base + index * 30.02
+            start, end = accepted + index, accepted + 30.01
+            mono = 1000 + index * 30.02
+            step_id = f"operation1-read{index}"
+            steps.append({"operation_id": step_id, "accepted": accepted, "deadline": accepted + 30,
+                "started": start, "received": start + .1, "finished": end,
+                "monotonic_started": mono + index, "monotonic_finished": mono + 30.01,
+                "sha256": "a" * 64, "state": "timed_out"})
+            receipt = {"request_id": "physical-" + str(index), "status_code": 206,
+                "target": snapshot["target"], "observed": start + .1, "runtime_identity": "a" * 64}
+            evidence.extend([
+                receipt | {"source": "storage", "method": "GetBlob"},
+                receipt | {"source": "application", "method": "storage.read", "run_id": "worker1",
+                           "operation_id": step_id, "caller": "candidate-planner"},
+                {"source": "application", "method": "safe_read.timeout", "run_id": "worker1",
+                 "operation_id": "operation1", "runtime_identity": "a" * 64, "caller": "candidate-planner",
+                 "status_code": 0, "request_id": "", "observed": end,
+                 "facts": {"read_operation_id": "operation1", "retry": index, "started": start,
+                     "finished": end, "deadline": accepted + 30, "monotonic_started": mono + index,
+                     "monotonic_deadline": mono + 30, "monotonic_finished": mono + 30.01}}])
+        actual = {"operation_id": "operation1", "state": "unavailable", "steps": steps,
+            "read_attempts": 3, "retry": 2, "remaining_reads": 509, "deadline": base + 300,
+            "before_sha256": "a" * 64, "after_sha256": "a" * 64}
+        observed.update(check_id=name, probe_id=name, actual=actual, started=base - 1, finished=base + 91)
+        snapshot.update(started=base + 92, finished=base + 93, business_sha256="a" * 64, suite_id="suite1",
+            operation_state={"state": "missing", "artifact_count": 0},
+            budget_state={"closed": True, "deadline": base + 300, "remaining_reads": 509})
+        for row in evidence[:3]:
+            row["observed"] = base + (92 if row["request_id"] == snapshot["request_id"] else 91)
+            if row["source"] == "application":
+                row["facts"] = {"probe_id": name, "sha256": sha256(actual)}
+        report = {"run_id": "suite1", "operation_ids": ["worker1", "operation1", "observer1",
+            *[step["operation_id"] for step in steps]],
+            "runtime_identities": {"candidate-planner": "a" * 64, "reference-data": "d" * 64,
+                "evidence-assessor": "e" * 64, "release-reviewer": "f" * 64, "briefing-author": "0" * 64},
+            "evidence": evidence}
+        check = {"check_id": name, "expected": "boundary", "actual": {"observation": observed, "control": snapshot}}
+        self.assertEqual(evaluate_check(sanitize(check), sanitize(report))["status"], "pass")
+        for method in ("safe_read.timeout", "GetBlob", "storage.read"):
+            changed = report | {"evidence": [row for row in evidence if row["method"] != method]}
+            self.assertEqual(evaluate_check(check, changed)["status"], "blocked", method)
+        changed = copy.deepcopy(report)
+        next(row for row in changed["evidence"] if row["method"] == "safe_read.timeout")["facts"]["monotonic_deadline"] += 1
+        self.assertNotEqual(evaluate_check(check, changed)["status"], "pass")
+        changed = copy.deepcopy(report)
+        extra = next(row for row in changed["evidence"] if row["method"] == "storage.read")
+        changed["evidence"].append(extra | {"request_id": "unexpected-extra-read"})
+        self.assertEqual(evaluate_check(check, changed)["status"], "blocked")
+        for target, field, value in (("budget_state", "remaining_reads", 508),
+                                     ("operation_state", "artifact_count", 1)):
+            changed_check = copy.deepcopy(check)
+            changed_check["actual"]["control"][target][field] = value
+            self.assertEqual(evaluate_check(changed_check, report)["status"], "fail")
+        changed_check = copy.deepcopy(check)
+        changed_check["actual"]["control"]["business_sha256"] = "b" * 64
+        self.assertEqual(evaluate_check(changed_check, report)["status"], "fail")
+        changed_check, changed_report = copy.deepcopy(check), copy.deepcopy(report)
+        changed_actual = changed_check["actual"]["observation"]["actual"]
+        changed_actual["steps"][0]["finished"] -= 2
+        for row in changed_report["evidence"]:
+            if row["method"] == "execution":
+                row["facts"]["sha256"] = sha256(changed_actual)
+            if row["method"] == "safe_read.timeout" and row["facts"]["retry"] == 0:
+                row["facts"]["finished"] -= 2
+                row["observed"] -= 2
+        self.assertEqual(evaluate_check(changed_check, changed_report)["status"], "pass")
+
     async def test_exported_fault_proof_rechecks_suite_scope_and_fingerprinted_identity(self):
         observation, snapshot, evidence = await self.fixture()
         snapshot["suite_id"] = "suite1"

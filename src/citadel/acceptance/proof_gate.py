@@ -174,7 +174,7 @@ def evaluate_check(check, report):
     if (check["check_id"].startswith("fault.") or check["check_id"] in ADMISSION_CHECKS
             or check["check_id"] in MODEL_BOUNDARY_CHECKS
             or check["check_id"] in counter_checks
-            or check["check_id"] in ("limit.read_attempts_run", "limit.safe_read_retries")):
+            or check["check_id"] in ("limit.read_attempts_run", "limit.safe_read_retries", "limit.safe_read_timeout_seconds")):
         from .operation_oracle import evaluate_operation
         if (control.get("suite_id") != report.get("run_id")
                 or control.get("caller") != "operator" or control.get("container") != "planner-operations"
@@ -208,6 +208,11 @@ def evaluate_check(check, report):
                 return blocked
             return evaluate_read_boundary(observation, control, records,
                 runtime_identity=identities["candidate-planner"], observer_identity=control["runtime_identity"])
+        if check["check_id"] == "limit.safe_read_timeout_seconds":
+            steps = observation.get("actual", {}).get("steps")
+            if (not isinstance(steps, list) or len(steps) != 3
+                    or any(not isinstance(step, dict) or step.get("operation_id") not in operations for step in steps)):
+                return blocked
         if check["check_id"] in ADMISSION_CHECKS:
             nested = observation.get("actual")
             slot = nested.get("slot") if isinstance(nested, dict) else None

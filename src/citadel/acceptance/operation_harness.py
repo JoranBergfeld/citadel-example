@@ -55,6 +55,12 @@ def bind_operation_result(result, *, run_id, principal, account, mode="operation
                     f"{account}/planner-operations/acceptance/{run_id}/observations/{operation}.json".encode()).hexdigest()):
             raise Blocked("operation_worker_authority_or_target_conflict")
         ids.append(operation)
+        if check == "limit.safe_read_timeout_seconds":
+            steps = row["actual"].get("steps")
+            if (not isinstance(steps, list) or len(steps) != 3 or any(not isinstance(step, dict)
+                    or step.get("operation_id") != operation + f"-read{index}" for index, step in enumerate(steps))):
+                raise Blocked("read_timeout_physical_binding_conflict")
+            ids.extend(identity(step["operation_id"]) for step in steps)
         if mode == "read-limit":
             steps = row["actual"].get("steps")
             if (not isinstance(steps, list) or not 0 <= len(steps) <= 513

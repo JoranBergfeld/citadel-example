@@ -17,6 +17,7 @@ OPERATION_CHECKS = {
     "fault.deadline-no-late-effect": {"fault.deadline-no-late-effect"},
     "fault.safe-read-recovery": {"fault.safe-read-recovery"},
     "fault.safe-read-exhaustion": {"fault.safe-read-exhaustion", "limit.safe_read_retries"},
+    "limit.safe_read_timeout_seconds": {"limit.safe_read_timeout_seconds"},
 }
 
 
@@ -91,6 +92,9 @@ def evaluate_operation(observation, snapshot, evidence, *, runtime_identity, obs
         run_id=observation.get("run_id"), operation_id=observation.get("operation_id"),
         caller=observation["caller"]):
         return blocked
+    if group == "limit.safe_read_timeout_seconds":
+        from .read_timeout import evaluate_timeout_reads
+        return evaluate_timeout_reads(observation, snapshot, evidence, runtime_identity=runtime_identity)
     if group in ("fault.safe-read-recovery", "fault.safe-read-exhaustion"):
         steps, budget = actual.get("steps"), snapshot.get("budget_state")
         recovered = group == "fault.safe-read-recovery"

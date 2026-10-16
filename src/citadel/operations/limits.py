@@ -213,9 +213,10 @@ class Accounting:
             raise OperationError("exhausted", "At most two automatic safe-read retries")
         document, etag, record = await self._load(budget_id)
         self._charge(record, reads=1)
-        deadline = min(record["deadline"], self.clock() + 30)
+        started = self.clock()
+        deadline = min(record["deadline"], started + 30)
         await self._save(document, etag, record)
-        return {"deadline": deadline,
+        return {"deadline": deadline, "started": started,
                 "backoff": 0 if retry == 0 else 2 ** (retry - 1)}
 
     async def reserve_reads(self, budget_id, count):
@@ -231,13 +232,22 @@ class Accounting:
         for retry in range(3):
             permit = await self.safe_read(budget_id, retry=retry)
             await asyncio.sleep(permit["backoff"])
-            remaining = permit["deadline"] - self.clock()
+            started = self.clock()
+            remaining = permit["deadline"] - started
             if remaining <= 0:
                 raise OperationError("deadline", "Safe-read deadline elapsed during backoff")
+            monotonic_started = asyncio.get_running_loop().time()
+            timer = asyncio.timeout_at(monotonic_started + remaining)
             try:
-                async with asyncio.timeout(remaining):
+                async with timer:
                     return await read()
             except (TimeoutError, OperationError) as exc:
+                if isinstance(exc, TimeoutError) and timer.expired():
+                    from citadel.acceptance.telemetry import emit
+                    emit("safe_read.timeout", facts={"started": started, "finished": self.clock(),
+                        "deadline": permit["deadline"], "retry": retry, "read_operation_id": budget_id,
+                        "monotonic_started": monotonic_started, "monotonic_deadline": timer.when(),
+                        "monotonic_finished": asyncio.get_running_loop().time()})
                 if isinstance(exc, OperationError) and exc.code != "unavailable":
                     raise
                 if retry == 2:
