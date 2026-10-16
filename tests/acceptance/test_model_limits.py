@@ -47,6 +47,9 @@ class ModelLimitTests(unittest.IsolatedAsyncioTestCase):
     async def test_actual_worker_keeps_own_identity_global_lease_cooldowns_and_real_sdk_result_channel(self):
         await self.exercise_worker("model-limits", 1)
 
+    async def test_actual_timeout_worker_releases_only_after_definite_responses_and_client_quiescence(self):
+        await self.exercise_worker("model-timeout", 2)
+
     async def test_actual_execution_counter_worker_uses_eight_real_models_without_extra_grants(self):
         await self.exercise_worker("model-execution-limit", 8)
 

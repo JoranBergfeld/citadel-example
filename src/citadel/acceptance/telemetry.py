@@ -22,7 +22,7 @@ METHODS = {"SendMessage", "GetTask", "discovery", "status", "findings-read", "in
            "tools/call", "search_airports", "lookup_airport", "list_runways", "chat.completions",
            "storage.read", "storage.write", "storage.lease", "execution", "probe",
            "mcp.GET", "mcp.DELETE", "ping", "tools/list", "notifications/initialized", "authorization.denied",
-           "model.direct", "status.observed", "poll.observed", "safe_read.timeout",
+           "model.direct", "status.observed", "poll.observed", "safe_read.timeout", "model.timeout",
            "invocation.observed", "reference.observed", "exporter.health"}
 FACTS = {"generation", "read_attempts", "agent_executions", "model_attempts", "input_tokens",
          "output_tokens", "tokens", "deadline", "retry", "artifact_count", "sha256",
@@ -31,7 +31,7 @@ FACTS = {"generation", "read_attempts", "agent_executions", "model_attempts", "i
          "accepted_operation_id", "task_sha256", "source_sha256", "stream_count", "stream_sha256",
          "submitted_records", "acknowledged_records", "failed_records", "dropped_records",
          "delivery_attempts", "queued_records", "inflight", "ingestion_verified",
-         "monotonic_started", "monotonic_finished", "monotonic_deadline"}
+         "monotonic_started", "monotonic_finished", "monotonic_deadline", "model_attempt_id"}
 _correlation = ContextVar("citadel_evidence_correlation", default={})
 _exporter = None
 

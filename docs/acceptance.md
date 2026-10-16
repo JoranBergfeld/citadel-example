@@ -562,9 +562,20 @@ service observations; actual event-loop deadlines prove expiry even when wall
 and monotonic clocks diverge. No deadline is reset after backoff, no timer is
 increased, and missing expiry/service evidence blocks.
 
-Implemented providers currently cover 270 of 278 canonical checks; this is not
-a cloud pass count. Eight still need actual drivers: the three rotation families,
-process restart, and the 10/60/180/900-second acceptance/model/A2A/workflow
+The 60-second model control first completes a real Framework inference, then
+fully receives another genuine successful model response but withholds its
+callback until the unchanged production guard expires. The second reservation
+remains outstanding in its private control ledger; no settlement, refund, closure
+or replay is invented. A further real admission attempt must conflict without
+changing that ledger or sending another request. Independent raw state and
+queried model/API/timer receipts must match both responses and the retained
+permit. Global exclusion is released only after both definite responses, client
+closure and the existing quiet window; missing/ambiguous response data retains
+exclusion. Normal workflow grants remain unchanged.
+
+Implemented providers currently cover 271 of 278 canonical checks; this is not
+a cloud pass count. Seven still need actual drivers: the three rotation families,
+process restart, and the 10/180/900-second acceptance/A2A/workflow
 boundaries. These implementation gaps keep the full gate blocked.
 
 1. Perform deployed validation of the implemented telemetry configuration,

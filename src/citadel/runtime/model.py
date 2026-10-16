@@ -117,8 +117,19 @@ class GovernedModel:
                 await self.sleep(5)
         token = _permit.set({**permit, "sent": False})
         try:
-            async with asyncio.timeout(max(0, permit["deadline"] - self.clock())):
-                result = await self.agent.run(prompt)
+            started = self.clock()
+            monotonic_started = asyncio.get_running_loop().time()
+            timer = asyncio.timeout_at(monotonic_started + max(0, permit["deadline"] - started))
+            try:
+                async with timer:
+                    result = await self.agent.run(prompt)
+            except TimeoutError:
+                if timer.expired():
+                    emit("model.timeout", facts={"started": started, "finished": self.clock(),
+                        "deadline": permit["deadline"], "model_attempt_id": permit["attempt_id"],
+                        "monotonic_started": monotonic_started, "monotonic_deadline": timer.when(),
+                        "monotonic_finished": asyncio.get_running_loop().time()})
+                raise
             if self.clock() >= permit["deadline"]:
                 raise OperationError("deadline", "Late model response cannot release admission")
             await accounting.finish_model(budget_id, permit["attempt_id"])

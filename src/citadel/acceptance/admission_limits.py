@@ -120,6 +120,7 @@ def admission_snapshot(document, result):
         "deadline": budget.get("deadline"), "agent_executions": len(agents), "candidates": len(candidates),
         "agents_sha256": sha256(agents), "candidates_sha256": sha256(candidates),
         "remaining": remaining, "model_active": budget["model"] is not None,
+        "model": budget["model"], "history": budget["history"],
         "child_active": budget["child"] is not None, "grant_present": budget["grant"] is not None,
         "history_count": len(budget["history"]), "grant_count": len(budget["grants"]),
         "tokens_per_minute": budget.get("tokens_per_minute"),

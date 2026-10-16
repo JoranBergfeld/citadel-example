@@ -16,10 +16,13 @@ from .storage_probes import StorageControls
 from .admission_limits import ADMISSION_CHECKS, admission_snapshot, evaluate_admission
 from .read_limit import read_snapshot, evaluate_read_boundary
 from .model_limits import MODEL_BOUNDARY_CHECKS, evaluate_model_boundaries
+from .model_timeout import evaluate_model_timeout
 from .model_counters import COUNTER_MODES, COUNTER_CHECKS, COUNTER_GROUPS, evaluate_model_counter
 
 
 def _groups(mode):
+    if mode == "model-timeout":
+        return {"limit.model_timeout_seconds": {"limit.model_timeout_seconds"}}
     if mode in COUNTER_MODES:
         key = COUNTER_CHECKS[COUNTER_MODES[mode]]
         return {key: COUNTER_GROUPS[COUNTER_MODES[mode]]}
@@ -80,7 +83,7 @@ def bind_operation_result(result, *, run_id, principal, account, mode="operation
                         for index, step in enumerate(slot["steps"]))):
                 raise Blocked("admission_global_slot_binding_conflict")
             ids.extend(identity(step["operation_id"]) for step in slot["steps"])
-        if mode in ("model-limits", *COUNTER_MODES):
+        if mode in ("model-limits", "model-timeout", *COUNTER_MODES):
             slots = row["actual"].get("slot")
             if not isinstance(slots, dict) or set(slots) != {"before", "after"}:
                 raise Blocked("model_boundary_global_slot_binding_conflict")
@@ -108,6 +111,7 @@ class FaultAcceptance:
         _groups(mode)
         admission = mode == "admission-limits"
         phase_key = ("model_counter_" + COUNTER_MODES[mode] + "_phase" if mode in COUNTER_MODES else
+                     "model_timeout_phase" if mode == "model-timeout" else
                      "model_boundary_phase" if mode == "model-limits" else "read_phase" if mode == "read-limit"
                      else "admission_phase" if admission else "operation_phase")
         if phase_key in report:
@@ -156,7 +160,7 @@ class FaultAcceptance:
             for row in phase["observations"]:
                 phase["snapshots"][row["operation_id"]] = snapshot | (
                     read_snapshot(document) if mode == "read-limit" else
-                    admission_snapshot(document, row["actual"]) if admission or mode in ("model-limits", *COUNTER_MODES) else
+                    admission_snapshot(document, row["actual"]) if admission or mode in ("model-limits", "model-timeout", *COUNTER_MODES) else
                     operation_snapshot(document, "candidate-planner", row["actual"]))
                 if "quota" in phase:
                     phase["snapshots"][row["operation_id"]]["quota"] = phase["quota"]
@@ -173,6 +177,7 @@ class FaultAcceptance:
         groups = _groups(mode)
         admission = mode == "admission-limits"
         phase = report.get("model_counter_" + COUNTER_MODES[mode] + "_phase" if mode in COUNTER_MODES else
+                           "model_timeout_phase" if mode == "model-timeout" else
                            "model_boundary_phase" if mode == "model-limits" else "read_phase" if mode == "read-limit" else
                            "admission_phase" if admission else "operation_phase", {})
         snapshots = phase.get("snapshots", {})
@@ -189,6 +194,7 @@ class FaultAcceptance:
             for check in sorted(groups.get(row.get("probe_id"), set())):
                 observation = row | {"check_id": check}
                 evaluator = (evaluate_model_counter if mode in COUNTER_MODES else
+                             evaluate_model_timeout if mode == "model-timeout" else
                              evaluate_model_boundaries if mode == "model-limits" else
                              evaluate_read_boundary if mode == "read-limit" else evaluate_admission if admission else evaluate_operation)
                 result = evaluator(observation, snapshot, evidence,
@@ -197,7 +203,7 @@ class FaultAcceptance:
                         "subscription": report.get("subscription_bindings", {}).get("candidate-planner"),
                         "target": report.get("gateway_targets", {}).get("model"),
                         "slot_target": report.get("storage_targets", {}).get("active-run-slot")}
-                        if mode in ("model-limits", *COUNTER_MODES) else {}),
+                        if mode in ("model-limits", "model-timeout", *COUNTER_MODES) else {}),
                     **({"tokens_per_minute": report.get("model_tokens_per_minute"),
                         "quota_binding": report.get("quota_inputs")} if mode in COUNTER_MODES else {}))
                 output.append(result | {"expected": "boundary" if check.startswith("limit.") else "fault",
