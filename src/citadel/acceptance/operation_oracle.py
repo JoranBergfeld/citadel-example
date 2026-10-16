@@ -94,14 +94,20 @@ def evaluate_operation(observation, snapshot, evidence, *, runtime_identity, obs
     if group in ("fault.safe-read-recovery", "fault.safe-read-exhaustion"):
         steps, budget = actual.get("steps"), snapshot.get("budget_state")
         recovered = group == "fault.safe-read-recovery"
+        if (not isinstance(steps, list) or any(not isinstance(step, dict)
+                or any(type(step.get(key)) not in (int, float) or not math.isfinite(step[key])
+                       for key in ("monotonic_started", "monotonic_finished")) for step in steps)):
+            return blocked | {"reason": "actual_elapsed_read_timing_required"}
         valid = (isinstance(steps, list) and len(steps) == 3 and isinstance(budget, dict)
             and all(isinstance(step, dict) and hash_value(step.get("sha256"))
                 and all(type(step.get(key)) in (int, float) and math.isfinite(step[key])
                         for key in ("started", "finished"))
-                and observation["started"] <= step["started"] <= step["finished"] <= observation["finished"]
-                and step["finished"] - step["started"] <= 30 for step in steps)
+                and all(observation["started"] - 5 <= step[key] <= observation["finished"] + 5
+                        for key in ("started", "finished"))
+                and 0 <= step["monotonic_finished"] - step["monotonic_started"] <= 30 for step in steps)
             and [step.get("state") for step in steps] == ["dropped", "dropped", "received" if recovered else "dropped"]
-            and all(steps[index]["started"] - steps[index - 1]["finished"] >= index for index in (1, 2))
+            and all(steps[index]["monotonic_started"] - steps[index - 1]["monotonic_finished"] >= index
+                    for index in (1, 2))
             and actual.get("state") == ("recovered" if recovered else "unavailable")
             and type(actual.get("read_attempts")) is int and actual["read_attempts"] == 3
             and type(actual.get("retry")) is int and actual["retry"] == 2

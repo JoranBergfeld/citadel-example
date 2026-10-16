@@ -76,9 +76,12 @@ class OperationProbes:
 
         async def read():
             started = self.clock()
+            monotonic_started = time.monotonic()
             observed, _ = await self.ledger.read()
+            monotonic_finished = time.monotonic()
             discarded = len(steps) < dropped
             steps.append({"started": started, "finished": self.clock(), "sha256": business_hash(observed),
+                          "monotonic_started": monotonic_started, "monotonic_finished": monotonic_finished,
                           "state": "dropped" if discarded else "received"})
             if discarded:
                 raise OperationError("unavailable", "Acceptance discarded a successful read response")

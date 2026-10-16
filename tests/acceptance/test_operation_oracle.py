@@ -101,11 +101,13 @@ class OperationOracleTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_safe_read_recovery_and_exhaustion_bind_actual_backoff_and_persisted_accounting(self):
         for mode in ("recovery", "exhaustion"):
-            ledger = MemoryLedger()
-            probe = OperationProbes(ledger, workload="candidate-planner", enabled=True, run_id="worker1")
-            started = time.time()
+            epoch, beginning = time.time(), time.monotonic()
+            clock = lambda: epoch + time.monotonic() - beginning
+            ledger = MemoryLedger(clock=clock)
+            probe = OperationProbes(ledger, workload="candidate-planner", enabled=True, run_id="worker1", clock=clock)
+            started = clock()
             result = await getattr(probe, "safe_read_" + mode)("operation1")
-            finished = time.time()
+            finished = clock()
             document, _ = await ledger.read()
             observed, snapshot, evidence = await self.fixture()
             group = "fault.safe-read-" + mode
@@ -132,6 +134,40 @@ class OperationOracleTests(unittest.IsolatedAsyncioTestCase):
                 snapshot["budget_state"]["remaining_reads"] = 510
                 self.assertEqual(evaluate_operation(observed, snapshot, evidence,
                     runtime_identity="a" * 64, observer_identity="c" * 64)["status"], "fail")
+
+    async def test_retry_backoff_uses_actual_elapsed_time_even_when_wall_clock_moves_backwards(self):
+        epoch, beginning = time.time(), time.monotonic()
+
+        def clock():
+            elapsed = time.monotonic() - beginning
+            return epoch + elapsed - (2 if elapsed > .5 else 0)
+
+        ledger = MemoryLedger(clock=clock)
+        probe = OperationProbes(ledger, workload="candidate-planner", enabled=True, run_id="worker1", clock=clock)
+        started = clock()
+        actual = await probe.safe_read_recovery("operation1")
+        finished = clock()
+        document, _ = await ledger.read()
+        observed, snapshot, evidence = await self.fixture()
+        group = "fault.safe-read-recovery"
+        observed.update(check_id=group, probe_id=group, actual=actual, started=started, finished=finished)
+        snapshot.update(sha256=sha256(document), started=finished + 1, finished=finished + 2,
+                        **operation_snapshot(document, "candidate-planner", actual))
+        for row in evidence:
+            row["observed"] = finished + 1
+        evidence[0]["facts"] = {"sha256": sha256(actual), "probe_id": group}
+        self.assertLess(actual["steps"][1]["started"], actual["steps"][0]["finished"])
+        self.assertEqual(evaluate_operation(observed, snapshot, evidence,
+            runtime_identity="a" * 64, observer_identity="c" * 64)["status"], "pass")
+        missing = actual | {"steps": [
+            {key: value for key, value in step.items() if key != "monotonic_started"} for step in actual["steps"]]}
+        missing_evidence = [evidence[0] | {"facts": {"sha256": sha256(missing), "probe_id": group}}, *evidence[1:]]
+        self.assertEqual(evaluate_operation(observed | {"actual": missing}, snapshot, missing_evidence,
+            runtime_identity="a" * 64, observer_identity="c" * 64)["status"], "blocked")
+        actual["steps"][1]["monotonic_started"] = actual["steps"][0]["monotonic_finished"] + .5
+        evidence[0]["facts"]["sha256"] = sha256(actual)
+        self.assertEqual(evaluate_operation(observed, snapshot, evidence,
+            runtime_identity="a" * 64, observer_identity="c" * 64)["status"], "fail")
 
     async def fixture(self):
         ledger = MemoryLedger()

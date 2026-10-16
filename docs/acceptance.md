@@ -143,6 +143,10 @@ requires its four independently verified, actually executed storage denials.
   boundary rather than assuming one monotonic sleep crossed it. Their finite
   condition waits also retain the original phase's monotonic time ceiling;
   stalled clocks block without replaying an operation or extending its deadline.
+  Physical safe-read durations and one-/two-second backoffs use recorded monotonic
+  instants; raw wall instants remain unchanged for service correlation within the
+  existing five-second correlation tolerance. Neither clock is substituted for
+  the other. Missing elapsed timing blocks; a measured short backoff fails.
 - Each fault publishes its metadata once through the actual Blob SDK; its service
   receipt, physical client-request ID and hash-bound application record correlate
   with storage logs. The operator independently reads the persisted ledger and
