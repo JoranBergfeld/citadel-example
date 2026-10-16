@@ -6,6 +6,7 @@ from types import SimpleNamespace
 
 from azure.core.credentials import AccessToken
 import httpx
+import httpx2
 
 from citadel.acceptance.coverage import CONTAINERS
 from citadel.acceptance.reference_worker import execute
@@ -115,3 +116,42 @@ class ReferenceWorkerTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(json.loads(item.content)["params"]["protocolVersion"], "2025-11-25")
             self.assertNotIn("Ocp-Apim-Subscription-Key", item.headers)
         self.assertNotIn("not-exported", str(result))
+
+    async def test_reference_model_control_uses_own_identity_without_storage_or_subscription_authority(self):
+        requests, scopes, allocations = [], [], []
+
+        class Credential:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                pass
+
+            async def get_token(self, *args, **kwargs):
+                scopes.append(args)
+                return AccessToken("reference-only-token", time.time() + 3600)
+
+        def credential(**kwargs):
+            allocations.append(kwargs)
+            return Credential()
+
+        async def respond(request):
+            requests.append(request)
+            return httpx2.Response(403, headers={"x-ms-request-id": "actual-reference-model-id"},
+                                   json={"error": {"code": "PermissionDenied"}})
+
+        request = {key: value for key, value in self.request.items() if key != "storage"} | {
+            "mode": "direct-model", "model": {"run_id": "modelphase1",
+                "origin": "https://allocated.openai.azure.com", "deployment": "citadel-gpt-41-mini"}}
+        result = await execute(self.config, request, enabled=True, principal_id=self.principal,
+            credential_factory=credential,
+            client_factory=lambda **options: httpx2.AsyncClient(transport=httpx2.MockTransport(respond), **options))
+        self.assertEqual(result["state"], "complete")
+        self.assertEqual(len(requests), 1)
+        self.assertEqual(scopes, [("https://cognitiveservices.azure.com/.default",)])
+        self.assertEqual(allocations, [{"client_id": self.config.client_id, "retry_total": 0}])
+        self.assertEqual(result["observations"][0]["operation_id"], "reference1")
+        self.assertEqual(result["observations"][0]["run_id"], "modelphase1")
+        self.assertNotIn("Ocp-Apim-Subscription-Key", requests[0].headers)
+        self.assertEqual(result["read_attempts"], 0)
+        self.assertNotIn("reference-only-token", str(result))

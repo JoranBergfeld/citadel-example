@@ -174,7 +174,7 @@ class ConsoleProbe:
         self.lifecycle, self.admit = lifecycle, admit
         self.console = console or PtyConsole(lifecycle.native)
 
-    def execute(self, app, workload, run_id, *, mode, storage=None, deadline=None):
+    def execute(self, app, workload, run_id, *, mode, storage=None, model=None, deadline=None):
         identity(run_id)
         if workload != "reference-data" or app["app"].rsplit("/", 1)[-1] != self.lifecycle.id + "-reference-data":
             raise Blocked("reference_console_only")
@@ -213,6 +213,8 @@ class ConsoleProbe:
                 "deadline": min(deadline or float("inf"), time.time() + 900)}
             if mode == "storage-boundaries":
                 request["storage"] = storage
+            elif mode == "direct-model":
+                request["model"] = model
             elif mode == "origin-boundary":
                 request["origin"] = endpoint(
                     "https://" + deployed["properties"]["configuration"]["ingress"]["fqdn"],

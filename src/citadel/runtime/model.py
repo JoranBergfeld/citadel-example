@@ -1,6 +1,7 @@
 """Framework inference with no automatic retry and admission at the HTTP boundary."""
 
 import asyncio
+import hashlib
 import json
 import time
 from contextvars import ContextVar
@@ -73,12 +74,31 @@ class GovernedModel:
         if payload.get("max_completion_tokens") != 2000 or payload.get("tools"):
             raise OperationError("forbidden", "Model cannot select network tools or raise output bound")
         admission["sent"] = True
+        request.extensions["citadel_model_started"] = self.clock()
         request.headers.update(correlation_headers())
 
     async def _response(self, response):
+        facts = {"started": response.request.extensions["citadel_model_started"], "finished": self.clock()}
+        if response.status_code == 200:
+            content = await response.aread()
+            if len(content) > 1024 * 1024:
+                raise OperationError("result_limit", "Model response exceeds its metadata envelope")
+            try:
+                document = json.loads(content)
+                usage = document.get("usage") if isinstance(document, dict) else None
+                if (isinstance(usage, dict)
+                        and all(type(usage.get(key)) is int and 0 <= usage[key] <= bound
+                                for key, bound in (("prompt_tokens", 16000), ("completion_tokens", 2000),
+                                                   ("total_tokens", 18000)))
+                        and usage["prompt_tokens"] + usage["completion_tokens"] == usage["total_tokens"]):
+                    facts.update(input_tokens=usage["prompt_tokens"], output_tokens=usage["completion_tokens"],
+                                 tokens=usage["total_tokens"])
+            except ValueError:
+                pass
         emit("chat.completions",
              request_id=gateway_request_id(response.headers),
-             status_code=response.status_code)
+             status_code=int(response.status_code), facts=facts,
+             target=hashlib.sha256(str(response.request.url).encode()).hexdigest())
 
     async def explain(self, accounting, budget_id, execution_id, evidence):
         prompt = json.dumps(evidence, sort_keys=True, ensure_ascii=False, allow_nan=False)

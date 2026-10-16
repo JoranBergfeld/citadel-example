@@ -36,13 +36,16 @@ def validate_request(request, *, enabled, workload, client_id):
         keys.add("release")
     if isinstance(request, dict) and request.get("mode") == "immutable-versions":
         keys.add("versions")
+    if isinstance(request, dict) and request.get("mode") == "direct-model":
+        keys.add("model")
     if (enabled is not True or not isinstance(request, dict)
             or request.keys() != keys
             or type(request["schema_version"]) is not int or request["schema_version"] != 1
             or request["workload"] != workload
             or workload not in AGENTS or str(UUID(request["client_id"])) != str(UUID(client_id))
             or request["mode"] not in ("gateway-matrix", "operation-faults", "admission-limits", "read-limit", "release-faults",
-                                      "draft-versions", "immutable-versions", "storage-boundaries", "origin-boundary")
+                                      "draft-versions", "immutable-versions", "storage-boundaries", "origin-boundary",
+                                      "direct-model")
             or request["mode"] == "operation-faults" and workload not in ("candidate-planner", "briefing-author")
             or request["mode"] == "admission-limits" and workload != "candidate-planner"
             or request["mode"] == "read-limit" and workload != "candidate-planner"
@@ -72,6 +75,9 @@ def validate_request(request, *, enabled, workload, client_id):
     if request["mode"] == "origin-boundary":
         from citadel.runtime.configuration import endpoint
         endpoint(request["origin"], ".azurecontainerapps.io")
+    if request["mode"] == "direct-model":
+        from .model_probes import validate_model_manifest
+        validate_model_manifest(request["model"])
     return request
 
 
@@ -256,7 +262,11 @@ async def run_gateway_matrix(config, request):
     """No supplied credentials, identity substitution, developer fallback or raw URL."""
     validate_request(request, enabled=os.environ.get("CITADEL_ACCEPTANCE_ENABLED") == "true",
                      workload=config.target, client_id=config.client_id)
-    async with ManagedIdentityCredential(client_id=config.client_id) as credential:
+    direct_model = request["mode"] == "direct-model"
+    if direct_model and request["model"]["deployment"] != config.model_deployment:
+        raise ValueError("Model control cannot change the allocated model deployment")
+    async with ManagedIdentityCredential(client_id=config.client_id,
+            **({"retry_total": 0} if direct_model else {})) as credential:
         async with ContainerClient(config.blob, config.operations_container, credential=credential,
                 api_version="2026-10-06", retry_total=0, retry_connect=0, retry_read=0, retry_status=0,
                 connection_timeout=5, read_timeout=30) as container:
@@ -265,6 +275,26 @@ async def run_gateway_matrix(config, request):
             # The conditional marker is authoritative; a lost response is not permission to rerun.
             await container.get_blob_client(scope + "/dispatch.json").upload_blob(
                 canonical_bytes(request), overwrite=False, timeout=5)
+            if direct_model:
+                from .model_probes import DirectModelProbe
+
+                async def admitted():
+                    if time.time() >= request["deadline"]:
+                        raise OperationError("deadline", "Reserved model control expired")
+
+                model = request["model"]
+                probe = DirectModelProbe(workload=config.target, origin=model["origin"],
+                    deployment=model["deployment"], credential=credential,
+                    principal_id=os.environ["AZURE_PRINCIPAL_ID"], enabled=True,
+                    run_id=model["run_id"], operation_id=request["run_id"],
+                    deadline=request["deadline"], admit=admitted)
+                observation = await probe.observe()
+                async with asyncio.timeout(max(0, min(30, request["deadline"] - time.time()))):
+                    await container.get_blob_client(scope + "/observations.json").upload_blob(
+                        canonical_bytes({"schema_version": 1, "run_id": request["run_id"],
+                            "state": "complete" if observation["state"] == "observed" else "blocked",
+                            "observations": [observation]}), overwrite=False, timeout=5)
+                return [observation]
             if not await store.open_pool(scope, exclusive=config.target == "candidate-planner"):
                 raise ValueError("Existing probe admission cannot be replayed")
             pool = TicketPool(store, scope, 512)

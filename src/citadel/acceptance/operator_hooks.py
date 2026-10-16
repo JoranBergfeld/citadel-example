@@ -131,6 +131,10 @@ class Harness:
                     self.save(report)
             if all(run["state"] in ("succeeded", "failed_no_commit")
                    for run in self.lifecycle.value["runs"].values()):
+                from .model_harness import ModelAcceptance
+                ModelAcceptance(self.lifecycle).execute(report)
+                report["finished"] = time.time()
+                self.save(report)
                 from .storage_harness import StorageAcceptance
                 StorageAcceptance(self.lifecycle).execute(report)
                 report["finished"] = time.time()
@@ -205,6 +209,9 @@ class Harness:
                                   ingress=[row for row in report.get("boundary_phase", {}).get("origins", [])
                                            if row.get("request_id")])
             report["evidence"] = collector.poll()
+            from .model_harness import ModelAcceptance
+            for result in ModelAcceptance.evaluate(report, report["evidence"]):
+                self._replace(report, result)
             from .storage_harness import StorageAcceptance
             for result in StorageAcceptance.evaluate(report, report["evidence"]):
                 self._replace(report, result)

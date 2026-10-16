@@ -30,20 +30,25 @@ def validate_request(config, request, *, enabled):
         keys.add("storage")
     if request.get("mode") == "origin-boundary":
         keys.add("origin")
+    if request.get("mode") == "direct-model":
+        keys.add("model")
     if (enabled is not True or config.target != "reference-data"
             or config.operations_container is not None or config.subscription_secret is not None
             or set(request) != keys or type(request.get("schema_version")) is not int
             or request["schema_version"] != 1 or request["workload"] != "reference-data"
             or str(UUID(request["client_id"])) != config.client_id
-            or request["mode"] not in ("storage-boundaries", "origin-boundary")
+            or request["mode"] not in ("storage-boundaries", "origin-boundary", "direct-model")
             or type(request["deadline"]) not in (float, int) or not math.isfinite(request["deadline"])
             or not time.time() < request["deadline"] <= time.time() + 900):
         raise ValueError("Only an explicitly enabled, allocated read-only reference probe is allowed")
     identity(request["run_id"])
     if request["mode"] == "storage-boundaries":
         validate_storage_manifest(request["storage"])
-    else:
+    elif request["mode"] == "origin-boundary":
         endpoint(request["origin"], ".azurecontainerapps.io")
+    else:
+        from .model_probes import validate_model_manifest
+        validate_model_manifest(request["model"])
 
 
 async def execute(config, request, *, enabled, principal_id,
@@ -80,7 +85,7 @@ async def execute(config, request, *, enabled, principal_id,
                                 control = await probe.observe(container, action, target)
                                 control["control"] = True
                                 result["observations"].append(control)
-                else:
+                elif request["mode"] == "origin-boundary":
                     from .origin_probes import MODES, OriginProbe
                     probe = OriginProbe(workload="reference-data", origin=request["origin"],
                         principal_id=principal, run_id=request["run_id"], enabled=True,
@@ -89,6 +94,22 @@ async def execute(config, request, *, enabled, principal_id,
                         key_id=next(iter(config.trust.signing_keys)))
                     for mode in MODES:
                         result["observations"].append(await probe.observe(mode))
+                else:
+                    from .model_probes import DirectModelProbe
+
+                    async def admitted():
+                        if time.time() >= request["deadline"]:
+                            raise OperationError("deadline", "Model control window expired")
+
+                    model = request["model"]
+                    probe = DirectModelProbe(workload=config.target, origin=model["origin"],
+                        deployment=model["deployment"], credential=credential, principal_id=principal,
+                        enabled=True, run_id=model["run_id"], operation_id=request["run_id"],
+                        deadline=request["deadline"], admit=admitted, client_factory=client_factory)
+                    observation = await probe.observe()
+                    result["observations"].append(observation)
+                    if observation["state"] != "observed":
+                        return result
                 result["state"] = "complete"
     except (OperationError, TimeoutError, ValueError):
         pass

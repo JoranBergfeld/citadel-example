@@ -32,6 +32,22 @@ class NativeFixture:
 
 
 class RevisionTests(unittest.TestCase):
+    def test_direct_model_manifest_survives_exact_revision_dispatch_without_any_credential(self):
+        native = NativeFixture()
+        lifecycle = SimpleNamespace(native=native, value={}, state=SimpleNamespace(save=lambda: None))
+        app = {"app": "/d-candidate-planner",
+               "identityClientId": "11111111-1111-1111-1111-111111111111",
+               "image": "registry.example/image@sha256:" + "a" * 64}
+        model = {"run_id": "phase1", "origin": "https://allocated.openai.azure.com",
+                 "deployment": "citadel-gpt-41-mini"}
+        RevisionProbe(lifecycle).execute(app, "candidate-planner", "r1", mode="direct-model", model=model)
+        environment = native.patches[0]["properties"]["template"]["containers"][0]["env"]
+        request = json.loads(base64.b64decode(next(
+            entry["value"] for entry in environment if entry["name"] == "CITADEL_ACCEPTANCE_REQUEST")))
+        self.assertEqual(request["model"], model)
+        self.assertEqual(request["mode"], "direct-model")
+        self.assertEqual(lifecycle.value["probe_intents"]["r1"]["state"], "observed")
+
     def test_origin_driver_uses_actual_app_ingress_not_caller_supplied_destination(self):
         native = NativeFixture()
         native.app["properties"]["configuration"] = {"ingress": {

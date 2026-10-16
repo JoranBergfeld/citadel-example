@@ -239,10 +239,33 @@ requires its four independently verified, actually executed storage denials.
 - `DirectModelProbe` has a tested actual-MI, one-shot HTTPX2 provider using the
   cognitive-services token scope, fixed v1 inference path, bounded nonprivate
   prompt and 2,000-output-token maximum. It exports no token or response prose.
-  **It is not yet dispatched by the full suite:** asserted control IDs cannot
-  enable a worker model mode without integrated global admission and working
-  APIM controls. Normal delegated model grants have not been expanded to hide
-  that missing orchestration.
+  The full suite now dispatches all five actual workload identities in a separate
+  `direct-model` phase. The operator acquires the existing global active-run lease
+  before dispatch, persists finite private reservations before each actual call,
+  and waits sixty seconds under that lease at both phase boundaries to isolate
+  normal workflows' rolling model quota. The existing 900-second deadline,
+  512 controller reads, 42 executions, 128 attempts, aggregate token ceiling,
+  one in-flight call, five-second spacing and independently verified actual TPM
+  quota are enforced without creating workload grants or increasing normal grants.
+  Each actor receives at most one one-shot control; no reservation is refunded.
+  Ambiguous dispatch/result/restoration retains admission and requires explicit
+  reconciliation rather than automatic replay or lease retirement.
+  Reference Data uses its approved read-only console path without a storage grant
+  or subscription secret; the four agents use immutable dispatch markers and
+  their existing result containers. They never borrow the operator's model token.
+- Direct-model oracles require the actual own-MI denial receipt in queried
+  application ingestion, a normal successful APIM model response with actual
+  bounded usage, allocated-subscription/backend-dispatch correlation, both actual
+  global lease receipts and independent unchanged draft/finding snapshots.
+  Reference Data uses Candidate Planner's permitted APIM model control, not an
+  invented Reference Data model subscription. Missing receipts, generic errors,
+  unknown usage or missing no-effect observations block; observed unauthorized
+  inference fails. Exports independently re-evaluate all five obligations.
+  Normal Agent Framework responses export only actual token counts, request
+  destination hash and measured times; no prompt, response prose or credentials.
+  These are queried application/APIM/storage correlations, **not** a claim of
+  separate model-account diagnostic ingestion. Standalone model-route checks
+  and the remaining numeric model-boundary obligations are still unfinished.
 - `ConsoleProbe` selects only the inventoried Reference Data app's actual ready
   revision/replica/container, pinned image and assigned identity. Its CLI 2.91.0
   process uses a real PTY and the approved console-only ARM `2025-07-01` exception.

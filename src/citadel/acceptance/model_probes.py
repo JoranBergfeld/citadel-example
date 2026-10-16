@@ -29,9 +29,18 @@ def model_origin(value):
     return value
 
 
+def validate_model_manifest(value):
+    if not isinstance(value, dict) or set(value) != {"origin", "deployment", "run_id"}:
+        raise ValueError("Exact inventoried direct-model manifest required")
+    model_origin(value["origin"])
+    identity(value["deployment"])
+    identity(value["run_id"])
+    return value
+
+
 class DirectModelProbe:
     def __init__(self, *, workload, origin, deployment, credential, principal_id,
-                 enabled, run_id, deadline, admit, client_factory=None):
+                 enabled, run_id, deadline, admit, client_factory=None, operation_id=None):
         if (enabled is not True or workload not in INVOCATION_CALLERS or not callable(admit)
                 or type(deadline) not in (float, int) or not math.isfinite(deadline)
                 or not time.time() < deadline <= time.time() + 900):
@@ -41,6 +50,7 @@ class DirectModelProbe:
         self.identity = hashlib.sha256(str(UUID(principal_id)).encode()).hexdigest()
         self.credential, self.deadline, self.admit = credential, deadline, admit
         self.client, self.sent = client_factory or httpx2.AsyncClient, False
+        self.operation = identity(operation_id) if operation_id is not None else uuid4().hex
 
     async def observe(self):
         if self.sent or time.time() >= self.deadline:
@@ -48,7 +58,7 @@ class DirectModelProbe:
                                  "Expired or repeated direct model dispatch refused")
         self.sent = True
         await self.admit()
-        operation = uuid4().hex
+        operation = self.operation
         result = {"check_id": f"model.{self.workload}.direct-denied",
             "run_id": self.run_id, "operation_id": operation, "caller": self.workload,
             "runtime_identity": self.identity, "target": hashlib.sha256(self.url.encode()).hexdigest(),
@@ -71,7 +81,7 @@ class DirectModelProbe:
                             content.extend(chunk)
                             if len(content) > 1024 * 1024:
                                 raise OperationError("result_limit", "Direct model evidence exceeds bound")
-                        result["status_code"] = response.status_code
+                        result["status_code"] = int(response.status_code)
                         request_id = (response.headers.get("x-ms-request-id")
                             or response.headers.get("apim-request-id") or response.headers.get("x-request-id"))
                         if request_id:
@@ -94,7 +104,7 @@ class DirectModelProbe:
                                             "output_tokens": usage["completion_tokens"]})
                         with correlate(self.run_id, operation, self.workload):
                             emit("model.direct", request_id=result.get("request_id"),
-                                 status_code=response.status_code, target=result["target"],
+                                 status_code=int(response.status_code), target=result["target"],
                                  facts={"model_attempts": 1, "input_tokens": INPUT_BOUND,
                                         "output_tokens": OUTPUT_BOUND, "reason": result["reason"]})
         except (AzureError, httpx2.HTTPError, TimeoutError, ValueError, OperationError):

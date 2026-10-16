@@ -29,6 +29,29 @@ def evaluate_check(check, report):
                 check["check_id"].startswith("route.operator.")
                 and observation.get("run_id") == report.get("run_id"))):
         return blocked
+    if check["check_id"].startswith("model."):
+        from .model_oracle import evaluate_model
+        allowed, slot = control.get("allowed"), control.get("slot")
+        observer = control.get("runtime_identity")
+        bindings = report.get("subscription_bindings")
+        if (not isinstance(allowed, dict) or not isinstance(slot, list) or len(slot) != 2
+                or any(not isinstance(row, dict) or row.get("operation_id") not in operations for row in slot)
+                or allowed.get("run_id") not in operations or allowed.get("operation_id") not in operations
+                or not isinstance(allowed.get("caller"), str) or not isinstance(bindings, dict)
+                or not hash_value(observer) or observer in identities.values()):
+            return blocked
+        snapshots = {}
+        for side in ("before", "after"):
+            rows = actual.get(side)
+            if (not isinstance(rows, list) or len(rows) != 2
+                    or any(not isinstance(row, dict) or row.get("operation_id") not in operations
+                        or row.get("suite_id") != report.get("run_id") or row.get("caller") != "operator"
+                        or not isinstance(row.get("container"), str) for row in rows)
+                    or {row["container"] for row in rows} != {"drafts", "findings"}):
+                return blocked
+            snapshots[side] = {row["container"]: row for row in rows}
+        return evaluate_model(observation, control, snapshots, records, identities=identities,
+            subscription=bindings.get(allowed["caller"]), observer_identity=observer)
     from .release_probes import RELEASE_CHECKS, validate_source
     if check["check_id"] == "fault.immutable-versions":
         from .immutable_oracle import evaluate_immutable

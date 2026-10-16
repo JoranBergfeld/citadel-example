@@ -31,7 +31,7 @@ completed missing_operation_id operation_state input_hash missing_state budget_s
 business_sha256 steps
 agents models reads remaining candidates agents_sha256 candidates_sha256
 model_active child_active grant_present history_count grant_count overlap_state
-slot scope_sha256
+slot scope_sha256 allowed
 route_context context_reads control_reference finding read_scope artifact_id operations result_sha256 task_sha256
 finding_controls observation_kind read_operation_id ticket_reads
 accepted_operation_id

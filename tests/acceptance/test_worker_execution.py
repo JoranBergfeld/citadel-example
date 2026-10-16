@@ -10,6 +10,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import httpx
+import httpx2
 from azure.storage.blob.aio import ContainerClient
 
 from citadel.acceptance.worker import run_gateway_matrix
@@ -17,6 +18,60 @@ from tests.runtime.test_storage import FixtureCredential
 
 
 class WorkerExecutionTests(unittest.IsolatedAsyncioTestCase):
+    async def test_direct_model_worker_never_borrows_subscription_or_reacquires_operator_run_slot(self):
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "runtime"))
+        try:
+            from test_ticket_storage import TicketWire
+        finally:
+            sys.path.pop(0)
+        wire, requests, allocations = TicketWire(clock=time.time), [], []
+        existing = set(wire.blobs)
+
+        class Credential(FixtureCredential):
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                pass
+
+        def credential(**options):
+            allocations.append(options)
+            return Credential()
+
+        async def provider(request):
+            requests.append(request)
+            return httpx2.Response(403, headers={"x-ms-request-id": "actual-model-id"},
+                                   json={"error": {"code": "PermissionDenied"}})
+
+        config = SimpleNamespace(target="candidate-planner",
+            client_id="11111111-1111-1111-1111-111111111111",
+            blob="https://allocated.blob.core.windows.net", operations_container="planner-operations",
+            model_deployment="citadel-gpt-41-mini")
+        request = {"schema_version": 1, "mode": "direct-model", "workload": config.target,
+            "client_id": config.client_id, "run_id": "modelworker1", "deadline": time.time() + 120,
+            "model": {"run_id": "modelphase1", "origin": "https://allocated.openai.azure.com",
+                      "deployment": "citadel-gpt-41-mini"}}
+        client_type = httpx2.AsyncClient
+        with (patch.dict(os.environ, {"CITADEL_ACCEPTANCE_ENABLED": "true",
+                                      "AZURE_PRINCIPAL_ID": config.client_id}),
+              patch("citadel.acceptance.worker.ManagedIdentityCredential", credential),
+              patch("citadel.acceptance.worker.ContainerClient",
+                    lambda *args, **kw: ContainerClient(*args, transport=wire, **kw)),
+              patch("httpx2.AsyncClient", lambda **kw: client_type(
+                  transport=httpx2.MockTransport(provider), **kw))):
+            observations = await run_gateway_matrix(config, request)
+            with self.assertRaises(Exception):
+                await run_gateway_matrix(config, request)
+        self.assertEqual(len(requests), 1)
+        self.assertEqual(allocations[0], {"client_id": config.client_id, "retry_total": 0})
+        self.assertNotIn("Ocp-Apim-Subscription-Key", requests[0].headers)
+        self.assertEqual(observations[0]["operation_id"], "modelworker1")
+        self.assertEqual(observations[0]["run_id"], "modelphase1")
+        self.assertEqual(set(wire.blobs) - existing, {
+            "/planner-operations/acceptance/modelworker1/dispatch.json",
+            "/planner-operations/acceptance/modelworker1/observations.json"})
+        self.assertEqual(wire.leases, {})
+
     async def test_gateway_worker_uses_allocated_secret_and_publishes_digest_bound_wire_observations(self):
         from citadel.acceptance.telemetry import configure
         from citadel.acceptance.route_context import build_route_context
