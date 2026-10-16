@@ -122,6 +122,7 @@ def admission_snapshot(document, result):
         "remaining": remaining, "model_active": budget["model"] is not None,
         "child_active": budget["child"] is not None, "grant_present": budget["grant"] is not None,
         "history_count": len(budget["history"]), "grant_count": len(budget["grants"]),
+        "tokens_per_minute": budget.get("tokens_per_minute"),
         "count": len(document["budgets"])},
         "overlap_state": "present" if result["operation_id"] + "-overlap" in document["budgets"] else "missing",
         "business_sha256": business_hash(document)}

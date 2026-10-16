@@ -166,10 +166,11 @@ def evaluate_check(check, report):
             observer_identity=observer, subscription=report["subscription_bindings"].get(actor))
     from .admission_limits import ADMISSION_CHECKS, evaluate_admission
     from .model_limits import MODEL_BOUNDARY_CHECKS, evaluate_model_boundaries
-    from .model_counters import COUNTER_CHECKS, evaluate_model_counter
+    from .model_counters import COUNTER_GROUPS, evaluate_model_counter
+    counter_checks = set().union(*COUNTER_GROUPS.values())
     if (check["check_id"].startswith("fault.") or check["check_id"] in ADMISSION_CHECKS
             or check["check_id"] in MODEL_BOUNDARY_CHECKS
-            or check["check_id"] in COUNTER_CHECKS.values()
+            or check["check_id"] in counter_checks
             or check["check_id"] in ("limit.read_attempts_run", "limit.safe_read_retries")):
         from .operation_oracle import evaluate_operation
         if (control.get("suite_id") != report.get("run_id")
@@ -178,7 +179,7 @@ def evaluate_check(check, report):
                 or control["runtime_identity"] in identities.values()
                 or control.get("operation_id") not in operations):
             return blocked
-        if check["check_id"] in MODEL_BOUNDARY_CHECKS or check["check_id"] in COUNTER_CHECKS.values():
+        if check["check_id"] in MODEL_BOUNDARY_CHECKS or check["check_id"] in counter_checks:
             nested = observation.get("actual")
             slot = nested.get("slot") if isinstance(nested, dict) else None
             if (not isinstance(slot, dict) or any(not isinstance(slot.get(side), dict)
@@ -191,7 +192,10 @@ def evaluate_check(check, report):
                 runtime_identity=identities["candidate-planner"], observer_identity=control["runtime_identity"],
                 subscription=report.get("subscription_bindings", {}).get("candidate-planner"),
                 target=report.get("gateway_targets", {}).get("model"),
-                slot_target=report.get("storage_targets", {}).get("active-run-slot"))
+                slot_target=report.get("storage_targets", {}).get("active-run-slot"),
+                **({"tokens_per_minute": report.get("model_tokens_per_minute"),
+                    "quota_binding": report.get("quota_inputs")}
+                   if check["check_id"] in counter_checks else {}))
         if check["check_id"] == "limit.read_attempts_run":
             from .read_limit import evaluate_read_boundary
             nested = observation.get("actual")

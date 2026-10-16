@@ -50,6 +50,9 @@ class ModelLimitTests(unittest.IsolatedAsyncioTestCase):
     async def test_actual_execution_counter_worker_uses_eight_real_models_without_extra_grants(self):
         await self.exercise_worker("model-execution-limit", 8)
 
+    async def test_actual_run_counter_worker_fits_physical_read_and_wall_deadline_budgets(self):
+        await self.exercise_worker("model-run-limit", 128)
+
     async def exercise_worker(self, mode, count):
         from azure.storage.blob.aio import ContainerClient
         from azure.keyvault.secrets.aio import SecretClient
@@ -106,7 +109,8 @@ class ModelLimitTests(unittest.IsolatedAsyncioTestCase):
             vault="https://allocated.vault.azure.net", subscription_secret="subscription-candidate-planner",
             gateway="https://gateway.test", model_deployment="approved", tokens_per_minute=120000)
         request = {"schema_version": 1, "mode": mode, "workload": config.target,
-            "client_id": config.client_id, "run_id": "model-boundary-worker", "deadline": time.time() + 300}
+            "client_id": config.client_id, "run_id": "model-boundary-worker",
+            "deadline": time.time() + (900 if count == 128 else 300)}
         async with httpx2.AsyncClient(transport=httpx2.MockTransport(response)) as http:
             with (patch.dict(os.environ, {"CITADEL_ACCEPTANCE_ENABLED": "true", "AZURE_PRINCIPAL_ID": config.client_id}),
                   patch("citadel.acceptance.worker.ManagedIdentityCredential", credential),
@@ -125,7 +129,7 @@ class ModelLimitTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(models), count)
         self.assertEqual(models[0].headers["Ocp-Apim-Subscription-Key"], "allocated-own-key")
         actual = rows[0]["actual"]
-        receipts = actual["models"] if mode == "model-execution-limit" else [actual["model"]]
+        receipts = [actual["model"]] if mode == "model-limits" else actual["models"]
         self.assertGreaterEqual(receipts[0]["started"] - actual["slot"]["before"]["steps"][-1]["finished"], 60)
         self.assertGreaterEqual(actual["slot"]["after"]["steps"][0]["started"] - receipts[-1]["finished"], 60)
         self.assertNotIn("/planner-operations/active-run-slot.json", wire.leases)

@@ -24,6 +24,8 @@ stream_id sequence stream_count stream_sha256 submitted_records acknowledged_rec
 delivery_attempts queued_records inflight ingestion_verified
 telemetry_inputs telemetry targets workspace insights gateway workspace_sha256 tables_sha256 insights_sha256 gateway_sha256
 counter_kind input_bound output_bound execution_id business_before_sha256 business_after_sha256 refusal_started refusal_finished
+rate_check history at settled_at tokens_per_minute model_tokens_per_minute
+quota quota_inputs capacity rate_count renewal_seconds
 control_identity
 observation control before after target container action etag suite_id client_request_id
 method event_id facts certificate_sha256 generation read_attempts agent_executions upstream_attempts backend_dispatched

@@ -16,13 +16,13 @@ from .storage_probes import StorageControls
 from .admission_limits import ADMISSION_CHECKS, admission_snapshot, evaluate_admission
 from .read_limit import read_snapshot, evaluate_read_boundary
 from .model_limits import MODEL_BOUNDARY_CHECKS, evaluate_model_boundaries
-from .model_counters import COUNTER_MODES, COUNTER_CHECKS, evaluate_model_counter
+from .model_counters import COUNTER_MODES, COUNTER_CHECKS, COUNTER_GROUPS, evaluate_model_counter
 
 
 def _groups(mode):
     if mode in COUNTER_MODES:
         key = COUNTER_CHECKS[COUNTER_MODES[mode]]
-        return {key: {key}}
+        return {key: COUNTER_GROUPS[COUNTER_MODES[mode]]}
     if mode == "model-limits":
         return {"limit.input_tokens_attempt": MODEL_BOUNDARY_CHECKS}
     if mode == "read-limit":
@@ -132,6 +132,10 @@ class FaultAcceptance:
             account = "https://" + accounts[0].rsplit("/", 1)[-1] + ".blob.core.windows.net"
             report["operation_ids"].append(run_id)
             self.lifecycle.state.save()
+            if mode in COUNTER_MODES and COUNTER_MODES[mode] != "execution":
+                from .model_counters import observe_model_quota
+                phase["quota"] = observe_model_quota(self.lifecycle, admit=admit, run_id=run_id)
+                self.lifecycle.state.save()
             result = RevisionProbe(self.lifecycle, admit=admit).execute(
                 app, "candidate-planner", run_id, mode=mode, deadline=phase["deadline"])
             operations = bind_operation_result(result, run_id=run_id, principal=principal, account=account, mode=mode)
@@ -148,6 +152,8 @@ class FaultAcceptance:
                     read_snapshot(document) if mode == "read-limit" else
                     admission_snapshot(document, row["actual"]) if admission or mode in ("model-limits", *COUNTER_MODES) else
                     operation_snapshot(document, "candidate-planner", row["actual"]))
+                if "quota" in phase:
+                    phase["snapshots"][row["operation_id"]]["quota"] = phase["quota"]
             phase["state"] = "observed" if result["state"] == "complete" else "blocked"
         except (AzureError, OperationError, Blocked, ValueError, KeyError, TypeError, TimeoutError):
             phase["state"] = "blocked"
@@ -185,7 +191,9 @@ class FaultAcceptance:
                         "subscription": report.get("subscription_bindings", {}).get("candidate-planner"),
                         "target": report.get("gateway_targets", {}).get("model"),
                         "slot_target": report.get("storage_targets", {}).get("active-run-slot")}
-                        if mode in ("model-limits", *COUNTER_MODES) else {}))
+                        if mode in ("model-limits", *COUNTER_MODES) else {}),
+                    **({"tokens_per_minute": report.get("model_tokens_per_minute"),
+                        "quota_binding": report.get("quota_inputs")} if mode in COUNTER_MODES else {}))
                 output.append(result | {"expected": "boundary" if check.startswith("limit.") else "fault",
                     "actual": {"observation": observation, "control": snapshot}})
         return output

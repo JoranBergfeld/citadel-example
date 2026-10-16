@@ -3,6 +3,7 @@ import copy
 import hashlib
 import time
 import unittest
+from types import SimpleNamespace
 
 import httpx2
 
@@ -11,6 +12,41 @@ from citadel.runtime.model import GovernedModel
 
 
 class ModelCounterTests(unittest.IsolatedAsyncioTestCase):
+    def test_actual_regional_quota_uses_two_bounded_arm_reads_and_refuses_pagination(self):
+        from citadel.acceptance.model_counters import observe_model_quota, quota_inputs
+        from citadel.evidence.manifests import sha256
+        deployment = ("/subscriptions/allocated/resourceGroups/platform/providers/"
+                      "Microsoft.CognitiveServices/accounts/model/deployments/citadel-gpt-41-mini")
+        regional = {"value": [{"model": {"name": "gpt-4.1-mini", "version": "2025-04-14"}, "skus": [
+            {"name": "Standard", "rateLimits": [{"key": "token", "count": 1000, "renewalPeriod": 60}]}]}]}
+        deployed = {"id": deployment, "sku": {"name": "Standard", "capacity": 120}, "properties": {
+            "model": {"name": "gpt-4.1-mini", "version": "2025-04-14"}, "versionUpgradeOption": "NoAutoUpgrade"}}
+        calls, tickets = [], []
+
+        class Native:
+            def rest(self, method, target, version):
+                calls.append((method, target, version))
+                return copy.deepcopy(deployed if target == deployment else regional)
+
+        lifecycle = SimpleNamespace(subscription="/subscriptions/allocated",
+            config={"modelCapacity": 120, "modelTokensPerMinute": 120000},
+            value={"inventory": [deployment]}, native=Native())
+        observation = observe_model_quota(lifecycle, admit=lambda: tickets.append(1), run_id="actual")
+        self.assertEqual(observation["tokens_per_minute"], 120000)
+        self.assertEqual(observation["target"], sha256(deployment.lower()))
+        self.assertEqual(quota_inputs(lifecycle), {"target": sha256(deployment.lower()), "capacity": 120})
+        self.assertEqual(len(tickets), 2)
+        self.assertEqual(calls, [("get", "/subscriptions/allocated/providers/Microsoft.CognitiveServices/"
+            "locations/westeurope/models", "2024-10-01"), ("get", deployment, "2024-10-01")])
+        regional["nextLink"] = "https://not-followed.invalid"
+        with self.assertRaises(ValueError):
+            observe_model_quota(lifecycle, admit=lambda: tickets.append(1), run_id="actual")
+        self.assertEqual(len(tickets), 3)
+        regional.pop("nextLink")
+        deployed["sku"]["capacity"] = 60
+        with self.assertRaises(ValueError):
+            observe_model_quota(lifecycle, admit=lambda: tickets.append(1), run_id="actual")
+
     def assert_counter_proof(self, result, document):
         from citadel.acceptance.admission_limits import admission_snapshot
         from citadel.acceptance.proof_gate import evaluate_check
@@ -35,6 +71,11 @@ class ModelCounterTests(unittest.IsolatedAsyncioTestCase):
             "request_id": "observer", "operation_id": "observer", "status_code": 206, "target": "d" * 64,
             "started": end + 63, "finished": end + 64, "sha256": sha256(document), "suite_id": "suite1",
             "caller": "operator", "container": "planner-operations", "action": "read", "runtime_identity": "b" * 64}
+        control["quota"] = {"source": "actual-regional-model-and-deployment", "target": "7" * 64,
+            "run_id": "worker", "capacity": 120, "rate_count": 1000, "renewal_seconds": 60,
+            "tokens_per_minute": 120000, "started": start - 64, "finished": start - 63,
+            "name": "gpt-4.1-mini", "version": "2025-04-14", "sku": "Standard",
+            "version_upgrade_option": "NoAutoUpgrade"}
         rows = [
             observed | {"source": "storage", "method": "PutBlob", "client_request_id": operation,
                         "observed": end + 62},
@@ -59,6 +100,8 @@ class ModelCounterTests(unittest.IsolatedAsyncioTestCase):
             "reference-data": "6" * 64}, "gateway_targets": {"model": result["models"][0]["target"]},
             "storage_targets": {"active-run-slot": "1" * 64},
             "subscription_bindings": {"candidate-planner": "9" * 64}, "evidence": rows,
+            "model_tokens_per_minute": 120000,
+            "quota_inputs": {"target": "7" * 64, "capacity": 120},
             "operation_ids": ["worker", operation, "observer", *[row["operation_id"] for row in slots]]}
         check = {"check_id": name, "expected": "boundary", "actual": {"observation": observed, "control": control}}
         self.assertEqual(evaluate_check(sanitize(check), sanitize(report))["status"], "pass", name)
@@ -68,6 +111,10 @@ class ModelCounterTests(unittest.IsolatedAsyncioTestCase):
         changed = copy.deepcopy(check)
         changed["actual"]["control"]["budget_state"]["remaining"]["models"] += 1
         self.assertEqual(evaluate_check(changed, report)["status"], "fail")
+        for field in ("count", "grant_count", "candidates"):
+            changed = copy.deepcopy(check)
+            changed["actual"]["control"]["budget_state"][field] = field == "count"
+            self.assertNotEqual(evaluate_check(changed, report)["status"], "pass", field)
         from citadel.acceptance.worker import validate_request
         from citadel.acceptance.operation_harness import bind_operation_result, FaultAcceptance
         mode = {"execution": "model-execution-limit", "run": "model-run-limit",
@@ -88,8 +135,32 @@ class ModelCounterTests(unittest.IsolatedAsyncioTestCase):
         report["model_counter_" + result["counter_kind"] + "_phase"] = {
             "observations": [observed], "snapshots": {operation: control}}
         collected = FaultAcceptance.evaluate(report, rows, mode=mode)
-        self.assertEqual(len(collected), 1)
-        self.assertEqual(collected[0]["status"], "pass")
+        self.assertEqual(len(collected), 1 if result["counter_kind"] == "execution" else 2)
+        for child in collected:
+            self.assertEqual(child["status"], "pass")
+            self.assertEqual(evaluate_check(sanitize(child), sanitize(report))["status"], "pass")
+            if child["check_id"] == name:
+                continue
+            self.assertEqual(evaluate_check(child, report | {"model_tokens_per_minute": None})["status"], "blocked")
+            changed = copy.deepcopy(child)
+            changed["actual"]["control"].pop("quota")
+            self.assertEqual(evaluate_check(changed, report)["status"], "blocked")
+            changed = copy.deepcopy(child)
+            changed["actual"]["control"]["quota"]["rate_count"] = 500
+            self.assertNotEqual(evaluate_check(changed, report)["status"], "pass")
+            changed = copy.deepcopy(child)
+            changed["actual"]["control"]["budget_state"]["tokens_per_minute"] = 60000
+            self.assertEqual(evaluate_check(changed, report)["status"], "blocked")
+            for field, value in (("response", "allowed"), ("after_sha256", "f" * 64),
+                                 ("history", []), ("remaining", {}), ("model_active", True)):
+                changed = copy.deepcopy(child)
+                actual = changed["actual"]["observation"]["actual"]
+                actual["rate_check"][field] = value
+                evidence = copy.deepcopy(rows)
+                next(row for row in evidence if row["source"] == "application"
+                    and row["method"] == "execution")["facts"]["sha256"] = sha256(actual)
+                self.assertNotEqual(evaluate_check(sanitize(changed), sanitize(report | {"evidence": evidence}))["status"],
+                                    "pass", field)
 
     async def test_run_attempt_and_aggregate_token_bounds_are_reached_only_by_actual_completed_requests(self):
         from citadel.acceptance.model_counters import ModelCounters
@@ -134,6 +205,19 @@ class ModelCounterTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(budget["remaining"]["tokens"], remaining_tokens)
             else:
                 self.assertGreater(budget["remaining"]["tokens"], 0)
+            rate = result["rate_check"]
+            self.assertEqual(rate["check_id"], "limit.model_requests_minute" if kind == "run"
+                             else "limit.model_tokens_minute_target")
+            self.assertEqual(rate["response"], "rate_limited")
+            self.assertEqual(rate["before_sha256"], rate["after_sha256"])
+            self.assertEqual(rate["tokens_per_minute"], 120000)
+            if kind == "run":
+                self.assertLess(rate["started"] - rate["history"][-1]["at"], 5)
+            else:
+                self.assertGreaterEqual(rate["started"] - rate["history"][-1]["at"], 5)
+                self.assertLess(len(rate["history"]), 12)
+                self.assertGreater(sum(row["tokens"] for row in rate["history"])
+                    + rate["input_tokens"] + rate["output_tokens"], 120000)
             self.assert_counter_proof(result, document)
 
     async def test_eight_actual_framework_responses_precede_ninth_execution_attempt_refusal(self):

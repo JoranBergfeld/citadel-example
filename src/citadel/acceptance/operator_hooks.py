@@ -41,6 +41,7 @@ def fingerprints(lifecycle):
     from .scenario_proof import scenario_inputs
     from .inventory import inventory_inputs
     from .retention import telemetry_inputs
+    from .model_counters import quota_inputs
     from citadel.runtime.configuration import OPERATIONS
     source = ReferenceData.from_bundle(lifecycle.config["bundleDir"])
     provenance = source.provenance
@@ -56,6 +57,8 @@ def fingerprints(lifecycle):
     result = {"software": software, "configuration": sha256(lifecycle.config),
               "manifest": actual, "image": [image.split("@", 1)[1] for image in images],
               "protocols": pins["protocols"], "model": pins["model"],
+              "model_tokens_per_minute": lifecycle.config["modelTokensPerMinute"],
+              "quota_inputs": quota_inputs(lifecycle),
               "inputs": {"bundle": actual, "scenario_oracles": sha256(scenarios),
                          "inventory": sha256(inventory),
                          "telemetry": sha256(telemetry),

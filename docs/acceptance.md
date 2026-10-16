@@ -513,7 +513,7 @@ actually fail. The private intent, 512-read pool and original 900-second deadlin
 are not replenished. Independent raw-ledger counters, queried model/Blob/APIM
 receipts and immutable publication hashes are required for all three exported
 limits. Malformed usage leaves admission unresolved; no automatic retry occurs.
-Other numeric-limit and restart controls listed below remain unimplemented.
+Other timeout/deadline and restart controls listed below remain unimplemented.
 
 Three further fixed counter modes spend actual model attempts: eight responses
 before the ninth per-execution refusal; 128 responses across bounded executions
@@ -526,6 +526,19 @@ control run. Insufficient actual quota or excessive service latency blocks the
 control rather than raising a ceiling or issuing a replacement run automatically.
 Local counter tests use the real framework with external wire fixtures and a
 simulated rate clock; the worker integration also tests real isolation windows.
+
+The run counter also attempts a reservation immediately after a real completed
+response; the token counter attempts one when actual rolling history would exceed
+its configured quota, with the five-second spacing satisfied and fewer than twelve
+requests. Both must return `rate_limited` without another physical model request or
+any ledger change. The exported oracle reconstructs those histories from actual
+durable settlement timestamps and queried response receipts, and checks every
+rolling minute against twelve requests and the allocated token ceiling.
+Two admitted ARM GETs independently obtain regional model rate metadata and the
+exact deployed Standard SKU/capacity before either worker starts. Pagination,
+missing metadata, changed model/capacity or unverified quota block; configured TPM
+alone cannot pass. These reads, additional settlement observations and refusals
+retain the existing finite read and time budgets.
 
 1. Perform deployed validation of the implemented telemetry configuration,
    application ingestion counts and gateway/storage correlation proofs.
