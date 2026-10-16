@@ -43,6 +43,9 @@ def evaluate_check(check, report):
     if check["check_id"] in ("telemetry.storage-correlation", "telemetry.gateway-correlation"):
         from .service_correlation import evaluate_correlation
         return evaluate_correlation(check, report)
+    if check["check_id"] == "limit.poll_seconds":
+        from .poll_limits import evaluate_poll
+        return evaluate_poll(check, report)
     observation, control = actual.get("observation"), actual.get("control")
     operations = report.get("operation_ids", [])
     if (not isinstance(observation, dict) or not isinstance(control, dict)

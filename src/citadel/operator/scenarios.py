@@ -1,6 +1,7 @@
 """Operator -> Candidate Planner only. Durable runtime tickets remain authoritative."""
 
 import asyncio
+import hashlib
 import importlib
 import json
 import re
@@ -39,8 +40,9 @@ def acceptance_hook(lifecycle, check_id, run_id):
 
 
 class PlannerClient:
-    def __init__(self, gateway, key, *, http):
+    def __init__(self, gateway, key, *, http, clock=time.time):
         self.gateway, self.key, self.http = endpoint(gateway), key, http
+        self.clock, self.status_receipt = clock, None
         self.mode, self.sent = None, False
         self.invoking, self.invocation_receipt = False, None
         http.event_hooks.setdefault("request", []).insert(0, self.guard)
@@ -56,7 +58,7 @@ class PlannerClient:
         if self.sent or self.mode is None or str(request.url) != self.mode:
             raise Blocked("hidden_retry_or_gateway_redirect")
         self.sent = True
-        self.started = time.time()
+        self.started = self.clock()
         request.headers["Ocp-Apim-Subscription-Key"] = self.key
         from citadel.acceptance.telemetry import correlation_headers
         request.headers.update(correlation_headers())
@@ -69,13 +71,13 @@ class PlannerClient:
         self.invocation_receipt = observe_invocation(response, caller="operator", target="candidate-planner",
             run_id=response.request.headers.get("x-citadel-run-id"),
             operation_id=response.request.headers.get("x-citadel-operation-id"),
-            started=self.started, finished=time.time())
+            started=self.started, finished=self.clock())
 
     async def exchange(self, path, deadline, callback, *, invocation=False):
         self.mode, self.sent = self.gateway + path, False
         self.invoking = invocation
         try:
-            async with asyncio.timeout(max(0, min(180 if invocation else 30, deadline - time.time()))):
+            async with asyncio.timeout(max(0, min(180 if invocation else 30, deadline - self.clock()))):
                 return await callback()
         except (httpx.RequestError, TimeoutError, A2AClientTimeoutError):
             raise Blocked("invocation_ambiguous_reconcile_only" if invocation else "status_unavailable") from None
@@ -94,6 +96,7 @@ class PlannerClient:
                 return result.continuation_token
 
     async def status(self, run_id, deadline):
+        self.status_receipt = None
         async def request():
             response = await self.http.get(self.gateway + "/candidate-planner/operations/" + run_id)
             if response.status_code == 429:
@@ -105,8 +108,30 @@ class PlannerClient:
                 raise Blocked("missing_state_is_not_nonexecution")
             if result.get("run_id") != run_id or result.get("operation_id") != run_id:
                 raise Blocked("operation_ownership_binding_conflict")
+            from citadel.acceptance.telemetry import gateway_request_id
+            self.status_receipt = {"run_id": run_id, "operation_id": run_id, "caller": "operator",
+                "target": hashlib.sha256(str(response.request.url).encode()).hexdigest(),
+                "request_id": gateway_request_id(response.headers), "status_code": response.status_code,
+                "started": self.started, "finished": self.clock(), "sha256": sha256(result),
+                "business_state": result.get("state")}
             return result
         return await self.exchange("/candidate-planner/operations/" + run_id, deadline, request)
+
+    async def poll(self, run_id, state, deadline, *, save, enforce_interval=True):
+        if enforce_interval and state.get("lastRead") and self.clock() - state["lastRead"] < 15:
+            raise Blocked("poll_interval_15_seconds_required")
+        if state["reads"] >= 64:
+            raise Blocked("operator_poll_bound_exhausted")
+        state["reads"] += 1
+        state["lastRead"] = self.clock()
+        save()
+        from citadel.acceptance.telemetry import correlate
+        with correlate(run_id, run_id, "operator"):
+            result = await self.status(run_id, deadline)
+        if self.status_receipt is not None:
+            state.setdefault("poll_receipts", []).append(self.status_receipt)
+            save()
+        return result
 
     async def product(self, run_id, deadline):
         async with A2AAgent(agent_card=self.card, http_client=self.http) as agent:
@@ -169,14 +194,8 @@ def scenario_command(lifecycle, args):
             while time.time() < existing["deadline"]:
                 if args.command == "demo":
                     await asyncio.sleep(15)
-                elif existing.get("lastRead") and time.time() - existing["lastRead"] < 15:
-                    raise Blocked("poll_interval_15_seconds_required")
-                if existing["reads"] >= 64:
-                    raise Blocked("operator_poll_bound_exhausted")
-                existing["reads"] += 1
-                existing["lastRead"] = time.time()
-                lifecycle.state.save()
-                status = await client.status(args.run_id, existing["deadline"])
+                status = await client.poll(args.run_id, existing, existing["deadline"],
+                    save=lifecycle.state.save, enforce_interval=args.command != "demo")
                 existing["state"] = status["state"]
                 lifecycle.state.save()
                 if status["state"] == "succeeded":

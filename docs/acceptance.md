@@ -540,6 +540,19 @@ missing metadata, changed model/capacity or unverified quota block; configured T
 alone cannot pass. These reads, additional settlement observations and refusals
 retain the existing finite read and time budgets.
 
+The 15-second polling provider reuses the completed comparison run. It makes two
+actual owner-authorized status reads, attempts an immediate intervening poll
+through the production operator admission path, and requires refusal before any
+dispatch or durable read-counter change. Twelve bounded operator Blob reads
+independently compare all six business ledgers before and after. No invocation,
+model attempt, grant, read-pool refill or replacement run is created.
+Workload clients also emit payload-free receipts for every pending/completed
+owner poll. The exported gate requires the complete queried backend/client census,
+actual gateway and runtime identity bindings, and at least 15 seconds after the
+actual accepted invocation and each preceding poll response. Missing peer receipts
+cannot be replaced by successful operator timing alone. The fixed provider retains
+the original run deadline and the existing 64-read operator allowance.
+
 1. Perform deployed validation of the implemented telemetry configuration,
    application ingestion counts and gateway/storage correlation proofs.
    Dependency approval is settled; no existing pin was changed and no cloud

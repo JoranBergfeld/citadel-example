@@ -170,6 +170,9 @@ class GatewayPeers:
                     started = time.time()
                     response = await self.http.get(f"{self.gateway}/{child}/operations/{operation_id}")
                     response.raise_for_status()
+                    from citadel.acceptance.poll_limits import observe_poll
+                    observe_poll(response, caller=self.workload, target=child, run_id=payload["run_id"],
+                                 operation_id=parent_id, started=started, finished=time.time())
                     from citadel.acceptance.workflow_routes import observe_status
                     observe_status(response, caller=self.workload, target=child, run_id=payload["run_id"],
                                    operation_id=parent_id, started=started, finished=time.time())

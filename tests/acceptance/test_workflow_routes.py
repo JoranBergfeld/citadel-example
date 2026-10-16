@@ -1,5 +1,6 @@
 import copy
 import json
+import io
 import unittest
 
 import httpx
@@ -9,6 +10,28 @@ from tests.acceptance.test_route_context import ledgers
 
 
 class WorkflowRouteTests(unittest.TestCase):
+    def test_pending_and_completed_real_poll_receipts_have_bounded_payload_free_timing(self):
+        from citadel.acceptance.poll_limits import observe_poll
+        response = httpx.Response(200, headers={"apim-request-id": "actual-poll"},
+            request=httpx.Request("GET", "https://gateway.example/evidence-assessor/operations/child"),
+            json={"run_id": "actual", "operation_id": "child", "state": "running",
+                  "input_hash": "a" * 64, "result": {"private": "never-export"}})
+        record = observe_poll(response, caller="candidate-planner", target="evidence-assessor",
+            run_id="actual", operation_id="parent", started=100, finished=101)
+        self.assertEqual(record["facts"]["read_operation_id"], "child")
+        self.assertEqual(record["facts"]["business_state"], "running")
+        self.assertNotIn("never-export", str(record))
+        from citadel.acceptance.telemetry import Telemetry
+        output = io.StringIO()
+        Telemetry("candidate-planner", "11111111-1111-1111-1111-111111111111", output=output).emit(
+            record["method"], request_id=record["request_id"], status_code=200,
+            facts=record["facts"], target=record["target"])
+        self.assertEqual(json.loads(output.getvalue())["method"], "poll.observed")
+        self.assertIsNone(observe_poll(response, caller="candidate-planner", target="evidence-assessor",
+            run_id="actual", operation_id="parent", started=100, finished=99))
+        self.assertIsNone(observe_poll(response, caller="briefing-author", target="evidence-assessor",
+            run_id="actual", operation_id="parent", started=100, finished=101))
+
     def test_unusable_wall_clock_receipt_is_not_evidence_and_does_not_abort_valid_work(self):
         from citadel.acceptance.workflow_routes import observe_status, status_controls
         documents = ledgers()

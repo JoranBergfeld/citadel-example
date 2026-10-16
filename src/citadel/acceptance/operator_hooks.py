@@ -161,6 +161,10 @@ class Harness:
                 report["finished"] = time.time()
                 self.save(report)
                 if scenario == "comparison" and scenario in report["scenarios"]:
+                    from .poll_limits import PollAcceptance
+                    PollAcceptance(self.lifecycle).execute(report)
+                    report["finished"] = time.time()
+                    self.save(report)
                     from .origin_harness import BoundaryAcceptance
                     for observed in BoundaryAcceptance(self.lifecycle).execute(report):
                         if observed.get("check_id") in required_checks():
@@ -260,6 +264,8 @@ class Harness:
                 self._replace(report, result)
             from .scenario_proof import collect_projection
             self._replace(report, collect_projection(report))
+            from .poll_limits import PollAcceptance
+            self._replace(report, PollAcceptance.evaluate(report))
             from .model_harness import ModelAcceptance
             for result in ModelAcceptance.evaluate(report, report["evidence"]):
                 self._replace(report, result)
