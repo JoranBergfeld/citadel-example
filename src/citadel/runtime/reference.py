@@ -10,7 +10,9 @@ from starlette.applications import Starlette
 from starlette.routing import Route
 
 from citadel.evidence import EvidenceError, ReferenceData
+from citadel.evidence.manifests import sha256
 from citadel.gateway import GatewayTrust
+from citadel.acceptance.telemetry import correlate, emit
 
 
 def reference_application(reference, trust):
@@ -54,6 +56,11 @@ def reference_application(reference, trust):
             if selected is None or selected.provenance["fixture"]["id"] != fixture:
                 raise EvidenceError("unsupported_version", "Unknown fixture")
             payload = getattr(selected, name)(**arguments)
+            scope = server.request_context.request.scope
+            with correlate(scope["citadel.run_id"], scope["citadel.operation_id"], scope["citadel.caller"]):
+                emit("reference.observed", request_id=scope["citadel.request_id"], status_code=200,
+                     facts={"probe_id": name, "sha256": sha256(payload),
+                            "source_sha256": sha256(payload["provenance"])})
             return CallToolResult(content=[TextContent(type="text", text=json.dumps(payload))],
                                   structuredContent=payload)
         except EvidenceError as exc:

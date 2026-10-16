@@ -16,6 +16,9 @@ schema_version run_id operation_id operation_ids check_id status mode fingerprin
 required_checks checks scenarios human_reviews product_sha256 semantics_sha256
 supported gaps_visible fictional confirmed_at expected actual business_state reason
 source sources request_id control_request_id caller runtime_identity gateway_identity
+scenario_inputs gateway_targets storage_targets scenario_oracles
+assessed airport_ident assessment_sha256 selected_identifiers pool_count pool_sha256 lookup_sha256 runways_sha256
+brief read_scopes observations bypass
 control_identity
 observation control before after target container action etag suite_id client_request_id
 method event_id facts certificate_sha256 generation read_attempts agent_executions upstream_attempts backend_dispatched
@@ -47,7 +50,8 @@ name region sku version_upgrade_option verification a2a a2a_binding mcp mcp_tran
 model_path blob_data_api key_vault_data_api
 """.split())
 DYNAMIC = {"scenarios", "human_reviews", "limits", "protocols", "inputs", "lifecycle_refs",
-           "runtime_identities", "subscription_bindings", "collection_windows", "operations", "finding_controls"}
+           "runtime_identities", "subscription_bindings", "collection_windows", "operations", "finding_controls",
+           "scenario_inputs", "gateway_targets", "storage_targets"}
 
 
 def sanitize(value, *, dynamic=False):

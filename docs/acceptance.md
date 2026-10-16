@@ -15,6 +15,28 @@ requires its four independently verified, actually executed storage denials.
   The independent semantic oracle compares the immutable source, labelled fixture,
   exact ordered candidates, assessments, released-version/hash shapes and caveats.
   It rejects fabricated completed briefs for pool exhaustion.
+- Each completed scenario is independently observed through six operator Blob
+  reads (four operation ledgers, drafts and findings), under its original run
+  deadline and a persisted six-read allowance. No workload read pool is refilled,
+  no model call is added and interrupted observation intent is not replayed.
+  Exact returned products, draft hashes, immutable findings, every completed
+  assessor/reviewer execution and the author's citations/funded scopes must agree.
+  Expected source/fixture and tool-result hashes come independently from the
+  pinned Reference Data bundle and are bound into the deployment fingerprint.
+- Actual Reference Data MCP handlers emit only tool-result/provenance hashes,
+  using their authenticated HTTP caller/run/operation/request context. Scenario
+  collection requires each real search/lookup/runway trace from application
+  ingestion, the matching APIM subscription/request/target, all actual accepted
+  A2A input bindings and all six observer Blob service receipts. Missing or
+  substituted sources block; observed source/projection mismatches fail. Console
+  logs, a semantic pass label or a successful export cannot substitute.
+  Denied-bypass additionally re-evaluates all four earlier real denials/no-effects
+  from its exact bound control attempt before the subsequent normal run.
+- The private-field projection gate re-evaluates all four distinct scenario
+  executions. Exact root/brief/finding field sets, nested source evidence and
+  private-draft projections are checked without exporting drafts or prose.
+  The sanitized report repeats these oracles; human narrative review still binds
+  the exact private returned product, never a synthesized or inferred signoff.
 - `denied-bypass-controls` executes the actual storage providers and their permitted
   controls. It independently re-evaluates both planning identities' private-draft
   reads and finding overwrites, including unchanged targets and queried application/

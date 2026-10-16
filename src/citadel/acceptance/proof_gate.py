@@ -25,6 +25,12 @@ def evaluate_check(check, report):
     from .protocol_oracle import DEPENDENCIES as PROTOCOLS, evaluate_protocol
     if check["check_id"] in PROTOCOLS:
         return evaluate_protocol(check, report)
+    if check["check_id"].startswith("scenario."):
+        from .scenario_proof import evaluate_scenario_proof
+        return evaluate_scenario_proof(check, report)
+    if check["check_id"] == "projection.private-fields-absent":
+        from .scenario_proof import evaluate_projection
+        return evaluate_projection(check, report)
     observation, control = actual.get("observation"), actual.get("control")
     operations = report.get("operation_ids", [])
     if (not isinstance(observation, dict) or not isinstance(control, dict)

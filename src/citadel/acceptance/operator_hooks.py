@@ -38,11 +38,29 @@ def fingerprints(lifecycle):
     images = sorted({app["image"] for app in lifecycle.value["outputs"]["appInventory"]})
     if not images or any("@sha256:" not in image for image in images):
         raise Blocked("acceptance_immutable_images_required")
-    provenance = ReferenceData.from_bundle(lifecycle.config["bundleDir"]).provenance
+    from .scenario_proof import scenario_inputs
+    from citadel.runtime.configuration import OPERATIONS
+    source = ReferenceData.from_bundle(lifecycle.config["bundleDir"])
+    provenance = source.provenance
+    scenarios = scenario_inputs(source)
+    accounts = [resource for resource in lifecycle.value["inventory"]
+        if "/providers/Microsoft.Storage/storageAccounts/" in resource and "/blobServices/" not in resource]
+    if len(accounts) != 1:
+        raise Blocked("exact_scenario_storage_inventory_required")
+    account = "https://" + accounts[0].rsplit("/", 1)[-1] + ".blob.core.windows.net"
+    gateway = lifecycle.value["outputs"]["gatewayUrl"]
     result = {"software": software, "configuration": sha256(lifecycle.config),
               "manifest": actual, "image": [image.split("@", 1)[1] for image in images],
               "protocols": pins["protocols"], "model": pins["model"],
-              "inputs": {"bundle": actual, **{key: sha256(value) for key, value in provenance.items()}},
+              "inputs": {"bundle": actual, "scenario_oracles": sha256(scenarios),
+                         **{key: sha256(value) for key, value in provenance.items()}},
+              "scenario_inputs": scenarios,
+              "gateway_targets": {actor: hashlib.sha256(
+                  (gateway + "/" + actor + ("/mcp" if actor == "reference-data" else "/a2a")).encode()).hexdigest()
+                  for actor in (*OPERATIONS, "reference-data")},
+              "storage_targets": {container: hashlib.sha256(
+                  (account + "/" + container + "/ledger-v1.json").encode()).hexdigest()
+                  for container in (*OPERATIONS.values(), "drafts", "findings")},
               "runtime_identities": {
                   app["app"].split("/")[-1].removeprefix(lifecycle.id + "-"):
                       hashlib.sha256(str(UUID(app["identityPrincipalId"])).encode()).hexdigest()
@@ -113,6 +131,9 @@ class Harness:
                         report["scenarios"][scenario] = {
                             "operation_id": operation, "product_sha256": checked["product_sha256"],
                             "semantics_sha256": checked["semantics_sha256"]}
+                        from .scenario_harness import ScenarioAcceptance
+                        ScenarioAcceptance(self.lifecycle).execute(
+                            report, scenario, outcome["product"], source=source, run_id=operation)
                         checked.update(status="blocked", reason="required_service_correlation_missing")
                     self._replace(report, checked)
                 except Blocked as exc:
@@ -209,6 +230,11 @@ class Harness:
                                   ingress=[row for row in report.get("boundary_phase", {}).get("origins", [])
                                            if row.get("request_id")])
             report["evidence"] = collector.poll()
+            from .scenario_harness import ScenarioAcceptance
+            for result in ScenarioAcceptance.evaluate(report):
+                self._replace(report, result)
+            from .scenario_proof import collect_projection
+            self._replace(report, collect_projection(report))
             from .model_harness import ModelAcceptance
             for result in ModelAcceptance.evaluate(report, report["evidence"]):
                 self._replace(report, result)

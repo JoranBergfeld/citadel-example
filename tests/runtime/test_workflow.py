@@ -49,7 +49,7 @@ class FixtureGateway(httpx.AsyncBaseTransport):
 
 class WorkflowTests(unittest.IsolatedAsyncioTestCase):
     async def run_case(self, fixture, *, count=4, expected_state="succeeded", data_source=None,
-                       corrupt_brief=False):
+                       corrupt_brief=False, persisted=None, run_id="run1"):
         gateway = FixtureGateway()
         gateway.corrupt_brief = corrupt_brief
         base = data_source or reference(count)
@@ -105,12 +105,12 @@ class WorkflowTests(unittest.IsolatedAsyncioTestCase):
                 headers={"Ocp-Apim-Subscription-Key": "operator"}, timeout=30))
             async with A2AAgent(agent_card=runtimes["candidate-planner"].card, http_client=client) as agent:
                 accepted = await agent.run(json.dumps({
-                    "operation_id": "run1", "run_id": "run1", "fixture": fixture,
+                    "operation_id": run_id, "run_id": run_id, "fixture": fixture,
                 }), background=True)
                 self.assertIsNotNone(accepted.continuation_token)
                 async with asyncio.timeout(12):
                     while True:
-                        state = await client.get("https://gateway.test/candidate-planner/operations/run1")
+                        state = await client.get("https://gateway.test/candidate-planner/operations/" + run_id)
                         self.assertEqual(state.status_code, 200, state.text)
                         if state.json()["state"] not in ("pending", "running"):
                             break
@@ -122,13 +122,16 @@ class WorkflowTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIsNone(result.continuation_token)
                 output = json.loads(result.text)
                 repeated = await agent.run(json.dumps({
-                    "operation_id": "run1", "run_id": "run1", "fixture": fixture,
+                    "operation_id": run_id, "run_id": run_id, "fixture": fixture,
                 }), background=True)
                 self.assertIsNone(repeated.continuation_token)
                 self.assertEqual(json.loads(repeated.text), output)
                 self.assertNotIn("private_notes", json.dumps(output))
                 self.assertLessEqual(gateway.read_attempts + sum(item.read_attempts for item in ledgers), 512)
                 self.last_read_count = gateway.read_attempts + sum(item.read_attempts for item in ledgers)
+                if persisted is not None:
+                    for name, ledger in zip(("drafts", "findings", *runtimes), ledgers):
+                        persisted[name] = (await ledger.read())[0]
                 self.assertEqual(output["provenance"], data.provenance)
                 self.assertTrue(set(CAVEATS).issubset(output["caveats"]))
                 if output.get("brief"):

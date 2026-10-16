@@ -165,6 +165,8 @@ class GatewayTrust:
             operation_id = opaque(headers.get("x-citadel-operation-id", request_id))
         except ValueError:
             run_id = operation_id = request_id
+        scope["citadel.run_id"] = run_id
+        scope["citadel.operation_id"] = operation_id
 
         async def observed_send(message):
             if message["type"] == "http.response.start":
