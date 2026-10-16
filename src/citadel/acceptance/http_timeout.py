@@ -223,6 +223,8 @@ def evaluate_http_timeout(check, report):
         elif not observations[0]["finished"] <= timer["started"] <= observations[1]["started"] <= observations[1]["finished"] <= timer["finished"]:
             return blocked
         target, subscription = report["gateway_targets"]["candidate-planner"], report["subscription_bindings"]["operator"]
+        if not hash_value(target) or not hash_value(subscription):
+            return blocked
         roots = [row["control_reference"] for side in ("before", "after")
                  for row in actual[side] if row["container"] == "planner-operations"]
         if (len(roots) != 2 or roots[0] != roots[1] or roots[0]["operation_id"] != run

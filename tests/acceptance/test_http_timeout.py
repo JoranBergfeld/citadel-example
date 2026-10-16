@@ -77,6 +77,14 @@ class HttpTimeoutOracleTests(unittest.TestCase):
                 evidence["evidence"].append(evidence["evidence"][-2] | {"request_id": "hidden-replay"})
             self.assertNotEqual(evaluate_check(changed, evidence)["status"], "pass", mutation)
 
+    def test_consistent_but_unhashed_gateway_binding_cannot_be_exported_as_proof(self):
+        check, report = fixture()
+        report["subscription_bindings"]["operator"] = "not-a-credential-hash"
+        for row in report["evidence"]:
+            if row["source"] == "gateway":
+                row["credential_sha256"] = "not-a-credential-hash"
+        self.assertEqual(evaluate_check(check, report)["status"], "blocked")
+
     def test_actual_provider_uses_allocated_operator_key_original_run_and_twelve_sdk_reads(self):
         self._provider()
 
