@@ -585,9 +585,22 @@ independently observed root bindings, the actual monotonic timer and unchanged
 business state. A shorter inherited timeout or a transport error is not proof
 of the full 180-second boundary.
 
-Implemented providers currently cover 272 of 278 canonical checks; this is not
-a cloud pass count. Six still need actual drivers: the three rotation families,
-process restart, and the 10/900-second acceptance/workflow
+The 10-second backend control first obtains a real completed cached response,
+then temporarily enables one exact cached-root hold in the existing pinned
+Candidate Planner application. It preserves the normal command, identity,
+credentials and original operation pools. The application only holds an already
+succeeded, input-bound root; its actual production `SendMessage` guard expires
+after ten seconds. No new execution is scheduled. Configuration is private,
+fixed-purpose and disabled by default; arbitrary durations and other workloads
+are rejected. Both enabling and restoring wait for the exact named ready
+revision, with at most 94 total operator reads under the original run deadline.
+The public oracle requires the independently queried backend timer, actual
+indeterminate protocol response, earlier allowed control and unchanged snapshots;
+a client timeout or successful revision update alone cannot pass.
+
+Implemented providers currently cover 273 of 278 canonical checks; this is not
+a cloud pass count. Five still need actual drivers: the three rotation families,
+process restart, and the 900-second workflow
 boundaries. These implementation gaps keep the full gate blocked.
 
 1. Perform deployed validation of the implemented telemetry configuration,

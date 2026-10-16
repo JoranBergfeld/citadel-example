@@ -31,6 +31,8 @@ async def _stop_checkpoints(task):
 @asynccontextmanager
 async def application(config):
     from citadel.acceptance.telemetry import configure, finish
+    from citadel.acceptance.acceptance_timeout import CachedAcceptanceHold
+    acceptance_hold = CachedAcceptanceHold.from_environment(os.environ, workload=config.target)
     async with AsyncExitStack() as stack:
         configure(config.target, os.environ["AZURE_PRINCIPAL_ID"],
             client_id=config.client_id, connection_string=os.environ["APPLICATIONINSIGHTS_CONNECTION_STRING"])
@@ -73,7 +75,7 @@ async def application(config):
             stack.push_async_callback(peers.close)
             runtime = Runtime(config.target, ledger, model=model, peers=peers, gateway_url=config.gateway,
                               artifacts=artifacts, drafts=drafts, tokens_per_minute=config.tokens_per_minute,
-                              ticket_store=AzureTicketStore(ticket_container))
+                              ticket_store=AzureTicketStore(ticket_container), acceptance_hold=acceptance_hold)
             stack.push_async_callback(runtime.shutdown)
             app = agent_application(runtime, config.trust)
         await stack.enter_async_context(app.app.router.lifespan_context(app.app))

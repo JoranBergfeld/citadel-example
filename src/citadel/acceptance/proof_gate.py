@@ -46,7 +46,7 @@ def evaluate_check(check, report):
     if check["check_id"] == "limit.poll_seconds":
         from .poll_limits import evaluate_poll
         return evaluate_poll(check, report)
-    if check["check_id"] == "limit.a2a_http_timeout_seconds":
+    if check["check_id"] in ("limit.a2a_http_timeout_seconds", "limit.acceptance_seconds"):
         from .http_timeout import evaluate_http_timeout
         return evaluate_http_timeout(check, report)
     observation, control = actual.get("observation"), actual.get("control")

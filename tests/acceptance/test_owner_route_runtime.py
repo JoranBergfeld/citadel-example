@@ -37,7 +37,7 @@ class OwnerRouteRuntimeTests(unittest.IsolatedAsyncioTestCase):
                 response = await super().handle_async_request(copy)
                 response.headers["apim-request-id"] = "test-request"
                 return response
-        gateway, now, records = Wire(), [time.time()], []
+        gateway, now, records, runtimes = Wire(), [time.time()], [], {}
         drafts = CountingLedger(clock=lambda: now[0])
         findings = CountingLedger(clock=lambda: now[0])
         ledgers = {role: CountingLedger(clock=lambda: now[0]) for role in (
@@ -81,11 +81,13 @@ class OwnerRouteRuntimeTests(unittest.IsolatedAsyncioTestCase):
                                      clock=lambda: now[0], sleep=poll_sleep)
                 runtime = Runtime(role, ledger, model=model, peers=peers, gateway_url="https://gateway.test",
                     clock=lambda: now[0], artifacts=drafts if role == "evidence-assessor" else findings, drafts=drafts)
+                runtimes[role] = runtime
                 stack.push_async_callback(runtime.shutdown)
                 gateway.apps[role] = agent_application(runtime, trust(role))
             http = await stack.enter_async_context(httpx.AsyncClient(transport=gateway))
             planner = PlannerClient("https://gateway.test", "operator", http=http)
             await planner.invoke("actual-comparison", "base-source", time.time() + 120)
+            original_invocation = planner.invocation_receipt
             async with asyncio.timeout(15):
                 while True:
                     await asyncio.sleep(.1)
@@ -99,6 +101,21 @@ class OwnerRouteRuntimeTests(unittest.IsolatedAsyncioTestCase):
             await planner.invoke("actual-comparison", "base-source", time.time() + 30)
             self.assertEqual(sum(row["method"] == "SendMessage" for row in records), accepted_count)
             self.assertEqual(sum(row["method"] == "SendMessage.cached" for row in records), 2)
+            from citadel.acceptance.acceptance_timeout import CachedAcceptanceHold
+            planner_runtime = runtimes["candidate-planner"]
+            planner_runtime.acceptance_hold = CachedAcceptanceHold.from_environment({
+                "CITADEL_ACCEPTANCE_ENABLED": "true", "CITADEL_ACCEPTANCE_HOLD": json.dumps({
+                    "run_id": "actual-comparison", "deadline": time.time() + 60, "mode": "cached-acceptance"})},
+                workload="candidate-planner")
+            await planner.invoke("actual-comparison", "base-source", time.time() + 30)
+            timers = [row for row in records if row["method"] == "acceptance.timeout"]
+            self.assertEqual(len(timers), 1)
+            timer = timers[0]["facts"]
+            self.assertEqual(timer["monotonic_deadline"] - timer["monotonic_started"], 10)
+            self.assertGreaterEqual(timer["monotonic_finished"], timer["monotonic_deadline"])
+            self.assertIsNone(planner.invocation_receipt)
+            self.assertEqual(sum(row["method"] == "SendMessage" for row in records), accepted_count)
+            planner_runtime.acceptance_hold = None
             documents = {role: (await ledger.read())[0] for role, ledger in ledgers.items()}
             documents["findings"] = (await findings.read())[0]
             before_drafts = (await drafts.read())[0]
@@ -111,7 +128,7 @@ class OwnerRouteRuntimeTests(unittest.IsolatedAsyncioTestCase):
                 "route.evidence-assessor.release-reviewer.status"})
             from citadel.acceptance.workflow_routes import invocation_controls
             invocations = invocation_controls([row | {"source": "application"} for row in records],
-                                               context, operator=planner.invocation_receipt)
+                                               context, operator=original_invocation)
             self.assertEqual({row["check_id"] for row in invocations}, {
                 "route.operator.candidate-planner.invoke",
                 "route.candidate-planner.evidence-assessor.invoke",

@@ -34,9 +34,10 @@ from .tickets import CAPACITY, TicketPool
 class Runtime:
     def __init__(self, workload, ledger, *, model, peers, gateway_url,
                  artifacts=None, drafts=None, tokens_per_minute=120000, clock=time.time,
-                 ticket_store=None):
+                 ticket_store=None, acceptance_hold=None):
         self.workload, self.model, self.peers, self.clock = workload, model, peers, clock
         self.ledger = ScopedLedger(ledger)
+        self.acceptance_hold = acceptance_hold
         self.ops = Operations(self.ledger, workload=workload, clock=clock)
         self.accounting = Accounting(self.ledger, workload=workload, clock=clock,
                                      tokens_per_minute=tokens_per_minute)
@@ -355,8 +356,11 @@ class DurableHandler(RequestHandler):
     async def on_message_send(self, params, context):
         if not params.configuration.return_immediately:
             raise InvalidParamsError("Only bounded nonblocking task acceptance is supported")
+        started, monotonic_started = time.time(), asyncio.get_running_loop().time()
+        timer = asyncio.timeout_at(monotonic_started + 10)
+        payload = None
         try:
-            async with asyncio.timeout(10):
+            async with timer:
                 parts = params.message.parts
                 if len(parts) != 1 or not parts[0].text:
                     raise OperationError("invalid_input", "One structured text message is required")
@@ -371,12 +375,20 @@ class DurableHandler(RequestHandler):
                          request_id=context.state["request_id"], status_code=200,
                          facts={"business_state": status["state"], "deadline": status["deadline"],
                                 "input_hash": status["input_hash"], "accepted_operation_id": status["operation_id"]})
+                    if status["state"] == "succeeded" and self.runtime.acceptance_hold is not None:
+                        await self.runtime.acceptance_hold.wait(context.state["caller"], payload, status)
                 if status["state"] != "pending":
                     return await self.runtime.task_status(context.state["caller"], status["operation_id"],
                                                           incoming=False)
                 return Task(id=status["operation_id"], context_id=status["run_id"],
                             status=TaskStatus(state=TaskState.TASK_STATE_SUBMITTED))
         except (ValueError, KeyError, TypeError, OperationError, TimeoutError) as exc:
+            if timer.expired() and isinstance(payload, dict) and {"run_id", "operation_id"} <= payload.keys():
+                with correlate(payload["run_id"], payload["operation_id"], context.state["caller"]):
+                    emit("acceptance.timeout", request_id=context.state["request_id"], status_code=0,
+                         facts={"started": started, "finished": time.time(), "deadline": started + 10,
+                                "monotonic_started": monotonic_started, "monotonic_deadline": timer.when(),
+                                "monotonic_finished": asyncio.get_running_loop().time()})
             code = (exc.code if isinstance(exc, OperationError) else
                     "indeterminate" if isinstance(exc, TimeoutError) else "invalid_input")
             return Message(message_id=uuid4().hex, role="ROLE_AGENT",

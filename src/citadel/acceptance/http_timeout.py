@@ -18,14 +18,17 @@ from .telemetry import gateway_request_id
 
 
 CHECK = "limit.a2a_http_timeout_seconds"
+ACCEPTANCE_CHECK = "limit.acceptance_seconds"
 
 
 class HttpTimeoutAcceptance:
-    def __init__(self, lifecycle):
+    def __init__(self, lifecycle, *, acceptance=False):
         self.lifecycle = lifecycle
+        self.acceptance = acceptance
+        self.phase_key = "acceptance_timeout_phase" if acceptance else "http_timeout_phase"
 
     def execute(self, report):
-        if "http_timeout_phase" in report:
+        if self.phase_key in report:
             raise Blocked("http_timeout_intent_requires_reconciliation")
         run_id = report["scenarios"]["comparison"]["operation_id"]
         run = self.lifecycle.value["runs"][run_id]
@@ -42,13 +45,13 @@ class HttpTimeoutAcceptance:
         phase = {"state": "observing", "run_id": run_id, "operation_id": operation,
             "started": time.time(), "deadline": run["deadline"], "read_attempts": 0,
             "before": [], "after": [], "observations": []}
-        report["http_timeout_phase"] = phase
+        report[self.phase_key] = phase
         report["operation_ids"].append(operation)
         run["state"] = "control_intent"
         self.lifecycle.state.save()
 
         def admit():
-            if phase["read_attempts"] >= 12 or time.time() >= phase["deadline"]:
+            if phase["read_attempts"] >= (94 if self.acceptance else 12) or time.time() >= phase["deadline"]:
                 raise OperationError("exhausted", "Finite HTTP timeout observations exhausted")
             phase["read_attempts"] += 1
             self.lifecycle.state.save()
@@ -91,6 +94,16 @@ class HttpTimeoutAcceptance:
                     async def received(response):
                         await response.aread()
                         receipt = client.invocation_receipt
+                        if self.acceptance and len(phase["observations"]) == 1:
+                            body = response.json()["result"]["message"]
+                            error = json.loads(body["parts"][0]["text"])
+                            if response.status_code != 200 or error != {"error": "indeterminate", "complete": False}:
+                                raise Blocked("actual_cached_acceptance_expiry_response_required")
+                            phase["observations"].append(phase["observations"][0] | {
+                                "request_id": gateway_request_id(response.headers), "started": client.started,
+                                "finished": time.time(), "business_state": "indeterminate", "sha256": sha256(error)})
+                            self.lifecycle.state.save()
+                            return
                         if (response.status_code != 200 or receipt is None
                                 or receipt["facts"]["business_state"] != "TASK_STATE_COMPLETED"
                                 or receipt["facts"]["accepted_operation_id"] != run_id):
@@ -114,6 +127,18 @@ class HttpTimeoutAcceptance:
                     http.event_hooks["response"].append(received)
                     await client.invoke(run_id, run["fixture"], phase["deadline"])
                     phase["before_sha256"] = sha256(run)
+                    if self.acceptance:
+                        from .acceptance_timeout import CachedAcceptanceRevision
+                        revision = CachedAcceptanceRevision(self.lifecycle, operation_id=operation,
+                            run_id=run_id, deadline=phase["deadline"], admit=admit)
+                        revision.start()
+                        try:
+                            await client.invoke(run_id, run["fixture"], phase["deadline"])
+                            phase["response"] = "indeterminate"
+                            phase["after_sha256"] = sha256(run)
+                        finally:
+                            revision.restore()
+                        return
                     try:
                         await client.invoke(run_id, run["fixture"], phase["deadline"])
                     except Blocked as exc:
@@ -141,9 +166,9 @@ class HttpTimeoutAcceptance:
             self.lifecycle.state.save()
 
     @staticmethod
-    def evaluate(report):
-        phase = report.get("http_timeout_phase", {})
-        check = {"check_id": CHECK, "expected": "boundary", "status": "blocked",
+    def evaluate(report, *, acceptance=False):
+        phase = report.get("acceptance_timeout_phase" if acceptance else "http_timeout_phase", {})
+        check = {"check_id": ACCEPTANCE_CHECK if acceptance else CHECK, "expected": "boundary", "status": "blocked",
                  "reason": "actual_http_timeout_driver_required"}
         if phase.get("state") != "observed":
             return check
@@ -154,11 +179,17 @@ class HttpTimeoutAcceptance:
             and (row.get("request_id"), row.get("client_request_id"), row.get("target")) in bindings}
         check["actual"] = {key: value for key, value in phase.items() if key not in ("state", "read_attempts")}
         check["actual"]["runtime_identity"] = next(iter(observers)) if len(observers) == 1 else None
+        if acceptance:
+            events = [row for row in report["evidence"] if row.get("source") == "application"
+                and row.get("method") == "acceptance.timeout"
+                and row.get("request_id") == phase["observations"][-1]["request_id"]]
+            check["actual"]["timer"] = events[0]["facts"] if len(events) == 1 else None
         return check | evaluate_http_timeout(check, report)
 
 
 def evaluate_http_timeout(check, report):
-    blocked = {"check_id": CHECK, "status": "blocked",
+    acceptance = check["check_id"] == ACCEPTANCE_CHECK
+    blocked = {"check_id": ACCEPTANCE_CHECK if acceptance else CHECK, "status": "blocked",
                "reason": "actual_http_timer_cached_receipts_and_independent_no_effect_required"}
     try:
         actual, records = check["actual"], report["evidence"]
@@ -174,10 +205,22 @@ def evaluate_http_timeout(check, report):
         if (len(observations) != 2 or len({row["request_id"] for row in observations}) != 2
                 or any(type(timer[key]) not in (int, float) or not math.isfinite(timer[key]) for key in
                     ("started", "finished", "deadline", "monotonic_started", "monotonic_deadline", "monotonic_finished"))
-                or timer["deadline"] != actual["deadline"]
+                or not acceptance and timer["deadline"] != actual["deadline"]
                 or not actual["started"] <= observations[0]["started"] <= observations[0]["finished"]
-                    <= timer["started"] <= observations[1]["started"] <= observations[1]["finished"]
-                    <= timer["finished"] <= actual["finished"]):
+                    <= observations[1]["started"] <= observations[1]["finished"] <= actual["finished"]):
+            return blocked
+        if acceptance:
+            if not observations[1]["started"] <= timer["started"] <= timer["finished"] <= observations[1]["finished"]:
+                return blocked
+            events = [row for row in records if row.get("source") == "application"
+                and row.get("method") == "acceptance.timeout" and row.get("request_id") == observations[1]["request_id"]]
+            if (len(events) != 1 or events[0].get("facts") != timer
+                    or events[0].get("runtime_identity") != report["runtime_identities"]["candidate-planner"]
+                    or events[0].get("caller") != "operator" or events[0].get("run_id") != run
+                    or events[0].get("operation_id") != run or events[0].get("status_code") != 0
+                    or not timer["finished"] - 5 <= events[0]["observed"] <= timer["finished"] + 5):
+                return blocked
+        elif not observations[0]["finished"] <= timer["started"] <= observations[1]["started"] <= observations[1]["finished"] <= timer["finished"]:
             return blocked
         target, subscription = report["gateway_targets"]["candidate-planner"], report["subscription_bindings"]["operator"]
         roots = [row["control_reference"] for side in ("before", "after")
@@ -188,12 +231,13 @@ def evaluate_http_timeout(check, report):
                     "operation_id": run, "run_id": run, "fixture": "base-source"},
                     "run_id": run, "deadline": roots[0]["deadline"]})):
             return blocked
-        for row in observations:
+        for index, row in enumerate(observations):
             if (row["target"] != target or row["status_code"] != 200 or row["caller"] != "operator"
                     or row["run_id"] != run or row["operation_id"] != run or row["accepted_operation_id"] != run
-                    or row["business_state"] != "TASK_STATE_COMPLETED" or not hash_value(row["sha256"])
+                    or row["business_state"] != ("indeterminate" if acceptance and index == 1 else "TASK_STATE_COMPLETED")
+                    or not hash_value(row["sha256"])
                     or row["input_hash"] != sha256({"operation_id": run, "run_id": run, "fixture": "base-source"})
-                    or not 0 <= row["finished"] - row["started"] <= 10):
+                    or not 0 <= row["finished"] - row["started"] <= 180):
                 return blocked
             gateways = [event for event in records if event.get("source") == "gateway"
                         and event.get("request_id") == row["request_id"]]
@@ -241,11 +285,13 @@ def evaluate_http_timeout(check, report):
                             client_request_id=row["operation_id"])):
                     return blocked
                 snapshots[side][row["container"]] = row["sha256"]
-        valid = (timer["monotonic_deadline"] - timer["monotonic_started"] == 180
+        valid = (timer["monotonic_deadline"] - timer["monotonic_started"] == (10 if acceptance else 180)
             and timer["monotonic_finished"] >= timer["monotonic_deadline"]
-            and actual["response"] == "invocation_ambiguous_reconcile_only"
+            and actual["response"] == ("indeterminate" if acceptance else "invocation_ambiguous_reconcile_only")
             and hash_value(actual["before_sha256"]) and actual["before_sha256"] == actual["after_sha256"]
-            and observations[0]["sha256"] == observations[1]["sha256"] and snapshots["before"] == snapshots["after"])
+            and (observations[1]["sha256"] == sha256({"error": "indeterminate", "complete": False}) if acceptance
+                 else observations[0]["sha256"] == observations[1]["sha256"])
+            and snapshots["before"] == snapshots["after"])
         return blocked | {"status": "pass" if valid else "fail",
             "reason": "actual_http_expiry_without_replay_verified" if valid else "http_timeout_or_no_effect_failed"}
     except (KeyError, TypeError, ValueError, AttributeError, IndexError):

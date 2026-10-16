@@ -22,7 +22,7 @@ METHODS = {"SendMessage", "SendMessage.cached", "GetTask", "discovery", "status"
            "tools/call", "search_airports", "lookup_airport", "list_runways", "chat.completions",
            "storage.read", "storage.write", "storage.lease", "execution", "probe",
            "mcp.GET", "mcp.DELETE", "ping", "tools/list", "notifications/initialized", "authorization.denied",
-           "model.direct", "status.observed", "poll.observed", "safe_read.timeout", "model.timeout",
+           "model.direct", "status.observed", "poll.observed", "safe_read.timeout", "model.timeout", "acceptance.timeout",
            "invocation.observed", "reference.observed", "exporter.health"}
 FACTS = {"generation", "read_attempts", "agent_executions", "model_attempts", "input_tokens",
          "output_tokens", "tokens", "deadline", "retry", "artifact_count", "sha256",

@@ -78,12 +78,18 @@ class HttpTimeoutOracleTests(unittest.TestCase):
             self.assertNotEqual(evaluate_check(changed, evidence)["status"], "pass", mutation)
 
     def test_actual_provider_uses_allocated_operator_key_original_run_and_twelve_sdk_reads(self):
+        self._provider()
+
+    def test_acceptance_provider_uses_owned_ready_revision_and_restores_normal_template(self):
+        self._provider(acceptance=True)
+
+    def _provider(self, *, acceptance=False):
         from azure.core.credentials import AccessToken
         from azure.core.pipeline.transport import HttpResponse, HttpTransport
         from azure.core.utils import CaseInsensitiveDict
         from azure.storage.blob import BlobClient
         from citadel.acceptance.http_timeout import HttpTimeoutAcceptance
-        requests, reads = [], []
+        requests, reads, arm = [], [], []
         deadline = time.time() + 900
         root = {"state": "succeeded", "run_id": "completed", "operation_id": "completed",
                 "deadline": deadline, "result": {"sha256": "a" * 64},
@@ -132,6 +138,18 @@ class HttpTimeoutOracleTests(unittest.TestCase):
                 return AccessToken("local-external-wire-fixture", 9999999999)
 
         class Native:
+            template = {"containers": [{"image": "registry/allocated@sha256:" + "a" * 64,
+                "command": ["python", "-m", "citadel.runtime"], "env": []}]}
+
+            def rest(self, method, resource, api, body=None):
+                arm.append((method, resource, api, body))
+                if method == "patch":
+                    self.template = copy.deepcopy(body["properties"]["template"])
+                suffix = self.template.get("revisionSuffix", "original")
+                return {"properties": {"template": copy.deepcopy(self.template),
+                    "latestRevisionName": "deployment-candidate-planner--" + suffix,
+                    "latestReadyRevisionName": "deployment-candidate-planner--" + suffix}}
+
             def blob(self, account, container, name):
                 return BlobClient(account, container, name, credential=Credential(), transport=Transport(),
                                   api_version="2026-10-06", retry_total=0)
@@ -139,14 +157,21 @@ class HttpTimeoutOracleTests(unittest.TestCase):
         async def transport(request):
             requests.append(request)
             body = json.loads(request.content)
+            if acceptance and len(requests) == 2:
+                return httpx.Response(200, headers={"apim-request-id": "cached-2"},
+                    json={"jsonrpc": "2.0", "id": body["id"], "result": {"message": {
+                        "messageId": "timeout", "role": "ROLE_AGENT",
+                        "parts": [{"text": json.dumps({"error": "indeterminate", "complete": False})}]}}})
             return httpx.Response(200, headers={"apim-request-id": "cached-" + str(len(requests))},
                 json={"jsonrpc": "2.0", "id": body["id"], "result": {"task": {
                     "id": "completed", "contextId": "completed", "status": {"state": "TASK_STATE_COMPLETED"}}}})
 
         run = {"state": "succeeded", "fixture": "base-source", "deadline": deadline, "reads": 2}
-        lifecycle = SimpleNamespace(value={"inventory": [
+        lifecycle = SimpleNamespace(id="deployment", value={"inventory": [
             "/subscriptions/s/resourceGroups/g/providers/Microsoft.Storage/storageAccounts/allocated"],
-            "runs": {"completed": run}, "outputs": {"gatewayUrl": "https://gateway.example"}},
+            "runs": {"completed": run}, "outputs": {"gatewayUrl": "https://gateway.example",
+                "appInventory": [{"app": "/subscriptions/s/resourceGroups/g/providers/Microsoft.App/containerApps/deployment-candidate-planner",
+                                  "image": "registry/allocated@sha256:" + "a" * 64}]}},
             state=SimpleNamespace(save=lambda: None), native=Native(), credentials=lambda: {
                 "callerStates": {"operator": "active"}, "callerKeys": {"operator": {"primary": "only-own-key"}}})
         report = {"run_id": "suite", "operation_ids": ["completed"],
@@ -154,17 +179,23 @@ class HttpTimeoutOracleTests(unittest.TestCase):
         client = httpx.AsyncClient
         with patch("citadel.acceptance.http_timeout.httpx.AsyncClient",
                    lambda **kwargs: client(transport=httpx.MockTransport(transport), **kwargs)):
-            HttpTimeoutAcceptance(lifecycle).execute(report)
-        phase = report["http_timeout_phase"]
-        self.assertEqual((len(requests), len(reads), phase["read_attempts"]), (2, 12, 12))
+            HttpTimeoutAcceptance(lifecycle, acceptance=acceptance).execute(report)
+        phase = report["acceptance_timeout_phase" if acceptance else "http_timeout_phase"]
+        self.assertEqual((len(requests), len(reads), phase["read_attempts"]), (2, 12, 16 if acceptance else 12))
         self.assertEqual((phase["state"], run["state"], run["reads"]), ("observed", "succeeded", 2))
-        self.assertGreaterEqual(phase["timer"]["monotonic_finished"] - phase["timer"]["monotonic_started"], 180)
+        if acceptance:
+            self.assertEqual(phase["response"], "indeterminate")
+            self.assertEqual(len([row for row in arm if row[0] == "patch"]), 2)
+            self.assertEqual(lifecycle.native.template["containers"][0]["env"], [])
+            self.assertTrue(all(row[2] == "2025-01-01" for row in arm))
+        else:
+            self.assertGreaterEqual(phase["timer"]["monotonic_finished"] - phase["timer"]["monotonic_started"], 180)
         self.assertEqual(phase["before_sha256"], phase["after_sha256"])
         self.assertTrue(all(row.method == "GET" for row in reads))
         self.assertTrue(all(row.headers["Ocp-Apim-Subscription-Key"] == "only-own-key" for row in requests))
         self.assertNotIn("only-own-key", str(report))
         with self.assertRaises(Blocked):
-            HttpTimeoutAcceptance(lifecycle).execute(report)
+            HttpTimeoutAcceptance(lifecycle, acceptance=acceptance).execute(report)
         self.assertEqual((len(requests), len(reads)), (2, 12))
 
 

@@ -173,6 +173,9 @@ class Harness:
                     report["finished"] = time.time()
                     self.save(report)
                     from .http_timeout import HttpTimeoutAcceptance
+                    HttpTimeoutAcceptance(self.lifecycle, acceptance=True).execute(report)
+                    report["finished"] = time.time()
+                    self.save(report)
                     HttpTimeoutAcceptance(self.lifecycle).execute(report)
                     report["finished"] = time.time()
                     self.save(report)
@@ -275,6 +278,7 @@ class Harness:
             self._replace(report, PollAcceptance.evaluate(report))
             from .http_timeout import HttpTimeoutAcceptance
             self._replace(report, HttpTimeoutAcceptance.evaluate(report))
+            self._replace(report, HttpTimeoutAcceptance.evaluate(report, acceptance=True))
             from .model_harness import ModelAcceptance
             for result in ModelAcceptance.evaluate(report, report["evidence"]):
                 self._replace(report, result)
