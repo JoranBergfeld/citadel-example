@@ -78,7 +78,7 @@ class GovernedModel:
         request.headers.update(correlation_headers())
 
     async def _response(self, response):
-        facts = {"started": response.request.extensions["citadel_model_started"], "finished": self.clock()}
+        facts = {"started": response.request.extensions["citadel_model_started"]}
         if response.status_code == 200:
             content = await response.aread()
             if len(content) > 1024 * 1024:
@@ -95,6 +95,7 @@ class GovernedModel:
                                  tokens=usage["total_tokens"])
             except ValueError:
                 pass
+        facts["finished"] = self.clock()
         emit("chat.completions",
              request_id=gateway_request_id(response.headers),
              status_code=int(response.status_code), facts=facts,

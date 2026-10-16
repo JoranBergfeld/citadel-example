@@ -16,16 +16,23 @@ from citadel.runtime.model import GovernedModel
 
 class ModelReceiptTests(unittest.IsolatedAsyncioTestCase):
     async def test_real_framework_model_response_exports_only_correlated_usage_and_target(self):
-        rows, requests = [], []
+        rows, requests, clock = [], [], [time.time()]
 
         async def response(request):
             requests.append(request)
-            return httpx2.Response(200, headers={"apim-request-id": "actual-model-gateway-receipt"},
-                json={"id": "model-response", "object": "chat.completion", "created": 0,
+            document = {"id": "model-response", "object": "chat.completion", "created": 0,
                     "model": "citadel-gpt-41-mini", "choices": [{"index": 0,
                         "message": {"role": "assistant", "content": "PRIVATE MODEL PROSE"},
                         "finish_reason": "stop"}],
-                    "usage": {"prompt_tokens": 17, "completion_tokens": 4, "total_tokens": 21}})
+                    "usage": {"prompt_tokens": 17, "completion_tokens": 4, "total_tokens": 21}}
+
+            class Stream(httpx2.AsyncByteStream):
+                async def __aiter__(self):
+                    clock[0] += 2
+                    yield json.dumps(document).encode()
+
+            return httpx2.Response(200, headers={"apim-request-id": "actual-model-gateway-receipt"},
+                                   stream=Stream())
 
         accounting = Accounting(MemoryLedger(), workload="candidate-planner")
         await accounting.start_run("run1", deadline=time.time() + 120)
@@ -37,7 +44,8 @@ class ModelReceiptTests(unittest.IsolatedAsyncioTestCase):
                       client_id="22222222-2222-2222-2222-222222222222", connection_string="fixture")
             async with httpx2.AsyncClient(transport=httpx2.MockTransport(response)) as client:
                 model = GovernedModel("candidate-planner", "https://gateway.example",
-                                      "allocated-test-key", "citadel-gpt-41-mini", http_client=client)
+                                      "allocated-test-key", "citadel-gpt-41-mini", http_client=client,
+                                      clock=lambda: clock[0])
                 with correlate("run1", "execution1", "candidate-planner"):
                     result = await model.explain(accounting, "run1", "execution1", {"private": "PROMPT"})
                 await model.close()
@@ -46,7 +54,7 @@ class ModelReceiptTests(unittest.IsolatedAsyncioTestCase):
         row = next(row for row in rows if row["method"] == "chat.completions")
         self.assertEqual({key: row["facts"].get(key) for key in ("input_tokens", "output_tokens", "tokens")},
                          {"input_tokens": 17, "output_tokens": 4, "tokens": 21})
-        self.assertLessEqual(row["facts"]["started"], row["facts"]["finished"])
+        self.assertEqual(row["facts"]["finished"] - row["facts"]["started"], 2)
         self.assertEqual(row["run_id"], "run1")
         self.assertEqual(row["operation_id"], "execution1")
         self.assertEqual(row["request_id"], "actual-model-gateway-receipt")
