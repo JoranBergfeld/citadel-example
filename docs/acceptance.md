@@ -573,9 +573,21 @@ permit. Global exclusion is released only after both definite responses, client
 closure and the existing quiet window; missing/ambiguous response data retains
 exclusion. Normal workflow grants remain unchanged.
 
-Implemented providers currently cover 271 of 278 canonical checks; this is not
-a cloud pass count. Seven still need actual drivers: the three rotation families,
-process restart, and the 10/180/900-second acceptance/A2A/workflow
+The A2A HTTP control reuses the completed comparison through two actual
+authenticated cached `SendMessage` responses under the operator's own key.
+It receives the complete second response, then withholds its callback until the
+unchanged 180-second production client timer expires. Twelve independent Blob
+SDK reads bracket the traffic; original operation tickets and deadline are never
+replenished. A persisted local control intent blocks another run or ambiguous
+replay. Cached backend observations are explicitly separate from new execution
+acceptances. The sanitized oracle requires both gateway/backend receipts,
+independently observed root bindings, the actual monotonic timer and unchanged
+business state. A shorter inherited timeout or a transport error is not proof
+of the full 180-second boundary.
+
+Implemented providers currently cover 272 of 278 canonical checks; this is not
+a cloud pass count. Six still need actual drivers: the three rotation families,
+process restart, and the 10/900-second acceptance/workflow
 boundaries. These implementation gaps keep the full gate blocked.
 
 1. Perform deployed validation of the implemented telemetry configuration,

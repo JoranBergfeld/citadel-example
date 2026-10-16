@@ -95,6 +95,10 @@ class OwnerRouteRuntimeTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(status["state"], "succeeded")
             product = await planner.product("actual-comparison", time.time() + 30)
             self.assertEqual(product["status"], "complete")
+            accepted_count = sum(row["method"] == "SendMessage" for row in records)
+            await planner.invoke("actual-comparison", "base-source", time.time() + 30)
+            self.assertEqual(sum(row["method"] == "SendMessage" for row in records), accepted_count)
+            self.assertEqual(sum(row["method"] == "SendMessage.cached" for row in records), 2)
             documents = {role: (await ledger.read())[0] for role, ledger in ledgers.items()}
             documents["findings"] = (await findings.read())[0]
             before_drafts = (await drafts.read())[0]

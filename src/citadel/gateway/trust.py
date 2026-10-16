@@ -170,7 +170,8 @@ class GatewayTrust:
 
         async def observed_send(message):
             if message["type"] == "http.response.start":
-                emit(method, request_id=request_id, status_code=int(message["status"]))
+                emit("SendMessage.cached" if method == "SendMessage" and scope.get("citadel.cached") else method,
+                     request_id=request_id, status_code=int(message["status"]))
             await send(message)
 
         with correlate(run_id, operation_id, caller):

@@ -18,7 +18,7 @@ from uuid import UUID, uuid4
 
 ACTORS = {"operator", "candidate-planner", "evidence-assessor", "release-reviewer",
           "briefing-author", "reference-data"}
-METHODS = {"SendMessage", "GetTask", "discovery", "status", "findings-read", "initialize",
+METHODS = {"SendMessage", "SendMessage.cached", "GetTask", "discovery", "status", "findings-read", "initialize",
            "tools/call", "search_airports", "lookup_airport", "list_runways", "chat.completions",
            "storage.read", "storage.write", "storage.lease", "execution", "probe",
            "mcp.GET", "mcp.DELETE", "ping", "tools/list", "notifications/initialized", "authorization.denied",

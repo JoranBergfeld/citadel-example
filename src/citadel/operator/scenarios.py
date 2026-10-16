@@ -45,6 +45,7 @@ class PlannerClient:
         self.clock, self.status_receipt = clock, None
         self.mode, self.sent = None, False
         self.invoking, self.invocation_receipt = False, None
+        self.timeout_receipt = None
         http.event_hooks.setdefault("request", []).insert(0, self.guard)
         http.event_hooks.setdefault("response", []).append(self.received)
         self.card = AgentCard(
@@ -76,10 +77,18 @@ class PlannerClient:
     async def exchange(self, path, deadline, callback, *, invocation=False):
         self.mode, self.sent = self.gateway + path, False
         self.invoking = invocation
+        self.timeout_receipt = None
+        started, monotonic_started = self.clock(), asyncio.get_running_loop().time()
+        duration = max(0, min(180 if invocation else 30, deadline - started))
+        timer = asyncio.timeout_at(monotonic_started + duration)
         try:
-            async with asyncio.timeout(max(0, min(180 if invocation else 30, deadline - self.clock()))):
+            async with timer:
                 return await callback()
         except (httpx.RequestError, TimeoutError, A2AClientTimeoutError):
+            if timer.expired():
+                self.timeout_receipt = {"started": started, "finished": self.clock(),
+                    "deadline": deadline, "monotonic_started": monotonic_started,
+                    "monotonic_deadline": timer.when(), "monotonic_finished": asyncio.get_running_loop().time()}
             raise Blocked("invocation_ambiguous_reconcile_only" if invocation else "status_unavailable") from None
         finally:
             self.mode = None

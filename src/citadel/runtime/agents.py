@@ -344,6 +344,7 @@ class TrustedContext(ServerCallContextBuilder):
         return ServerCallContext(state={"caller": request.scope["citadel.caller"],
                                         "action": request.scope["citadel.action"],
                                         "request_id": request.scope["citadel.request_id"],
+                                        "scope": request.scope,
                                         "headers": {"a2a-version": request.headers.get("a2a-version", "")}})
 
 
@@ -364,7 +365,10 @@ class DurableHandler(RequestHandler):
                     status = await self.runtime.accept(
                         context.state["caller"], payload,
                         recover=MessageToDict(params.metadata).get("citadel_recovery") is True)
-                    emit("SendMessage", request_id=context.state["request_id"], status_code=200,
+                    if status["state"] == "succeeded":
+                        context.state["scope"]["citadel.cached"] = True
+                    emit("SendMessage.cached" if status["state"] == "succeeded" else "SendMessage",
+                         request_id=context.state["request_id"], status_code=200,
                          facts={"business_state": status["state"], "deadline": status["deadline"],
                                 "input_hash": status["input_hash"], "accepted_operation_id": status["operation_id"]})
                 if status["state"] != "pending":

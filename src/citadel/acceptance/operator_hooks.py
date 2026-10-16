@@ -172,6 +172,10 @@ class Harness:
                                 "reason": "working_control_and_no_effect_proof_required", "actual": observed})
                     report["finished"] = time.time()
                     self.save(report)
+                    from .http_timeout import HttpTimeoutAcceptance
+                    HttpTimeoutAcceptance(self.lifecycle).execute(report)
+                    report["finished"] = time.time()
+                    self.save(report)
             if all(run["state"] in ("succeeded", "failed_no_commit")
                    for run in self.lifecycle.value["runs"].values()):
                 from .model_harness import ModelAcceptance
@@ -269,6 +273,8 @@ class Harness:
             self._replace(report, collect_projection(report))
             from .poll_limits import PollAcceptance
             self._replace(report, PollAcceptance.evaluate(report))
+            from .http_timeout import HttpTimeoutAcceptance
+            self._replace(report, HttpTimeoutAcceptance.evaluate(report))
             from .model_harness import ModelAcceptance
             for result in ModelAcceptance.evaluate(report, report["evidence"]):
                 self._replace(report, result)
