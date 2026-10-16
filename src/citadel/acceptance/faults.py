@@ -41,6 +41,18 @@ class OperationProbes:
         self.clock, self.sleep = clock, sleep
         self.ops = Operations(ledger, workload=workload, clock=clock)
         self.deadline = min(deadline or clock() + 900, clock() + 900)
+        self._wait_deadline = time.monotonic() + max(0, self.deadline - clock())
+
+    async def _wait_until(self, instant):
+        if instant >= self.deadline:
+            raise OperationError("deadline", "Insufficient remaining probe observation window")
+        async with asyncio.timeout(max(0, self._wait_deadline - time.monotonic())):
+            for _ in range(900):
+                remaining = instant - self.clock()
+                if remaining <= 0:
+                    return
+                await self.sleep(min(1, max(0.01, remaining)))
+        raise OperationError("deadline", "Probe clock did not reach its observation boundary")
 
     async def safe_read_recovery(self, operation_id=None):
         return await self._safe_read(operation_id, dropped=2)
@@ -98,7 +110,7 @@ class OperationProbes:
                                     worker=uuid4().hex, lease_seconds=180)
         before, _ = await self.ledger.read()
         key = operation_key(self.workload, "acceptance", operation)
-        await self.sleep(max(0, deadline - self.clock()) + 1)
+        await self._wait_until(deadline + 1)
         response = await rejected(lambda: self.ops.complete(owner, product={"probe": "late"}))
         after, _ = await self.ledger.read()
         return {"operation_id": operation, "state": after["operations"][key]["state"],
@@ -173,7 +185,7 @@ class OperationProbes:
                               run_id=self.run_id, deadline=self.deadline)
         owner = await self.ops.claim(self.workload, "acceptance", operation,
                                     worker=uuid4().hex, lease_seconds=20)
-        await self.sleep(21)
+        await self._wait_until(self.clock() + 21)
         fenced = await self.ops.fence(self.workload, "acceptance", operation)
         stale = await rejected(lambda: self.ops.complete(owner, product={"probe": "stale"}))
         retried = await self.ops.retry(self.workload, "acceptance", operation)

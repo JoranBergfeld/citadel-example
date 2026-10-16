@@ -115,7 +115,10 @@ requires its four independently verified, actually executed storage denials.
   Read faults discard actual successful provider responses; they never manufacture
   successful responses or authorization outcomes. Real one-/two-second backoffs
   and the three-target-read ceiling are checked separately from the shared durable
-  512-ticket control envelope. The deadline probe waits on the real clock.
+  512-ticket control envelope. Lease/deadline probes observe the actual wall-clock
+  boundary rather than assuming one monotonic sleep crossed it. Their finite
+  condition waits also retain the original phase's monotonic time ceiling;
+  stalled clocks block without replaying an operation or extending its deadline.
 - Each fault publishes its metadata once through the actual Blob SDK; its service
   receipt, physical client-request ID and hash-bound application record correlate
   with storage logs. The operator independently reads the persisted ledger and

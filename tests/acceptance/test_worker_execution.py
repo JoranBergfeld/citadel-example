@@ -243,7 +243,7 @@ class WorkerExecutionTests(unittest.IsolatedAsyncioTestCase):
                     side_effect=AssertionError("Fault probes must not fetch subscription secrets"))):
             observations = await run_gateway_matrix(config, request)
         result = json.loads(wire.blobs["/planner-operations/acceptance/fault-worker/observations.json"])
-        self.assertEqual(result["state"], "complete")
+        self.assertEqual(result["state"], "complete", result)
         self.assertEqual(len(observations), 6)
         self.assertEqual(len(bind_operation_result(result, run_id=request["run_id"],
             principal=observations[0]["runtime_identity"], account=config.blob)), 6)

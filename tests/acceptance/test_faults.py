@@ -8,6 +8,46 @@ from citadel.operations.limits import Accounting
 
 
 class FaultTests(unittest.IsolatedAsyncioTestCase):
+    async def test_fault_waits_observe_wall_deadlines_when_sleep_clock_advances_faster(self):
+        for method in ("fenced_retry", "deadline_no_late_effect"):
+            with self.subTest(method=method):
+                now, sleeps = [1000.0], []
+
+                async def sleep(seconds):
+                    sleeps.append(seconds)
+                    now[0] += seconds / 2
+
+                probe = OperationProbes(MemoryLedger(clock=lambda: now[0]),
+                    workload="candidate-planner", enabled=True, run_id="clock-skew",
+                    clock=lambda: now[0], sleep=sleep)
+                result = await getattr(probe, method)(operation_id="clock-control")
+                self.assertGreater(len(sleeps), 1)
+                if method == "fenced_retry":
+                    self.assertEqual(result["state"], "succeeded")
+                    self.assertEqual(result["stale"], "fenced")
+                    self.assertEqual(result["artifact_count"], 1)
+                else:
+                    self.assertEqual(result["response"], "fenced")
+                    self.assertGreater(result["observed"], result["deadline"])
+                    self.assertEqual(result["artifact_count"], 0)
+
+    async def test_stalled_probe_clock_has_finite_waits_and_never_replays_owner(self):
+        sleeps = []
+
+        async def sleep(seconds):
+            sleeps.append(seconds)
+
+        probe = OperationProbes(MemoryLedger(clock=lambda: 1000),
+            workload="candidate-planner", enabled=True, run_id="clock-stalled",
+            clock=lambda: 1000, sleep=sleep)
+        with self.assertRaises(OperationError) as caught:
+            await probe.fenced_retry(operation_id="clock-control")
+        self.assertEqual(caught.exception.code, "deadline")
+        self.assertEqual(len(sleeps), 900)
+        status = await probe.ops.status("candidate-planner", "acceptance", "clock-control")
+        self.assertEqual(status["state"], "running")
+        self.assertEqual(status["generation"], 1)
+
     async def test_expired_real_ownership_cannot_commit_a_late_product(self):
         now = [1000.0]
 
