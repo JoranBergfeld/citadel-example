@@ -31,6 +31,9 @@ def evaluate_check(check, report):
     if check["check_id"] == "projection.private-fields-absent":
         from .scenario_proof import evaluate_projection
         return evaluate_projection(check, report)
+    if check["check_id"].startswith("inventory."):
+        from .inventory import evaluate_inventory
+        return evaluate_inventory(check, report)
     observation, control = actual.get("observation"), actual.get("control")
     operations = report.get("operation_ids", [])
     if (not isinstance(observation, dict) or not isinstance(control, dict)

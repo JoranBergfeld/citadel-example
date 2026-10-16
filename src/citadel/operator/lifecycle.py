@@ -504,6 +504,7 @@ class Lifecycle:
         if len({app["identity"] for app in apps.values()}) != 5:
             raise Blocked("distinct_workload_identities_required")
         teams = {"reference": "Reference Data", "evidence": "Evidence Review", "planning": "Exercise Planning"}
+        observed_apps = {}
         for record in environments:
             properties = record["properties"]["customProperties"]
             app = apps[record["name"]]
@@ -519,6 +520,7 @@ class Lifecycle:
                     or record["properties"].get("server", {}).get("type") != "Azure compute service"):
                 raise Blocked("api_center_identity_or_gateway_metadata_mismatch")
             deployed = self.native.rest("get", app["app"], "2025-01-01")
+            observed_apps[record["name"]] = deployed
             containers = deployed["properties"]["template"]["containers"]
             environment = {e["name"]: e.get("value") for e in containers[0]["env"]}
             if (deployed["properties"]["provisioningState"] != "Succeeded"
@@ -539,7 +541,9 @@ class Lifecycle:
             raise Blocked("findings_host_environment_mismatch")
         self.value["inventoryMetadataVerified"] = True
         self.state.save()
-        self.require_plan_observation()
+        plan = self.require_plan_observation()
+        return {"center": center, "environments": environments, "applications": observed_apps,
+                "finding": finding, "deployment": deployment, "plan": plan}
 
     def collect(self):
         deadline = time.monotonic() + 600

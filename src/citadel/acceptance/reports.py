@@ -19,6 +19,7 @@ source sources request_id control_request_id caller runtime_identity gateway_ide
 scenario_inputs gateway_targets storage_targets scenario_oracles
 assessed airport_ident assessment_sha256 selected_identifiers pool_count pool_sha256 lookup_sha256 runways_sha256
 brief read_scopes observations bypass
+inventory_inputs environments applications created rest_sha256 plan inventory
 control_identity
 observation control before after target container action etag suite_id client_request_id
 method event_id facts certificate_sha256 generation read_attempts agent_executions upstream_attempts backend_dispatched

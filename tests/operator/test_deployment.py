@@ -9,6 +9,7 @@ import sys
 from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
+from uuid import UUID
 
 from citadel.evidence.preparation import prepare_bundle
 from citadel.operator.native import Native
@@ -152,7 +153,9 @@ class AzureFixture:
             prefix = self.root + teams[name] + "/providers/"
             aid = prefix + "Microsoft.App/containerApps/test19-" + name
             identity = prefix + "Microsoft.ManagedIdentity/userAssignedIdentities/test19-" + name
-            self.outputs["appInventory"].append({"app": aid, "identity": identity, "image": app["image"]})
+            principal, client = str(UUID(int=len(self.environments) + 1)), str(UUID(int=len(self.environments) + 11))
+            self.outputs["appInventory"].append({"app": aid, "identity": identity, "image": app["image"],
+                                                 "identityPrincipalId": principal, "identityClientId": client})
             self.environments.append({"name": name, "properties": {"customProperties": {
                 "workload": aid, "identity-resource-id": identity,
                 "gateway-address": self.gateway + "/" + name + ("/mcp" if name == "reference-data" else "/a2a"),
@@ -165,6 +168,8 @@ class AzureFixture:
                 "properties": {"provisioningState": "Succeeded", "template": {"containers": [{
                     "image": app["image"], "command": app["command"], "args": app["args"],
                     "env": [{"name": "CITADEL_TARGET", "value": name},
+                            {"name": "AZURE_PRINCIPAL_ID", "value": principal},
+                            {"name": "AZURE_CLIENT_ID", "value": client},
                             {"name": "CITADEL_MODEL_TOKENS_PER_MINUTE", "value": str(app["modelTokensPerMinute"])}]}]}}}
 
     def collection(self, resource, api):
@@ -403,6 +408,27 @@ class DeploymentTests(test_cli.CliCase):
             self.observe_fixture_plan()
         code, report = self.deploy()
         self.assertEqual((code, report.get("status")), (0, "deployed_unverified"), report)
+
+    def test_inventory_acceptance_uses_actual_queried_documents_and_bound_private_plan(self):
+        from citadel.acceptance.inventory import inventory_inputs, observe_inventory, CHECKS
+        from citadel.acceptance.proof_gate import evaluate_check
+        from citadel.evidence.manifests import sha256
+        from citadel.operator.lifecycle import Lifecycle
+        from citadel.operator.state import State
+        self.assert_deployed()
+        with State(self.state).locked() as state:
+            lifecycle = Lifecycle(state, adapter=self.fixture)
+            documents = lifecycle.verify_inventory()
+            self.assertIsInstance(documents, dict)
+            self.assertEqual(len(documents["applications"]), 5)
+            self.assertEqual(documents["center"]["id"], self.fixture.center)
+            expected = inventory_inputs(lifecycle)
+            actual = observe_inventory(lifecycle, documents)
+            report = {"evidence": [], "inventory_inputs": expected, "inputs": {"inventory": sha256(expected)},
+                      "runtime_identities": {row["name"]: row["runtime_identity"] for row in expected["applications"]}}
+            for identifier in CHECKS:
+                check = {"check_id": identifier, "expected": "evidence", "actual": actual}
+                self.assertEqual(evaluate_check(check, report)["status"], "pass")
 
     def test_foundation_actual_created_registry_digest_runtime_and_fifteen_bootstrap_objects(self):
         self.observe_fixture_plan()

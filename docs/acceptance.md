@@ -37,6 +37,15 @@ requires its four independently verified, actually executed storage denials.
   private-draft projections are checked without exporting drafts or prose.
   The sanitized report repeats these oracles; human narrative review still binds
   the exact private returned product, never a synthesized or inferred signoff.
+- Inventory checks consume the actual ARM documents already queried by the
+  lifecycle; they do not infer proof from `inventoryMetadataVerified`. Exactly
+  five truthful environment records, actual attached identities, assigned
+  principal/client configuration, immutable image/command and real REST findings
+  metadata are independently compared with fingerprint-bound expectations.
+  Duplicated environments or Agent-ID mislabelling fail. The Free-plan check uses
+  only the existing validated private human portal proof, its evidence hash,
+  request/resource-incarnation binding and observation time. An absent SKU,
+  a template label or provider provisioning success cannot establish Free.
 - `denied-bypass-controls` executes the actual storage providers and their permitted
   controls. It independently re-evaluates both planning identities' private-draft
   reads and finding overwrites, including unchanged targets and queried application/

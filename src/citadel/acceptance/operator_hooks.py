@@ -39,10 +39,12 @@ def fingerprints(lifecycle):
     if not images or any("@sha256:" not in image for image in images):
         raise Blocked("acceptance_immutable_images_required")
     from .scenario_proof import scenario_inputs
+    from .inventory import inventory_inputs
     from citadel.runtime.configuration import OPERATIONS
     source = ReferenceData.from_bundle(lifecycle.config["bundleDir"])
     provenance = source.provenance
     scenarios = scenario_inputs(source)
+    inventory = inventory_inputs(lifecycle)
     accounts = [resource for resource in lifecycle.value["inventory"]
         if "/providers/Microsoft.Storage/storageAccounts/" in resource and "/blobServices/" not in resource]
     if len(accounts) != 1:
@@ -53,8 +55,10 @@ def fingerprints(lifecycle):
               "manifest": actual, "image": [image.split("@", 1)[1] for image in images],
               "protocols": pins["protocols"], "model": pins["model"],
               "inputs": {"bundle": actual, "scenario_oracles": sha256(scenarios),
+                         "inventory": sha256(inventory),
                          **{key: sha256(value) for key, value in provenance.items()}},
               "scenario_inputs": scenarios,
+              "inventory_inputs": inventory,
               "gateway_targets": {actor: hashlib.sha256(
                   (gateway + "/" + actor + ("/mcp" if actor == "reference-data" else "/a2a")).encode()).hexdigest()
                   for actor in (*OPERATIONS, "reference-data")},
@@ -94,9 +98,10 @@ class Harness:
         proof = fingerprints(self.lifecycle)
         source = ReferenceData.from_bundle(self.lifecycle.config["bundleDir"])
         source.fixture_gate()
-        self.lifecycle.verify_inventory()
+        observed_inventory = self.lifecycle.verify_inventory()
         for app in self.lifecycle.value["outputs"]["appInventory"]:
-            deployed = self.lifecycle.native.rest("get", app["app"], "2025-01-01")
+            deployed = observed_inventory["applications"][app["app"].rsplit("/", 1)[-1].removeprefix(
+                self.lifecycle.id + "-")]
             environment = {e["name"]: e.get("value")
                            for e in deployed["properties"]["template"]["containers"][0]["env"]}
             if (environment.get("AZURE_PRINCIPAL_ID") != app["identityPrincipalId"]
@@ -115,8 +120,11 @@ class Harness:
         self.order.append(run_id)
         self.save(report)
         try:
-            self._set(report, "inventory.five-environments-and-rest", "pass", "provider_inventory_verified")
-            self._set(report, "inventory.actual-free-plan", "pass", "bound_human_portal_observation")
+            from .inventory import CHECKS, observe_inventory, evaluate_inventory
+            actual_inventory = observe_inventory(self.lifecycle, observed_inventory)
+            for identifier in CHECKS:
+                check = {"check_id": identifier, "expected": "evidence", "actual": actual_inventory}
+                self._replace(report, check | evaluate_inventory(check, report))
             from citadel.operator.scenarios import scenario_command
             for scenario in FIXTURES:
                 operation = uuid4().hex
