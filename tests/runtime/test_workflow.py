@@ -181,6 +181,19 @@ class WorkflowTests(unittest.IsolatedAsyncioTestCase):
             json.loads(body).get("method") == "SendMessage"
             for _, _, path, body in exchanges if path == "/a2a"), 42)
 
+    async def test_wall_clock_receipt_rejection_does_not_abort_twenty_member_workflow_or_add_reads(self):
+        from itertools import count
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        ticks = count(1000, -1)
+        with patch("citadel.runtime.network.time", SimpleNamespace(time=lambda: next(ticks))):
+            output, models, _ = await self.run_case("no-alternative", count=20)
+        self.assertEqual(output["status"], "bounded_pool_exhausted")
+        self.assertEqual(len(output["assessed"]), 20)
+        self.assertEqual(len(models), 41)
+        self.assertLessEqual(self.last_read_count, 512)
+        self.assertNotIn("brief", output)
+
     async def test_completed_brief_must_match_the_exact_atomic_status_reference(self):
         output, _, _ = await self.run_case("base-source", expected_state="indeterminate",
                                            corrupt_brief=True)

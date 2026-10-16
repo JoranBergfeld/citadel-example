@@ -9,6 +9,21 @@ from tests.acceptance.test_route_context import ledgers
 
 
 class WorkflowRouteTests(unittest.TestCase):
+    def test_unusable_wall_clock_receipt_is_not_evidence_and_does_not_abort_valid_work(self):
+        from citadel.acceptance.workflow_routes import observe_status, status_controls
+        documents = ledgers()
+        context = build_route_context(documents, run_ids=["real-run"])
+        body = documents["evidence-assessor"]["operations"]["candidate-planner/invoke/assess2"]
+        response = httpx.Response(200,
+            request=httpx.Request("GET", "https://gateway.example/evidence-assessor/operations/assess2"),
+            headers={"apim-request-id": "actual-service"}, json=body)
+        for finished in (99, 131, float("nan"), float("inf")):
+            with self.subTest(finished=finished):
+                record = observe_status(response, caller="candidate-planner", target="evidence-assessor",
+                    run_id="real-run", operation_id="parent1", started=100, finished=finished)
+                self.assertIsNone(record)
+                self.assertEqual(status_controls([], context), [])
+
     def test_invocation_receipt_requires_real_task_identity_and_matching_completed_source(self):
         from a2a.types import SendMessageResponse, Task, TaskStatus, TaskState
         from google.protobuf.json_format import MessageToDict

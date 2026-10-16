@@ -37,16 +37,19 @@ def _observation(record):
 def observe_status(response, *, caller, target, run_id, operation_id, started, finished):
     if target not in PAIRS or caller != PAIRS[target] or response.status_code != 200:
         return None
-    body = response.json()
-    if not isinstance(body, dict) or body.get("state") != "succeeded" or body.get("run_id") != run_id:
+    try:
+        body = response.json()
+        if not isinstance(body, dict) or body.get("state") != "succeeded" or body.get("run_id") != run_id:
+            return None
+        record = {"method": "status.observed", "run_id": run_id, "operation_id": operation_id,
+            "caller": caller, "request_id": gateway_request_id(response.headers), "status_code": response.status_code,
+            "target": hashlib.sha256(str(response.request.url).encode()).hexdigest(),
+            "facts": {"probe_id": f"route.{caller}.{target}.status", "read_operation_id": body["operation_id"],
+                "input_hash": body["input_hash"], "result_sha256": sha256(body["result"]),
+                "started": started, "finished": finished}}
+        observation = _observation(record)
+    except (ValueError, TypeError, KeyError, AttributeError):
         return None
-    record = {"method": "status.observed", "run_id": run_id, "operation_id": operation_id,
-        "caller": caller, "request_id": gateway_request_id(response.headers), "status_code": response.status_code,
-        "target": hashlib.sha256(str(response.request.url).encode()).hexdigest(),
-        "facts": {"probe_id": f"route.{caller}.{target}.status", "read_operation_id": body["operation_id"],
-            "input_hash": body["input_hash"], "result_sha256": sha256(body["result"]),
-            "started": started, "finished": finished}}
-    observation = _observation(record)
     record["facts"]["sha256"] = sha256(observation)
     with correlate(run_id, operation_id, caller):
         emit("status.observed", request_id=record["request_id"], status_code=record["status_code"],

@@ -82,6 +82,10 @@ requires its four independently verified, actually executed storage denials.
   trace, plus independently observed immutable state. Console records cannot
   substitute. Missing capacity, old/out-of-window controls or missing correlations
   block; no probe changes the original operation's allowance.
+  Invalid receipt metadata (including a backward wall-clock interval) produces no
+  acceptance control, without aborting otherwise valid workflow work. Timestamps
+  are never clamped into a passing interval, and missing receipts are not retried
+  by the observer. Normal protocol/state validation still applies independently.
 - Owner/task/finding proofs survive sanitization and are re-evaluated from the
   exact comparison context and correlated operator reads. A2A controls validate
   the real direct `Task` JSON result, task/context/artifact IDs and committed hash;
