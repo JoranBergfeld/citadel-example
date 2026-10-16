@@ -103,6 +103,19 @@ requires its four independently verified, actually executed storage denials.
   Both require the entire canonical dependency set, preserve failures and reject
   missing/duplicate controls, pass labels without evidence, substituted identities
   and incomplete service correlations. Sanitized exports repeat the same checks.
+- Protocol checks reuse actual successful wire operations, not a manifest version
+  or a passing route label. A2A requires all four observed `1.0`/JSONRPC cards,
+  genuine workflow invocation receipts and exact completed tasks; the package
+  contract remains `1.0.0`. MCP requires actual `2025-11-25` negotiation and all
+  three successful tools for each authorized caller. Safe wire metadata is bound
+  into each published observation hash and independently rechecked after export.
+  Model-v1 requires all four real framework usage receipts, five own-MI direct
+  controls and queried APIM backend target/method/status. The backend target is
+  hashed after removing its query and must match the inventoried v1 target used
+  by the direct providers. No raw URL, headers, prompt or response content enters
+  the report. Missing backend metadata blocks; a different observed route fails.
+  These are application/APIM/storage ingestion proofs, not a separate model-account
+  diagnostic source. No new requests, grants or dependencies are needed.
 - The full hook runs the origin/read/invocation boundary phase immediately after
   the genuine comparison, before the other scenarios or slower fault phases.
   It inherits that comparison's remaining absolute deadline instead of allocating
@@ -426,8 +439,8 @@ complete per-check correlations remain unverified locally.
    changed and no cloud delivery is inferred from local SDK wire tests.
 2. Execute/verify the implemented storage/origin providers and read-only
    Reference Data execution; observe the implemented pre-application ingress evidence path,
-   and complete direct-model probes, model-route controls and
-   credential/certificate/context rotation proof.
+   and collect deployed proof for the implemented direct-model/model-route controls.
+   Complete credential/certificate/context rotation providers and proof.
 3. Complete remaining deployed accounting/time boundaries and actual
    process-restart probes. Implemented release-response-loss, concurrent release,
    version-conflict, exact-hash and immutable-version providers still require

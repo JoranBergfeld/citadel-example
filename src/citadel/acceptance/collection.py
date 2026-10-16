@@ -111,7 +111,9 @@ union
  target=hash_sha256(extract(@"^[^?]+",0,tostring(Url))),
  facts=bag_pack('backend_dispatched',case(
  isempty(BackendUrl) and isempty(BackendMethod) and BackendResponseCode == 0 and BackendTime == 0,false,
- isnotempty(BackendUrl) and isnotempty(BackendMethod),true,bool(null))),
+ isnotempty(BackendUrl) and isnotempty(BackendMethod),true,bool(null)),
+ 'backend_target',iff(isnotempty(BackendUrl),hash_sha256(extract(@"^[^?]+",0,tostring(BackendUrl))),""),
+ 'backend_method',tostring(BackendMethod),'backend_status',toint(BackendResponseCode)),
  credential_sha256=hash_sha256(tolower(strcat(_ResourceId,'/subscriptions/',
  extract(@"([^/]+)$",1,tostring(ApimSubscriptionId)))))),
 (StorageBlobLogs | where TimeGenerated between (begin .. end)

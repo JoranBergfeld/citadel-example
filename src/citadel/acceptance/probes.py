@@ -88,6 +88,9 @@ class _GatewayWire:
                                     interfaces[0].get("url") == expected and
                                     interfaces[0].get("protocolBinding") == "JSONRPC" and
                                     interfaces[0].get("protocolVersion") == "1.0" else "invalid_card")
+                if result["actual"] == "gateway_card":
+                    result["protocols"] = {"a2a": interfaces[0]["protocolVersion"],
+                                           "a2a_binding": interfaces[0]["protocolBinding"]}
             if response.status_code == 200 and path in ("/mcp", "/a2a"):
                 envelope = response.json()
                 if (not isinstance(envelope, dict) or envelope.get("jsonrpc") != "2.0"
@@ -99,6 +102,8 @@ class _GatewayWire:
                     result.update(status="blocked", reason="protocol_control_failed")
                 elif capability == "initialize":
                     result["actual"] = "mcp_initialized"
+                    result["protocols"] = {"mcp": envelope["result"]["protocolVersion"],
+                                           "mcp_transport": "Streamable HTTP"}
                 elif path == "/mcp":
                     content = envelope["result"].get("structuredContent")
                     valid = isinstance(content, dict) and (
@@ -115,7 +120,9 @@ class _GatewayWire:
                             row.get("airport_ident", {}).get("parsed") == payload["params"]["arguments"]["ident"]
                             for row in runways)
                     if valid:
-                        result.update(actual="reference_data", sha256=sha256(content))
+                        result.update(actual="reference_data", sha256=sha256(content),
+                            protocols={"mcp": request_headers["MCP-Protocol-Version"],
+                                       "mcp_transport": "Streamable HTTP"})
                     else:
                         result.update(status="blocked", reason="protocol_control_failed")
             if response.status_code == 200 and capability in ("status", "task", "findings"):
@@ -123,6 +130,8 @@ class _GatewayWire:
                     result.update(status="blocked", reason="observed_owner_context_required")
                 else:
                     result.update(self._read_result(target, capability, response.json(), payload))
+                    if capability == "task" and result.get("actual") == "owned_task":
+                        result["protocols"] = {"a2a": request_headers["a2a-version"], "a2a_binding": "JSONRPC"}
             if self.workload != "operator":
                 with correlate(self.run_id, operation, self.workload):
                     emit("probe", request_id=request_id, status_code=int(response.status_code), target=target_hash,

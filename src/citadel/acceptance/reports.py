@@ -19,6 +19,7 @@ source sources request_id control_request_id caller runtime_identity gateway_ide
 control_identity
 observation control before after target container action etag suite_id client_request_id
 method event_id facts certificate_sha256 generation read_attempts agent_executions upstream_attempts backend_dispatched
+backend_target backend_method backend_status
 model_attempts input_tokens output_tokens tokens deadline retry artifact_count probe_id
 started finished observed status_code control_status before_sha256 after_sha256
 before_count after_count evidence evidence_sha256 artifacts sha256 count version

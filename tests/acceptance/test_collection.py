@@ -133,3 +133,12 @@ class CollectionTests(unittest.TestCase):
         self.assertIn("bool(null)", query)
         self.assertNotIn("RequestBody", query)
         self.assertNotIn("RequestHeaders", query)
+
+    def test_model_protocol_query_retains_actual_query_free_backend_target_method_and_status(self):
+        query = query_for_window(100, 101)
+        self.assertIn("'backend_target',iff(isnotempty(BackendUrl),", query)
+        self.assertIn('hash_sha256(extract(@"^[^?]+",0,tostring(BackendUrl)))', query)
+        self.assertIn("'backend_method',tostring(BackendMethod)", query)
+        self.assertIn("'backend_status',toint(BackendResponseCode)", query)
+        for payload in ("RequestBody", "ResponseBody", "RequestHeaders", "ResponseHeaders"):
+            self.assertNotIn(payload, query)

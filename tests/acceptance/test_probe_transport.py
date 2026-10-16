@@ -9,6 +9,34 @@ from citadel.operations import OperationError
 
 
 class ProbeTransportTests(unittest.IsolatedAsyncioTestCase):
+    async def test_discovery_exports_actual_a2a_wire_version_and_binding(self):
+        async with httpx.AsyncClient(transport=httpx.MockTransport(lambda request: httpx.Response(
+                200, headers={"apim-request-id": "actual-card"},
+                json={"supportedInterfaces": [{"url": "https://gateway.example/evidence-assessor/a2a",
+                    "protocolVersion": "1.0", "protocolBinding": "JSONRPC"}]}))) as client:
+            probe = GatewayProbe("candidate-planner", "https://gateway.example", "allocated",
+                                 client=client, enabled=True, run_id="protocol1")
+            observed = await probe.discovery("evidence-assessor")
+        self.assertEqual(observed.get("protocols"), {"a2a": "1.0", "a2a_binding": "JSONRPC"})
+
+    async def test_successful_mcp_negotiation_exports_observed_wire_version_without_payload(self):
+        def provider(request):
+            body = json.loads(request.content)
+            result = ({"protocolVersion": "2025-11-25"} if body["method"] == "initialize" else {
+                "structuredContent": {"provenance": {"fixture": {"id": "base-source"}},
+                                      "airports": [{"ident": {"parsed": "EBAM"}}]}})
+            return httpx.Response(200, headers={"apim-request-id": "actual-mcp"}, json={
+                "jsonrpc": "2.0", "id": body["id"], "result": result})
+
+        async with httpx.AsyncClient(transport=httpx.MockTransport(provider)) as client:
+            probe = GatewayProbe("candidate-planner", "https://gateway.example", "allocated",
+                                 client=client, enabled=True, run_id="protocol1")
+            initialized = await probe.mcp_initialize()
+            tool = await probe.reference_tool("search_airports")
+        for row in (initialized, tool):
+            self.assertEqual(row.get("protocols"), {"mcp": "2025-11-25", "mcp_transport": "Streamable HTTP"})
+            self.assertNotIn("airports", row)
+
     async def test_malformed_service_body_preserves_actual_failed_attempt_receipt(self):
         async with httpx.AsyncClient(transport=httpx.MockTransport(lambda request: httpx.Response(
                 200, headers={"apim-request-id": "actual-malformed"}, content=b"not-json"))) as client:
@@ -71,6 +99,7 @@ class ProbeTransportTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(ValueError):
                 await probe.task("evidence-assessor", "unobserved-operation")
         self.assertEqual([row.get("actual") for row in observed], ["owned_status", "owned_task", "exact_finding"])
+        self.assertEqual(observed[1].get("protocols"), {"a2a": "1.0", "a2a_binding": "JSONRPC"})
         self.assertEqual(rejected.get("status"), "blocked")
         self.assertEqual(rejected_task.get("status"), "blocked")
         self.assertEqual(len(requests), 5)

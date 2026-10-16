@@ -22,6 +22,9 @@ def evaluate_check(check, report):
     from .authority import DEPENDENCIES, evaluate_authority
     if check["check_id"] in DEPENDENCIES:
         return evaluate_authority(check, report)
+    from .protocol_oracle import DEPENDENCIES as PROTOCOLS, evaluate_protocol
+    if check["check_id"] in PROTOCOLS:
+        return evaluate_protocol(check, report)
     observation, control = actual.get("observation"), actual.get("control")
     operations = report.get("operation_ids", [])
     if (not isinstance(observation, dict) or not isinstance(control, dict)
