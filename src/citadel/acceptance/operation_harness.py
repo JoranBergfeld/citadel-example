@@ -16,9 +16,13 @@ from .storage_probes import StorageControls
 from .admission_limits import ADMISSION_CHECKS, admission_snapshot, evaluate_admission
 from .read_limit import read_snapshot, evaluate_read_boundary
 from .model_limits import MODEL_BOUNDARY_CHECKS, evaluate_model_boundaries
+from .model_counters import COUNTER_MODES, COUNTER_CHECKS, evaluate_model_counter
 
 
 def _groups(mode):
+    if mode in COUNTER_MODES:
+        key = COUNTER_CHECKS[COUNTER_MODES[mode]]
+        return {key: {key}}
     if mode == "model-limits":
         return {"limit.input_tokens_attempt": MODEL_BOUNDARY_CHECKS}
     if mode == "read-limit":
@@ -70,7 +74,7 @@ def bind_operation_result(result, *, run_id, principal, account, mode="operation
                         for index, step in enumerate(slot["steps"]))):
                 raise Blocked("admission_global_slot_binding_conflict")
             ids.extend(identity(step["operation_id"]) for step in slot["steps"])
-        if mode == "model-limits":
+        if mode in ("model-limits", *COUNTER_MODES):
             slots = row["actual"].get("slot")
             if not isinstance(slots, dict) or set(slots) != {"before", "after"}:
                 raise Blocked("model_boundary_global_slot_binding_conflict")
@@ -97,7 +101,8 @@ class FaultAcceptance:
     def execute(self, report, *, mode="operation-faults"):
         _groups(mode)
         admission = mode == "admission-limits"
-        phase_key = ("model_boundary_phase" if mode == "model-limits" else "read_phase" if mode == "read-limit"
+        phase_key = ("model_counter_" + COUNTER_MODES[mode] + "_phase" if mode in COUNTER_MODES else
+                     "model_boundary_phase" if mode == "model-limits" else "read_phase" if mode == "read-limit"
                      else "admission_phase" if admission else "operation_phase")
         if phase_key in report:
             raise Blocked("operation_probe_intent_requires_reconciliation")
@@ -141,7 +146,7 @@ class FaultAcceptance:
             for row in phase["observations"]:
                 phase["snapshots"][row["operation_id"]] = snapshot | (
                     read_snapshot(document) if mode == "read-limit" else
-                    admission_snapshot(document, row["actual"]) if admission or mode == "model-limits" else
+                    admission_snapshot(document, row["actual"]) if admission or mode in ("model-limits", *COUNTER_MODES) else
                     operation_snapshot(document, "candidate-planner", row["actual"]))
             phase["state"] = "observed" if result["state"] == "complete" else "blocked"
         except (AzureError, OperationError, Blocked, ValueError, KeyError, TypeError, TimeoutError):
@@ -155,7 +160,8 @@ class FaultAcceptance:
     def evaluate(report, evidence, *, mode="operation-faults"):
         groups = _groups(mode)
         admission = mode == "admission-limits"
-        phase = report.get("model_boundary_phase" if mode == "model-limits" else "read_phase" if mode == "read-limit" else
+        phase = report.get("model_counter_" + COUNTER_MODES[mode] + "_phase" if mode in COUNTER_MODES else
+                           "model_boundary_phase" if mode == "model-limits" else "read_phase" if mode == "read-limit" else
                            "admission_phase" if admission else "operation_phase", {})
         snapshots = phase.get("snapshots", {})
         output = []
@@ -170,7 +176,8 @@ class FaultAcceptance:
             snapshot = snapshot | {"runtime_identity": observer}
             for check in sorted(groups.get(row.get("probe_id"), set())):
                 observation = row | {"check_id": check}
-                evaluator = (evaluate_model_boundaries if mode == "model-limits" else
+                evaluator = (evaluate_model_counter if mode in COUNTER_MODES else
+                             evaluate_model_boundaries if mode == "model-limits" else
                              evaluate_read_boundary if mode == "read-limit" else evaluate_admission if admission else evaluate_operation)
                 result = evaluator(observation, snapshot, evidence,
                     runtime_identity=report.get("runtime_identities", {}).get("candidate-planner"),
@@ -178,7 +185,7 @@ class FaultAcceptance:
                         "subscription": report.get("subscription_bindings", {}).get("candidate-planner"),
                         "target": report.get("gateway_targets", {}).get("model"),
                         "slot_target": report.get("storage_targets", {}).get("active-run-slot")}
-                        if mode == "model-limits" else {}))
+                        if mode in ("model-limits", *COUNTER_MODES) else {}))
                 output.append(result | {"expected": "boundary" if check.startswith("limit.") else "fault",
                     "actual": {"observation": observation, "control": snapshot}})
         return output

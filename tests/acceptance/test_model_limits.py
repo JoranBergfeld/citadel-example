@@ -45,6 +45,12 @@ class ModelLimitTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(calls), 1)
 
     async def test_actual_worker_keeps_own_identity_global_lease_cooldowns_and_real_sdk_result_channel(self):
+        await self.exercise_worker("model-limits", 1)
+
+    async def test_actual_execution_counter_worker_uses_eight_real_models_without_extra_grants(self):
+        await self.exercise_worker("model-execution-limit", 8)
+
+    async def exercise_worker(self, mode, count):
         from azure.storage.blob.aio import ContainerClient
         from azure.keyvault.secrets.aio import SecretClient
         from citadel.acceptance.worker import run_gateway_matrix
@@ -86,7 +92,7 @@ class ModelLimitTests(unittest.IsolatedAsyncioTestCase):
 
         async def response(request):
             models.append(request)
-            return httpx2.Response(200, headers={"apim-request-id": "actual-boundary-model"},
+            return httpx2.Response(200, headers={"apim-request-id": f"actual-boundary-model-{len(models)}"},
                 json={"id": "fixture", "object": "chat.completion", "created": 0, "model": "approved",
                     "choices": [{"index": 0, "message": {"role": "assistant", "content": "OK"},
                                  "finish_reason": "stop"}],
@@ -99,7 +105,7 @@ class ModelLimitTests(unittest.IsolatedAsyncioTestCase):
             blob="https://allocated.blob.core.windows.net", operations_container="planner-operations",
             vault="https://allocated.vault.azure.net", subscription_secret="subscription-candidate-planner",
             gateway="https://gateway.test", model_deployment="approved", tokens_per_minute=120000)
-        request = {"schema_version": 1, "mode": "model-limits", "workload": config.target,
+        request = {"schema_version": 1, "mode": mode, "workload": config.target,
             "client_id": config.client_id, "run_id": "model-boundary-worker", "deadline": time.time() + 300}
         async with httpx2.AsyncClient(transport=httpx2.MockTransport(response)) as http:
             with (patch.dict(os.environ, {"CITADEL_ACCEPTANCE_ENABLED": "true", "AZURE_PRINCIPAL_ID": config.client_id}),
@@ -116,11 +122,12 @@ class ModelLimitTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(credentials, [{"client_id": config.client_id, "retry_total": 0}])
         self.assertEqual(len(secrets), 1)
         self.assertIn("/secrets/subscription-candidate-planner/?api-version=2025-07-01", secrets[0].url)
-        self.assertEqual(len(models), 1)
+        self.assertEqual(len(models), count)
         self.assertEqual(models[0].headers["Ocp-Apim-Subscription-Key"], "allocated-own-key")
         actual = rows[0]["actual"]
-        self.assertGreaterEqual(actual["model"]["started"] - actual["slot"]["before"]["steps"][-1]["finished"], 60)
-        self.assertGreaterEqual(actual["slot"]["after"]["steps"][0]["started"] - actual["model"]["finished"], 60)
+        receipts = actual["models"] if mode == "model-execution-limit" else [actual["model"]]
+        self.assertGreaterEqual(receipts[0]["started"] - actual["slot"]["before"]["steps"][-1]["finished"], 60)
+        self.assertGreaterEqual(actual["slot"]["after"]["steps"][0]["started"] - receipts[-1]["finished"], 60)
         self.assertNotIn("/planner-operations/active-run-slot.json", wire.leases)
         self.assertLessEqual(len([path for path in wire.blobs if "/read-tickets/" in path]), 512)
         self.assertNotIn("/planner-operations/ledger-v1.json", wire.blobs)
@@ -132,7 +139,7 @@ class ModelLimitTests(unittest.IsolatedAsyncioTestCase):
             from azure.core.exceptions import ResourceExistsError
             with self.assertRaises(ResourceExistsError):
                 await run_gateway_matrix(config, request)
-        self.assertEqual(len(models), 1)
+        self.assertEqual(len(models), count)
 
     async def test_real_framework_request_at_exact_token_bounds_and_concurrent_overflow_never_redispatch(self):
         from citadel.acceptance.model_limits import ModelLimits

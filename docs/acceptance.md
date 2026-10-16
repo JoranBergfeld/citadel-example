@@ -515,6 +515,18 @@ receipts and immutable publication hashes are required for all three exported
 limits. Malformed usage leaves admission unresolved; no automatic retry occurs.
 Other numeric-limit and restart controls listed below remain unimplemented.
 
+Three further fixed counter modes spend actual model attempts: eight responses
+before the ninth per-execution refusal; 128 responses across bounded executions
+before the 129th run-attempt refusal; and 55 conservative 18,000-token attempts
+before the next attempt exceeds the one-million-token budget. Counters are never
+seeded or edited to reach a boundary. Every successful attempt needs its own queried
+application/APIM receipt and the independently read final budget. The existing
+global lease, 60-second isolation, 512 reads and 900 seconds apply to each fresh
+control run. Insufficient actual quota or excessive service latency blocks the
+control rather than raising a ceiling or issuing a replacement run automatically.
+Local counter tests use the real framework with external wire fixtures and a
+simulated rate clock; the worker integration also tests real isolation windows.
+
 1. Perform deployed validation of the implemented telemetry configuration,
    application ingestion counts and gateway/storage correlation proofs.
    Dependency approval is settled; no existing pin was changed and no cloud

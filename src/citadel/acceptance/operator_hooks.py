@@ -188,6 +188,11 @@ class Harness:
                 FaultAcceptance(self.lifecycle).execute(report, mode="model-limits")
                 report["finished"] = time.time()
                 self.save(report)
+                from .model_counters import COUNTER_MODES
+                for mode in COUNTER_MODES:
+                    FaultAcceptance(self.lifecycle).execute(report, mode=mode)
+                    report["finished"] = time.time()
+                    self.save(report)
                 from .release_harness import ReleaseAcceptance
                 ReleaseAcceptance(self.lifecycle).execute(report)
                 report["finished"] = time.time()
@@ -267,6 +272,10 @@ class Harness:
                 self._replace(report, result)
             for result in FaultAcceptance.evaluate(report, report["evidence"], mode="model-limits"):
                 self._replace(report, result)
+            from .model_counters import COUNTER_MODES
+            for mode in COUNTER_MODES:
+                for result in FaultAcceptance.evaluate(report, report["evidence"], mode=mode):
+                    self._replace(report, result)
             from .release_harness import ReleaseAcceptance
             for result in ReleaseAcceptance.evaluate(report, report["evidence"]):
                 self._replace(report, result)
