@@ -553,6 +553,11 @@ actual accepted invocation and each preceding poll response. Missing peer receip
 cannot be replaced by successful operator timing alone. The fixed provider retains
 the original run deadline and the existing 64-read operator allowance.
 
+Implemented providers currently cover 269 of 278 canonical checks; this is not
+a cloud pass count. Nine still need actual drivers: the three rotation families,
+process restart, and the 10/30/60/180/900-second acceptance/read/model/A2A/workflow
+boundaries. These implementation gaps keep the full gate blocked.
+
 1. Perform deployed validation of the implemented telemetry configuration,
    application ingestion counts and gateway/storage correlation proofs.
    Dependency approval is settled; no existing pin was changed and no cloud
