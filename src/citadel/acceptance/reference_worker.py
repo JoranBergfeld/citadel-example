@@ -128,12 +128,12 @@ def main():
         request = json.loads(base64.b64decode(args.manifest, validate=True))
         config = Configuration.from_environment(os.environ)
         validate_request(config, request, enabled=args.enabled)
-        from .telemetry import configure
+        from .telemetry import configure, finish
         exporter = configure(config.target, os.environ["AZURE_PRINCIPAL_ID"],
             client_id=config.client_id, connection_string=os.environ["APPLICATIONINSIGHTS_CONNECTION_STRING"])
         result = asyncio.run(execute(config, request, enabled=args.enabled,
                                     principal_id=os.environ["AZURE_PRINCIPAL_ID"]))
-        result["telemetry"] = exporter.close()
+        result["telemetry"] = finish()
         exporter = None
         content = canonical_bytes(result)
         print("\n" + PREFIX + base64.b64encode(content).decode() + ":" + hashlib.sha256(content).hexdigest(), flush=True)

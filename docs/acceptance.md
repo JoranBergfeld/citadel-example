@@ -46,6 +46,22 @@ requires its four independently verified, actually executed storage denials.
   only the existing validated private human portal proof, its evidence hash,
   request/resource-incarnation binding and observation time. An absent SKU,
   a template label or provider provisioning success cannot establish Free.
+- Application ingestion has a count proof, not an SDK-acknowledgement assertion.
+  Each process emits bounded per-run event streams with unique IDs and sequence
+  numbers. Metadata-only health checkpoints hash every preceding event ID and
+  retain the actual official exporter's submitted/acknowledged/failed/dropped/
+  queued/in-flight counters. Quiescent streams retire rather than requiring
+  unbounded deployment history. Checkpoints run off the request path every
+  fifteen seconds; final draining and checkpoint delivery share the original
+  single fifteen-second shutdown flush allowance.
+  The collector requires every prefix event in actual application ingestion
+  across all five assigned identities, including emitted events also observed in
+  supplemental console logs. Missing prefixes/checkpoints, duplicate events or
+  console-only records block; observed loss/hash conflicts fail. SDK acknowledgement
+  remains explicitly `ingestion_verified=false`. Only health metadata may be
+  queried for the extra fifteen-second checkpoint interval after the ordinary
+  five-second correlation tolerance; business windows, run/read/model allowances
+  and the persisted 600-second collection deadline do not change.
 - `denied-bypass-controls` executes the actual storage providers and their permitted
   controls. It independently re-evaluates both planning identities' private-draft
   reads and finding overwrites, including unchanged targets and queried application/

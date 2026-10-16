@@ -272,6 +272,8 @@ class Harness:
             from .protocol_oracle import collect_protocols
             for result in collect_protocols(report):
                 self._replace(report, result)
+            from .telemetry_proof import collect_application
+            self._replace(report, collect_application(report))
             # No repeated polling can turn an unimplemented/absent required control into pass.
         except (Blocked, ValueError, TimeoutError):
             self._set(report, "telemetry.application-ingestion", "blocked",

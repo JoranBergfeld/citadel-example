@@ -1,4 +1,5 @@
 import io
+import hashlib
 import json
 import time
 import threading
@@ -106,6 +107,41 @@ class MonitorTests(unittest.TestCase):
         finally:
             exporter.close()
 
+    def test_real_exporter_checkpoint_binds_every_emitted_event_without_claiming_ingestion(self):
+        transport, output = Transport(), io.StringIO()
+        exporter = self.exporter(transport)
+        try:
+            telemetry = Telemetry("candidate-planner", "22222222-2222-2222-2222-222222222222",
+                                  output=output, exporter=exporter)
+            with correlate("run1", "op1", "operator"):
+                telemetry.emit("storage.read", request_id="read1", status_code=206)
+                telemetry.emit("storage.write", request_id="write1", status_code=201)
+            self.assertEqual(exporter.flush()["acknowledged_records"], 2)
+            telemetry.checkpoint()
+            rows = [json.loads(line) for line in output.getvalue().splitlines()]
+            self.assertEqual(len(rows), 3)
+            self.assertEqual([row["sequence"] for row in rows], [1, 2, 3])
+            self.assertEqual(len({row["stream_id"] for row in rows}), 1)
+            checkpoint = rows[-1]
+            self.assertEqual((checkpoint["method"], checkpoint["run_id"]), ("exporter.health", "run1"))
+            self.assertEqual(checkpoint["facts"]["stream_count"], 2)
+            self.assertEqual(checkpoint["facts"]["stream_sha256"],
+                             hashlib.sha256("".join(row["event_id"] for row in rows[:2]).encode()).hexdigest())
+            self.assertEqual(checkpoint["facts"]["submitted_records"], 2)
+            self.assertEqual(checkpoint["facts"]["acknowledged_records"], 2)
+            self.assertEqual(checkpoint["facts"]["dropped_records"], 0)
+            self.assertFalse(checkpoint["facts"]["ingestion_verified"])
+            self.assertEqual(exporter.flush()["acknowledged_records"], 3)
+            wire = "".join(str(request.body) for request in transport.requests)
+            self.assertIn("exporter.health", wire)
+            with correlate("run1", "op2", "operator"):
+                telemetry.emit("storage.read", request_id="read2", status_code=206)
+            last = json.loads(output.getvalue().splitlines()[-1])
+            self.assertEqual(last["sequence"], 1)
+            self.assertNotEqual(last["stream_id"], checkpoint["stream_id"])
+        finally:
+            exporter.close()
+
     def test_provider_failure_or_partial_acknowledgement_never_retries_or_claims_delivery(self):
         for status, partial in ((503, False), (200, True)):
             with self.subTest(status=status, partial=partial):
@@ -123,6 +159,23 @@ class MonitorTests(unittest.TestCase):
                     self.assertNotIn("private-provider-error", str(health))
                 finally:
                     exporter.close()
+
+    def test_final_checkpoint_drains_real_exporter_within_one_existing_flush_allowance(self):
+        transport, output = Transport(), io.StringIO()
+        exporter = self.exporter(transport)
+        telemetry = Telemetry("candidate-planner", "22222222-2222-2222-2222-222222222222",
+                              output=output, exporter=exporter)
+        with correlate("run1", "op1", "operator"):
+            telemetry.emit("execution", request_id="actual-result", status_code=201)
+        result = telemetry.finish()
+        records = [json.loads(line) for line in output.getvalue().splitlines()]
+        self.assertEqual(len(records), 2)
+        self.assertEqual(records[-1]["method"], "exporter.health")
+        self.assertEqual(records[-1]["facts"]["acknowledged_records"], 1)
+        self.assertEqual(records[-1]["facts"]["queued_records"], 0)
+        self.assertFalse(records[-1]["facts"]["inflight"])
+        self.assertEqual(result["acknowledged_records"], 2)
+        self.assertFalse(result["ingestion_verified"])
 
     def test_bounded_queue_reports_loss_without_sampling_or_hiding_pending_delivery(self):
         class HeldTransport(Transport):

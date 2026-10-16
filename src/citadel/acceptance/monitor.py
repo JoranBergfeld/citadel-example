@@ -79,9 +79,9 @@ class MonitorExporter:
 
     def emit(self, record):
         fields = {"schema", "event_id", "workload", "runtime_identity", "method", "request_id",
-                  "status_code", "facts", "run_id", "operation_id", "caller", "target"}
+                  "status_code", "facts", "run_id", "operation_id", "caller", "target", "stream_id", "sequence"}
         if (not isinstance(record, dict) or set(record) - fields
-                or not fields - {"run_id", "operation_id", "caller", "target"} <= set(record)
+                or not fields - {"run_id", "operation_id", "caller", "target", "stream_id", "sequence"} <= set(record)
                 or record.get("schema") != "citadel.telemetry.v1"
                 or record.get("workload") != self.workload or record.get("runtime_identity") != self.identity
                 or not isinstance(record.get("method"), str) or record["method"] not in METHODS
@@ -90,9 +90,11 @@ class MonitorExporter:
                 or not isinstance(record.get("facts"), dict) or set(record["facts"]) - FACTS
                 or not isinstance(record.get("caller", self.workload), str)
                 or record.get("caller", self.workload) not in ACTORS
-                or "target" in record and not hash_value(record["target"])):
+                or "target" in record and not hash_value(record["target"])
+                or ("stream_id" in record) != ("sequence" in record)
+                or "sequence" in record and (type(record["sequence"]) is not int or record["sequence"] < 1)):
             raise ValueError("Only owned allowlisted telemetry metadata may be exported")
-        for name in ("event_id", "run_id", "operation_id", "request_id"):
+        for name in ("event_id", "run_id", "operation_id", "request_id", "stream_id"):
             if name in record and (name != "request_id" or record[name]):
                 opaque(record[name])
         for value in record["facts"].values():

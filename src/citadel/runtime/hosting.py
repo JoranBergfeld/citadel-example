@@ -16,13 +16,27 @@ from .network import GatewayPeers
 from .tickets import AzureTicketStore
 
 
+async def _checkpoint_loop():
+    from citadel.acceptance.telemetry import checkpoint
+    while True:
+        await asyncio.sleep(15)
+        checkpoint()
+
+
+async def _stop_checkpoints(task):
+    task.cancel()
+    await asyncio.gather(task, return_exceptions=True)
+
+
 @asynccontextmanager
 async def application(config):
-    from citadel.acceptance.telemetry import configure
+    from citadel.acceptance.telemetry import configure, finish
     async with AsyncExitStack() as stack:
-        exporter = configure(config.target, os.environ["AZURE_PRINCIPAL_ID"],
+        configure(config.target, os.environ["AZURE_PRINCIPAL_ID"],
             client_id=config.client_id, connection_string=os.environ["APPLICATIONINSIGHTS_CONNECTION_STRING"])
-        stack.callback(exporter.close)
+        stack.callback(finish)
+        checkpoint_task = asyncio.create_task(_checkpoint_loop())
+        stack.push_async_callback(_stop_checkpoints, checkpoint_task)
         if config.target == "reference-data":
             from .storage import download_reference_bundle
             from .reference import reference_application

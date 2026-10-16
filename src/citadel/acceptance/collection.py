@@ -13,7 +13,7 @@ TABLES = {"AppRequests", "AppDependencies", "AppTraces", "StorageBlobLogs",
           "ApiManagementGatewayLogs", "ContainerAppConsoleLogs_CL", "ContainerAppHTTPLogs"}
 ROW_FIELDS = {"source", "request_id", "status_code", "runtime_identity", "observed",
               "run_id", "operation_id", "caller", "method", "target", "event_id", "facts",
-              "client_request_id", "credential_sha256"}
+              "client_request_id", "credential_sha256", "stream_id", "sequence"}
 
 
 def collection_remaining(report, now):
@@ -102,6 +102,7 @@ def query_for_window(started, finished, *, ingress=None):
     ingress_filter = " or ".join(predicates) or "false"
     return f"""
 let begin=datetime({start}); let end=datetime({end});
+let healthEnd=end+15s;
 union
 (ApiManagementGatewayLogs | where TimeGenerated between (begin .. end)
  | project source='gateway', request_id=iff(isnotnull(toguid(CorrelationId)),
@@ -131,20 +132,24 @@ union
  facts=bag_pack('upstream_attempts',toint(UpstreamRequestAttemptCount),'reason',
  iff(ResponseCodeDetails matches regex @"^rbac_access_denied_matched_policy\\[[^\\]\\r\\n]{{1,128}}\\]$",
  'ingress_rbac_denied','unverified_ingress_response'))),
-(AppTraces | where TimeGenerated between (begin .. end)
+(AppTraces | where TimeGenerated between (begin .. healthEnd)
  | extend e=parse_json(Message) | where e.schema == 'citadel.telemetry.v1'
+ | where TimeGenerated <= end or e.method == 'exporter.health'
  | project source='application', request_id=tostring(e.request_id),
  status_code=toint(e.status_code), runtime_identity=tostring(e.runtime_identity),
  observed=todouble(datetime_diff('millisecond',TimeGenerated,datetime(1970-01-01)))/1000,
  run_id=tostring(e.run_id), operation_id=tostring(e.operation_id), caller=tostring(e.caller),
- method=tostring(e.method), target=tostring(e.target), event_id=tostring(e.event_id), facts=e.facts),
-(ContainerAppConsoleLogs_CL | where TimeGenerated between (begin .. end)
+ method=tostring(e.method), target=tostring(e.target), event_id=tostring(e.event_id), facts=e.facts,
+ stream_id=tostring(e.stream_id), sequence=tolong(e.sequence)),
+(ContainerAppConsoleLogs_CL | where TimeGenerated between (begin .. healthEnd)
  | extend e=parse_json(Log_s) | where e.schema == 'citadel.telemetry.v1'
+ | where TimeGenerated <= end or e.method == 'exporter.health'
  | project source='console', request_id=tostring(e.request_id),
  status_code=toint(e.status_code), runtime_identity=tostring(e.runtime_identity),
  observed=todouble(datetime_diff('millisecond',TimeGenerated,datetime(1970-01-01)))/1000,
  run_id=tostring(e.run_id), operation_id=tostring(e.operation_id), caller=tostring(e.caller),
- method=tostring(e.method), target=tostring(e.target), event_id=tostring(e.event_id), facts=e.facts)
+ method=tostring(e.method), target=tostring(e.target), event_id=tostring(e.event_id), facts=e.facts,
+ stream_id=tostring(e.stream_id), sequence=tolong(e.sequence))
 | take 100001
 """
 

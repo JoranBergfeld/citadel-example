@@ -8,6 +8,9 @@ import hashlib
 import json
 import re
 import sys
+import threading
+import time
+from collections import OrderedDict
 from contextlib import contextmanager
 from contextvars import ContextVar
 from uuid import UUID, uuid4
@@ -19,12 +22,14 @@ METHODS = {"SendMessage", "GetTask", "discovery", "status", "findings-read", "in
            "tools/call", "search_airports", "lookup_airport", "list_runways", "chat.completions",
            "storage.read", "storage.write", "storage.lease", "execution", "probe",
            "mcp.GET", "mcp.DELETE", "ping", "tools/list", "notifications/initialized", "authorization.denied",
-           "model.direct", "status.observed", "invocation.observed", "reference.observed"}
+           "model.direct", "status.observed", "invocation.observed", "reference.observed", "exporter.health"}
 FACTS = {"generation", "read_attempts", "agent_executions", "model_attempts", "input_tokens",
          "output_tokens", "tokens", "deadline", "retry", "artifact_count", "sha256",
          "business_state", "probe_id", "status_code", "before_sha256", "after_sha256", "reason",
          "read_operation_id", "input_hash", "result_sha256", "started", "finished",
-         "accepted_operation_id", "task_sha256", "source_sha256"}
+         "accepted_operation_id", "task_sha256", "source_sha256", "stream_count", "stream_sha256",
+         "submitted_records", "acknowledged_records", "failed_records", "dropped_records",
+         "delivery_attempts", "queued_records", "inflight", "ingestion_verified"}
 _correlation = ContextVar("citadel_evidence_correlation", default={})
 _exporter = None
 
@@ -74,8 +79,13 @@ class Telemetry:
         self.identity = hashlib.sha256(str(UUID(principal_id)).encode()).hexdigest()
         self.output = output or sys.stdout
         self.exporter = exporter
+        self.streams, self.lock = OrderedDict(), threading.RLock()
 
     def emit(self, method, *, request_id, status_code, facts=None, target=None):
+        with self.lock:
+            self._emit(method, request_id=request_id, status_code=status_code, facts=facts, target=target)
+
+    def _emit(self, method, *, request_id, status_code, facts=None, target=None):
         if method not in METHODS or type(status_code) is not int or not 0 <= status_code <= 599:
             raise ValueError("Invalid telemetry metadata")
         clean = {}
@@ -94,10 +104,53 @@ class Telemetry:
             if not isinstance(target, str) or not re.fullmatch("[a-f0-9]{64}", target):
                 raise ValueError("Only a hashed service target may enter telemetry")
             record["target"] = target
+        run = record.get("run_id")
+        if run not in self.streams:
+            if len(self.streams) >= 512:
+                self.streams.popitem(last=False)
+            self.streams[run] = {"id": uuid4().hex, "count": 0, "digest": hashlib.sha256(),
+                                 "checkpointed": 0, "pending": False, "loss": (0, 0)}
+        stream = self.streams[run]
+        self.streams.move_to_end(run)
+        stream["count"] += 1
+        stream["digest"].update(record["event_id"].encode())
+        record.update(stream_id=stream["id"], sequence=stream["count"])
         self.output.write(json.dumps(record, sort_keys=True, allow_nan=False) + "\n")
         self.output.flush()
         if self.exporter is not None:
             self.exporter.emit(record)
+
+    def checkpoint(self):
+        """Nonblocking snapshot; only a subsequent service query can prove delivery."""
+        if self.exporter is None:
+            return
+        with self.lock:
+            health = self.exporter.flush(0)
+            loss = (health["failed_records"], health["dropped_records"])
+            for run, stream in list(self.streams.items()):
+                if stream["checkpointed"] == stream["count"] and not stream["pending"] and stream["loss"] == loss:
+                    continue
+                facts = {key: value for key, value in health.items() if key in FACTS}
+                facts.update(stream_count=stream["count"], stream_sha256=stream["digest"].hexdigest())
+                context = uncorrelated() if run is None else correlate(run, run, self.workload)
+                with context:
+                    self._emit("exporter.health", request_id=health["request_id"],
+                               status_code=health["status_code"], facts=facts)
+                stream.update(checkpointed=stream["count"], pending=health["queued_records"] > 0 or health["inflight"],
+                              loss=loss)
+                if not stream["pending"]:
+                    del self.streams[run]
+
+    def finish(self):
+        if self.exporter is None:
+            raise ValueError("Actual configured exporter required")
+        started = time.monotonic()
+        try:
+            self.exporter.flush(15)
+            self.checkpoint()
+        finally:
+            health = self.exporter.close(max(0, 15 - (time.monotonic() - started)))
+        return health
 
 
 def configure(workload, principal_id, *, client_id, connection_string):
@@ -112,6 +165,17 @@ def configure(workload, principal_id, *, client_id, connection_string):
 def emit(method, *, request_id=None, status_code=0, facts=None, target=None):
     if _exporter is not None:
         _exporter.emit(method, request_id=request_id, status_code=status_code, facts=facts, target=target)
+
+
+def checkpoint():
+    if _exporter is not None:
+        _exporter.checkpoint()
+
+
+def finish():
+    if _exporter is None:
+        raise ValueError("Actual configured telemetry required")
+    return _exporter.finish()
 
 
 def correlation_headers():

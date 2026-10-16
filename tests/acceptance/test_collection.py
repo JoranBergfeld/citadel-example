@@ -105,7 +105,10 @@ class CollectionTests(unittest.TestCase):
         records = Collector(provider, started=100, finished=101).poll()
         self.assertEqual(records[0]["source"], "console")
         query = provider.calls[0][0]
-        self.assertIn("(AppTraces | where TimeGenerated between (begin .. end)", query)
+        self.assertIn("(AppTraces | where TimeGenerated between (begin .. healthEnd)", query)
+        self.assertIn("let healthEnd=end+15s;", query)
+        self.assertEqual(query.count("TimeGenerated <= end or e.method == 'exporter.health'"), 2)
+        self.assertEqual(query.count("stream_id=tostring(e.stream_id), sequence=tolong(e.sequence)"), 2)
         self.assertIn("e=parse_json(Message)", query)
         console_query = query.split("(ContainerAppConsoleLogs_CL", 1)[1]
         self.assertIn("source='console'", console_query)
