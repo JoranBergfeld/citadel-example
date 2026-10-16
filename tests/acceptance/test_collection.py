@@ -51,8 +51,10 @@ class CollectionTests(unittest.TestCase):
         workspace = {"retentionInDays": 30, "workspaceCapping": {"dailyQuotaGb": -1}}
         tables = [{"name": name, "properties": {"plan": "Analytics", "retentionInDays": 30,
                                                 "totalRetentionInDays": 30}}
-                  for name in ("AppRequests", "AppDependencies", "AppTraces", "StorageBlobLogs",
-                               "ApiManagementGatewayLogs", "ContainerAppConsoleLogs_CL", "ContainerAppHTTPLogs")]
+                  for name in ("AppRequests", "AppDependencies", "AppTraces", "AppExceptions", "AppEvents",
+                               "AppMetrics", "StorageBlobLogs", "ApiManagementGatewayLogs",
+                               "ContainerAppConsoleLogs_CL", "ContainerAppSystemLogs_CL", "ContainerAppHTTPLogs",
+                               "AZKVAuditLogs", "AzureDiagnostics")]
         self.assertTrue(verify_retention(workspace, tables))
         self.assertFalse(verify_retention(workspace, tables[:-1]))
         tables[0]["properties"]["plan"] = "Basic"

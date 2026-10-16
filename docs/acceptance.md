@@ -485,6 +485,15 @@ complete per-check correlations remain unverified locally.
 
 ## Remaining implementation gates
 
+Retention and unsampled-configuration evaluation now reads the allocated workspace,
+all thirteen configured tables, Application Insights and the APIM diagnostic.
+The exported oracle binds actual resource IDs by hash and requires 30-day Analytics
+retention, no daily cap, 100% sampling, disabled Insights local authentication,
+and zero request/response body or header logging. It additionally re-evaluates
+queried application event prefixes and actual exporter loss counters; configuration
+or export acknowledgement alone cannot pass. These ARM reads share the original
+600-second collection deadline. Local REST fixtures do not establish cloud settings.
+
 1. Finish complete telemetry health/count proof evaluation and deployed validation
    of the approved exporter. Dependency approval is settled; no existing pin was
    changed and no cloud delivery is inferred from local SDK wire tests.

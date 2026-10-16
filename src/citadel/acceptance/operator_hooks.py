@@ -11,7 +11,7 @@ from uuid import UUID, uuid4
 from citadel.evidence import ReferenceData
 from citadel.evidence.manifests import sha256
 from citadel.operator.state import Blocked, ROOT, read_private, source_fingerprint
-from .collection import AzureQuery, Collector, collection_remaining, verify_retention
+from .collection import AzureQuery, Collector, collection_remaining
 from .coverage import required_checks
 from .reports import acceptance_status, automated_status, confirm_narrative, export_report, report_directory
 from .scenarios import FIXTURES, evaluate_scenario
@@ -40,11 +40,13 @@ def fingerprints(lifecycle):
         raise Blocked("acceptance_immutable_images_required")
     from .scenario_proof import scenario_inputs
     from .inventory import inventory_inputs
+    from .retention import telemetry_inputs
     from citadel.runtime.configuration import OPERATIONS
     source = ReferenceData.from_bundle(lifecycle.config["bundleDir"])
     provenance = source.provenance
     scenarios = scenario_inputs(source)
     inventory = inventory_inputs(lifecycle)
+    telemetry = telemetry_inputs(lifecycle)
     accounts = [resource for resource in lifecycle.value["inventory"]
         if "/providers/Microsoft.Storage/storageAccounts/" in resource and "/blobServices/" not in resource]
     if len(accounts) != 1:
@@ -56,9 +58,11 @@ def fingerprints(lifecycle):
               "protocols": pins["protocols"], "model": pins["model"],
               "inputs": {"bundle": actual, "scenario_oracles": sha256(scenarios),
                          "inventory": sha256(inventory),
+                         "telemetry": sha256(telemetry),
                          **{key: sha256(value) for key, value in provenance.items()}},
               "scenario_inputs": scenarios,
               "inventory_inputs": inventory,
+              "telemetry_inputs": telemetry,
               "gateway_targets": {actor: hashlib.sha256(
                   (gateway + "/" + actor + ("/mcp" if actor == "reference-data" else "/a2a")).encode()).hexdigest()
                   for actor in (*OPERATIONS, "reference-data")},
@@ -228,10 +232,9 @@ class Harness:
         try:
             details = self.lifecycle.native.rest("get", workspace[0], "2022-10-01")
             tables = self.lifecycle.native.collection(workspace[0] + "/tables", "2022-10-01")
-            retained = verify_retention(details["properties"], tables)
-            self._set(report, "telemetry.retention-and-unsampled",
-                      "blocked" if retained else "fail",
-                      "actual_sampling_exporter_proof_required" if retained else "retention_contract_mismatch")
+            from .retention import observe_retention, evaluate_retention
+            retention = {"check_id": "telemetry.retention-and-unsampled", "expected": "evidence",
+                         "actual": observe_retention(self.lifecycle, details, tables)}
             collector = Collector(AzureQuery(self.lifecycle.native, details["properties"]["customerId"]),
                                   started=report["started"], finished=report["finished"],
                                   budget_seconds=end - time.time(), prior=report["evidence"],
@@ -274,6 +277,7 @@ class Harness:
                 self._replace(report, result)
             from .telemetry_proof import collect_application
             self._replace(report, collect_application(report))
+            self._replace(report, retention | evaluate_retention(retention, report))
             # No repeated polling can turn an unimplemented/absent required control into pass.
         except (Blocked, ValueError, TimeoutError):
             self._set(report, "telemetry.application-ingestion", "blocked",

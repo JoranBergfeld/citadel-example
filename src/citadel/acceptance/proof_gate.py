@@ -37,6 +37,9 @@ def evaluate_check(check, report):
     if check["check_id"] == "telemetry.application-ingestion":
         from .telemetry_proof import evaluate_application
         return evaluate_application(check, report)
+    if check["check_id"] == "telemetry.retention-and-unsampled":
+        from .retention import evaluate_retention
+        return evaluate_retention(check, report)
     observation, control = actual.get("observation"), actual.get("control")
     operations = report.get("operation_ids", [])
     if (not isinstance(observation, dict) or not isinstance(control, dict)

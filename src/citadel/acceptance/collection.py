@@ -9,8 +9,9 @@ from datetime import datetime, timezone
 from .oracle import SOURCES
 
 
-TABLES = {"AppRequests", "AppDependencies", "AppTraces", "StorageBlobLogs",
-          "ApiManagementGatewayLogs", "ContainerAppConsoleLogs_CL", "ContainerAppHTTPLogs"}
+TABLES = {"AppRequests", "AppDependencies", "AppTraces", "AppExceptions", "AppEvents", "AppMetrics",
+          "StorageBlobLogs", "ApiManagementGatewayLogs", "ContainerAppConsoleLogs_CL",
+          "ContainerAppSystemLogs_CL", "ContainerAppHTTPLogs", "AZKVAuditLogs", "AzureDiagnostics"}
 ROW_FIELDS = {"source", "request_id", "status_code", "runtime_identity", "observed",
               "run_id", "operation_id", "caller", "method", "target", "event_id", "facts",
               "client_request_id", "credential_sha256", "stream_id", "sequence"}

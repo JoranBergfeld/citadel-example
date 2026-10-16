@@ -22,6 +22,7 @@ brief read_scopes observations bypass
 inventory_inputs environments applications created rest_sha256 plan inventory
 stream_id sequence stream_count stream_sha256 submitted_records acknowledged_records failed_records dropped_records
 delivery_attempts queued_records inflight ingestion_verified
+telemetry_inputs telemetry targets workspace insights gateway workspace_sha256 tables_sha256 insights_sha256 gateway_sha256
 control_identity
 observation control before after target container action etag suite_id client_request_id
 method event_id facts certificate_sha256 generation read_attempts agent_executions upstream_attempts backend_dispatched
