@@ -19,6 +19,9 @@ def evaluate_check(check, report):
             or not all(hash_value(value) for value in identities.values())
             or len(set(identities.values())) != len(identities)):
         return blocked
+    from .authority import DEPENDENCIES, evaluate_authority
+    if check["check_id"] in DEPENDENCIES:
+        return evaluate_authority(check, report)
     observation, control = actual.get("observation"), actual.get("control")
     operations = report.get("operation_ids", [])
     if (not isinstance(observation, dict) or not isinstance(control, dict)

@@ -92,6 +92,13 @@ requires its four independently verified, actually executed storage denials.
   owner/finding reads and real MCP tools. Existing pool identities/capacities and
   business products remain unchanged; consumed tickets are not returned.
   No live Azure execution is implied.
+- Executing-identity and status-owner aggregate checks reuse those real providers,
+  not new requests or grants. The former independently re-evaluates all ninety
+  storage capabilities against each allocated MI and actual service receipts;
+  the latter re-evaluates all forty-five owner-status/task/exact-finding proofs.
+  Both require the entire canonical dependency set, preserve failures and reject
+  missing/duplicate controls, pass labels without evidence, substituted identities
+  and incomplete service correlations. Sanitized exports repeat the same checks.
 - The full hook runs the origin/read/invocation boundary phase immediately after
   the genuine comparison, before the other scenarios or slower fault phases.
   It inherits that comparison's remaining absolute deadline instead of allocating
