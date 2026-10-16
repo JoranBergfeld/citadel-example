@@ -503,6 +503,18 @@ conflicting duplicate service receipts block. Pass labels or unrelated source ro
 cannot supply either census. Other canonical scenario/fault checks separately
 require their own service receipts.
 
+The fixed Candidate Planner `model-limits` worker now exercises exact 16,000-input/
+2,000-output conservative admission through the real framework, an overlapping
+reservation refusal, and 16,001-/2,001-token refusals without another dispatch.
+It uses only its assigned MI, its own Key Vault subscription secret and its existing
+private operation container. The shared run lease remains held through real
+60-second isolation windows before and after inference; a competing lease must
+actually fail. The private intent, 512-read pool and original 900-second deadline
+are not replenished. Independent raw-ledger counters, queried model/Blob/APIM
+receipts and immutable publication hashes are required for all three exported
+limits. Malformed usage leaves admission unresolved; no automatic retry occurs.
+Other numeric-limit and restart controls listed below remain unimplemented.
+
 1. Perform deployed validation of the implemented telemetry configuration,
    application ingestion counts and gateway/storage correlation proofs.
    Dependency approval is settled; no existing pin was changed and no cloud

@@ -65,10 +65,13 @@ def fingerprints(lifecycle):
               "telemetry_inputs": telemetry,
               "gateway_targets": {actor: hashlib.sha256(
                   (gateway + "/" + actor + ("/mcp" if actor == "reference-data" else "/a2a")).encode()).hexdigest()
-                  for actor in (*OPERATIONS, "reference-data")},
+                  for actor in (*OPERATIONS, "reference-data")} | {
+                      "model": hashlib.sha256((gateway + "/openai/v1/chat/completions").encode()).hexdigest()},
               "storage_targets": {container: hashlib.sha256(
                   (account + "/" + container + "/ledger-v1.json").encode()).hexdigest()
-                  for container in (*OPERATIONS.values(), "drafts", "findings")},
+                  for container in (*OPERATIONS.values(), "drafts", "findings")} | {
+                      "active-run-slot": hashlib.sha256(
+                          (account + "/planner-operations/active-run-slot.json").encode()).hexdigest()},
               "runtime_identities": {
                   app["app"].split("/")[-1].removeprefix(lifecycle.id + "-"):
                       hashlib.sha256(str(UUID(app["identityPrincipalId"])).encode()).hexdigest()
@@ -182,6 +185,9 @@ class Harness:
                 FaultAcceptance(self.lifecycle).execute(report, mode="read-limit")
                 report["finished"] = time.time()
                 self.save(report)
+                FaultAcceptance(self.lifecycle).execute(report, mode="model-limits")
+                report["finished"] = time.time()
+                self.save(report)
                 from .release_harness import ReleaseAcceptance
                 ReleaseAcceptance(self.lifecycle).execute(report)
                 report["finished"] = time.time()
@@ -258,6 +264,8 @@ class Harness:
             for result in FaultAcceptance.evaluate(report, report["evidence"], mode="admission-limits"):
                 self._replace(report, result)
             for result in FaultAcceptance.evaluate(report, report["evidence"], mode="read-limit"):
+                self._replace(report, result)
+            for result in FaultAcceptance.evaluate(report, report["evidence"], mode="model-limits"):
                 self._replace(report, result)
             from .release_harness import ReleaseAcceptance
             for result in ReleaseAcceptance.evaluate(report, report["evidence"]):

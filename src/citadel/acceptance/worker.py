@@ -45,10 +45,11 @@ def validate_request(request, *, enabled, workload, client_id):
             or workload not in AGENTS or str(UUID(request["client_id"])) != str(UUID(client_id))
             or request["mode"] not in ("gateway-matrix", "operation-faults", "admission-limits", "read-limit", "release-faults",
                                       "draft-versions", "immutable-versions", "storage-boundaries", "origin-boundary",
-                                      "direct-model")
+                                      "direct-model", "model-limits")
             or request["mode"] == "operation-faults" and workload not in ("candidate-planner", "briefing-author")
             or request["mode"] == "admission-limits" and workload != "candidate-planner"
             or request["mode"] == "read-limit" and workload != "candidate-planner"
+            or request["mode"] == "model-limits" and workload != "candidate-planner"
             or request["mode"] == "release-faults" and workload != "release-reviewer"
             or request["mode"] == "draft-versions" and workload != "evidence-assessor"
             or request["mode"] == "immutable-versions" and workload != "release-reviewer"
@@ -100,7 +101,8 @@ async def publish_operation(container, *, run_id, workload, principal_id, check_
     from .release_probes import RELEASE_CHECKS
     if not (workload == "release-reviewer" and check_id in RELEASE_CHECKS | {"fault.immutable-versions"}) and not (
             workload == "evidence-assessor" and check_id == "fault.concurrent-version-conflict") and not (
-            workload == "candidate-planner" and check_id in ("limit.agent_executions", "limit.read_attempts_run")) and (
+            workload == "candidate-planner" and check_id in (
+                "limit.agent_executions", "limit.read_attempts_run", "limit.input_tokens_attempt")) and (
             workload not in ("candidate-planner", "briefing-author") or check_id not in {
             "fault.dropped-committed-write", "fault.pending-incomplete", "fault.fenced-explicit-retry",
             "fault.safe-read-recovery", "fault.safe-read-exhaustion", "fault.deadline-no-late-effect"}):
@@ -258,6 +260,67 @@ async def run_release_faults(config, request, credential, pool, container):
     return results
 
 
+async def run_model_limits(config, request, credential, pool, container, store):
+    from agent_framework.exceptions import ChatClientException
+    from citadel.operations.blob import AzureBlobLedger
+    from citadel.runtime.model import GovernedModel
+    from .admission_limits import global_slot
+    from .model_limits import ModelLimits
+    scope, operation, started = pool.scope, uuid4().hex, time.time()
+    results, state = [], "blocked"
+    try:
+        ledger = AzureBlobLedger(container.get_blob_client(scope + "/ledger-v1.json"), control_plane=True)
+        await ledger.initialize()
+        bounded = ProbeLedger(ledger, pool, request["deadline"])
+
+        async def cooldown(after):
+            elapsed_end = time.monotonic() + 60
+            while time.time() < after + 60 or time.monotonic() < elapsed_end:
+                if time.time() >= request["deadline"]:
+                    raise OperationError("deadline", "Shared model cooldown exceeded its inherited deadline")
+                await asyncio.sleep(min(5, max(0, request["deadline"] - time.time())))
+
+        with read_scope(pool, deadline=request["deadline"]), correlate(request["run_id"], operation, config.target):
+            before = await global_slot(container, run_id=request["run_id"],
+                operation_id=operation, deadline=request["deadline"])
+            if [row.get("status_code") for row in before["steps"]] != [200, 409, 200]:
+                raise OperationError("conflict", "Actual globally exclusive model slot required")
+            if config.tokens_per_minute < 18000:
+                raise OperationError("rate_limited", "Actual quota cannot fund the exact token-boundary control")
+            await pool.admit()
+            async with SecretClient(config.vault, credential, api_version="2025-07-01",
+                    retry_total=0, connection_timeout=5, read_timeout=30) as vault:
+                async with asyncio.timeout(max(0, min(30, request["deadline"] - time.time()))):
+                    secret = await vault.get_secret(config.subscription_secret)
+            if not secret.value:
+                raise OperationError("unavailable", "Allocated subscription credential missing")
+            model = GovernedModel(config.target, config.gateway, secret.value, config.model_deployment)
+            try:
+                await cooldown(before["steps"][-1]["finished"])
+                actual = await ModelLimits(bounded, model=model, enabled=True, deadline=request["deadline"],
+                    tokens_per_minute=config.tokens_per_minute).boundaries(operation_id=operation)
+            finally:
+                await model.close()
+            await cooldown(actual["model"]["finished"])
+            after = await global_slot(container, run_id=request["run_id"],
+                operation_id=operation + "-end", deadline=request["deadline"])
+            if [row.get("status_code") for row in after["steps"]] != [200, 409, 200]:
+                raise OperationError("conflict", "Model control lost global exclusion")
+            actual["slot"] = {"before": before, "after": after}
+            results.append(await publish_operation(container, run_id=request["run_id"], workload=config.target,
+                principal_id=os.environ["AZURE_PRINCIPAL_ID"], check_id="limit.input_tokens_attempt",
+                actual=actual, started=started, deadline=request["deadline"]))
+            state = "complete"
+        await store.release_run(scope)
+    except (OperationError, ValueError, TimeoutError, ChatClientException):
+        pass
+    async with asyncio.timeout(max(0, min(30, request["deadline"] - time.time()))):
+        await container.get_blob_client(scope + "/observations.json").upload_blob(
+            canonical_bytes({"schema_version": 1, "run_id": request["run_id"], "state": state,
+                             "observations": results}), overwrite=False, timeout=5)
+    return results
+
+
 async def run_gateway_matrix(config, request):
     """No supplied credentials, identity substitution, developer fallback or raw URL."""
     validate_request(request, enabled=os.environ.get("CITADEL_ACCEPTANCE_ENABLED") == "true",
@@ -266,7 +329,7 @@ async def run_gateway_matrix(config, request):
     if direct_model and request["model"]["deployment"] != config.model_deployment:
         raise ValueError("Model control cannot change the allocated model deployment")
     async with ManagedIdentityCredential(client_id=config.client_id,
-            **({"retry_total": 0} if direct_model else {})) as credential:
+            **({"retry_total": 0} if direct_model or request["mode"] == "model-limits" else {})) as credential:
         async with ContainerClient(config.blob, config.operations_container, credential=credential,
                 api_version="2026-10-06", retry_total=0, retry_connect=0, retry_read=0, retry_status=0,
                 connection_timeout=5, read_timeout=30) as container:
@@ -298,6 +361,8 @@ async def run_gateway_matrix(config, request):
             if not await store.open_pool(scope, exclusive=config.target == "candidate-planner"):
                 raise ValueError("Existing probe admission cannot be replayed")
             pool = TicketPool(store, scope, 512)
+            if request["mode"] == "model-limits":
+                return await run_model_limits(config, request, credential, pool, container, store)
             if request["mode"] in ("release-faults", "draft-versions", "immutable-versions"):
                 return await run_release_faults(config, request, credential, pool, container)
             if request["mode"] == "storage-boundaries":

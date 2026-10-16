@@ -15,16 +15,19 @@ from .revision import RevisionProbe
 from .storage_probes import StorageControls
 from .admission_limits import ADMISSION_CHECKS, admission_snapshot, evaluate_admission
 from .read_limit import read_snapshot, evaluate_read_boundary
+from .model_limits import MODEL_BOUNDARY_CHECKS, evaluate_model_boundaries
 
 
 def _groups(mode):
+    if mode == "model-limits":
+        return {"limit.input_tokens_attempt": MODEL_BOUNDARY_CHECKS}
     if mode == "read-limit":
         return {"limit.read_attempts_run": {"limit.read_attempts_run"}}
     if mode == "admission-limits":
         return {"limit.agent_executions": ADMISSION_CHECKS}
     if mode == "operation-faults":
         return OPERATION_CHECKS
-    raise ValueError("Only fixed operation, read and nonmodel admission modes are supported")
+    raise ValueError("Only fixed operation, read and bounded admission modes are supported")
 
 
 def bind_operation_result(result, *, run_id, principal, account, mode="operation-faults"):
@@ -67,6 +70,20 @@ def bind_operation_result(result, *, run_id, principal, account, mode="operation
                         for index, step in enumerate(slot["steps"]))):
                 raise Blocked("admission_global_slot_binding_conflict")
             ids.extend(identity(step["operation_id"]) for step in slot["steps"])
+        if mode == "model-limits":
+            slots = row["actual"].get("slot")
+            if not isinstance(slots, dict) or set(slots) != {"before", "after"}:
+                raise Blocked("model_boundary_global_slot_binding_conflict")
+            for side, prefix in (("before", operation), ("after", operation + "-end")):
+                slot = slots[side]
+                if (not isinstance(slot, dict) or slot.get("scope_sha256") != sha256("acceptance/" + run_id)
+                        or not isinstance(slot.get("steps"), list) or len(slot["steps"]) != 3
+                        or any(not isinstance(step, dict) or step.get("operation_id") != prefix + f"-slot{index}"
+                            or step.get("target") != hashlib.sha256(
+                                f"{account}/planner-operations/active-run-slot.json".encode()).hexdigest()
+                            for index, step in enumerate(slot["steps"]))):
+                    raise Blocked("model_boundary_global_slot_binding_conflict")
+                ids.extend(identity(step["operation_id"]) for step in slot["steps"])
         checks.add(check)
     if len(ids) != len(set(ids)) or result["state"] == "complete" and checks != set(groups):
         raise Blocked("operation_worker_coverage_conflict")
@@ -80,7 +97,8 @@ class FaultAcceptance:
     def execute(self, report, *, mode="operation-faults"):
         _groups(mode)
         admission = mode == "admission-limits"
-        phase_key = "read_phase" if mode == "read-limit" else "admission_phase" if admission else "operation_phase"
+        phase_key = ("model_boundary_phase" if mode == "model-limits" else "read_phase" if mode == "read-limit"
+                     else "admission_phase" if admission else "operation_phase")
         if phase_key in report:
             raise Blocked("operation_probe_intent_requires_reconciliation")
         accounts = [resource for resource in self.lifecycle.value["inventory"]
@@ -123,7 +141,7 @@ class FaultAcceptance:
             for row in phase["observations"]:
                 phase["snapshots"][row["operation_id"]] = snapshot | (
                     read_snapshot(document) if mode == "read-limit" else
-                    admission_snapshot(document, row["actual"]) if admission else
+                    admission_snapshot(document, row["actual"]) if admission or mode == "model-limits" else
                     operation_snapshot(document, "candidate-planner", row["actual"]))
             phase["state"] = "observed" if result["state"] == "complete" else "blocked"
         except (AzureError, OperationError, Blocked, ValueError, KeyError, TypeError, TimeoutError):
@@ -137,7 +155,7 @@ class FaultAcceptance:
     def evaluate(report, evidence, *, mode="operation-faults"):
         groups = _groups(mode)
         admission = mode == "admission-limits"
-        phase = report.get("read_phase" if mode == "read-limit" else
+        phase = report.get("model_boundary_phase" if mode == "model-limits" else "read_phase" if mode == "read-limit" else
                            "admission_phase" if admission else "operation_phase", {})
         snapshots = phase.get("snapshots", {})
         output = []
@@ -152,10 +170,15 @@ class FaultAcceptance:
             snapshot = snapshot | {"runtime_identity": observer}
             for check in sorted(groups.get(row.get("probe_id"), set())):
                 observation = row | {"check_id": check}
-                evaluator = evaluate_read_boundary if mode == "read-limit" else evaluate_admission if admission else evaluate_operation
+                evaluator = (evaluate_model_boundaries if mode == "model-limits" else
+                             evaluate_read_boundary if mode == "read-limit" else evaluate_admission if admission else evaluate_operation)
                 result = evaluator(observation, snapshot, evidence,
                     runtime_identity=report.get("runtime_identities", {}).get("candidate-planner"),
-                    observer_identity=observer)
+                    observer_identity=observer, **({
+                        "subscription": report.get("subscription_bindings", {}).get("candidate-planner"),
+                        "target": report.get("gateway_targets", {}).get("model"),
+                        "slot_target": report.get("storage_targets", {}).get("active-run-slot")}
+                        if mode == "model-limits" else {}))
                 output.append(result | {"expected": "boundary" if check.startswith("limit.") else "fault",
                     "actual": {"observation": observation, "control": snapshot}})
         return output
