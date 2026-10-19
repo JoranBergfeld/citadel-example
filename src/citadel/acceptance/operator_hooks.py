@@ -210,6 +210,9 @@ class Harness:
                 FaultAcceptance(self.lifecycle).execute(report, mode="model-timeout")
                 report["finished"] = time.time()
                 self.save(report)
+                FaultAcceptance(self.lifecycle).execute(report, mode="process-restart")
+                report["finished"] = time.time()
+                self.save(report)
                 from .release_harness import ReleaseAcceptance
                 ReleaseAcceptance(self.lifecycle).execute(report)
                 report["finished"] = time.time()
@@ -299,6 +302,8 @@ class Harness:
                 for result in FaultAcceptance.evaluate(report, report["evidence"], mode=mode):
                     self._replace(report, result)
             for result in FaultAcceptance.evaluate(report, report["evidence"], mode="model-timeout"):
+                self._replace(report, result)
+            for result in FaultAcceptance.evaluate(report, report["evidence"], mode="process-restart"):
                 self._replace(report, result)
             from .release_harness import ReleaseAcceptance
             for result in ReleaseAcceptance.evaluate(report, report["evidence"]):

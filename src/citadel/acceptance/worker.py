@@ -46,11 +46,12 @@ def validate_request(request, *, enabled, workload, client_id):
             or workload not in AGENTS or str(UUID(request["client_id"])) != str(UUID(client_id))
             or request["mode"] not in ("gateway-matrix", "operation-faults", "admission-limits", "read-limit", "release-faults",
                                       "draft-versions", "immutable-versions", "storage-boundaries", "origin-boundary",
-                                      "direct-model", "model-limits", "model-timeout", *COUNTER_MODES)
+                                      "direct-model", "model-limits", "model-timeout", "process-restart", *COUNTER_MODES)
             or request["mode"] == "operation-faults" and workload not in ("candidate-planner", "briefing-author")
             or request["mode"] == "admission-limits" and workload != "candidate-planner"
             or request["mode"] == "read-limit" and workload != "candidate-planner"
             or request["mode"] in ("model-limits", "model-timeout") and workload != "candidate-planner"
+            or request["mode"] == "process-restart" and workload != "candidate-planner"
             or request["mode"] in COUNTER_MODES and workload != "candidate-planner"
             or request["mode"] == "release-faults" and workload != "release-reviewer"
             or request["mode"] == "draft-versions" and workload != "evidence-assessor"
@@ -109,7 +110,8 @@ async def publish_operation(container, *, run_id, workload, principal_id, check_
                 *COUNTER_CHECKS.values())) and (
             workload not in ("candidate-planner", "briefing-author") or check_id not in {
             "fault.dropped-committed-write", "fault.pending-incomplete", "fault.fenced-explicit-retry",
-            "fault.safe-read-recovery", "fault.safe-read-exhaustion", "fault.deadline-no-late-effect"}):
+            "fault.safe-read-recovery", "fault.safe-read-exhaustion", "fault.deadline-no-late-effect",
+            "fault.restart-no-replay"}):
         raise ValueError("Only fixed durable-operation observations may be published")
     blob = container.get_blob_client(f"acceptance/{run_id}/observations/{operation}.json")
     row = {"check_id": check_id, "probe_id": check_id, "run_id": run_id, "operation_id": operation,
@@ -444,7 +446,7 @@ async def run_gateway_matrix(config, request):
                     canonical_bytes({"schema_version": 1, "run_id": request["run_id"],
                                      "state": state, "observations": results}), overwrite=False, timeout=5)
                 return results
-            if request["mode"] in ("operation-faults", "admission-limits", "read-limit"):
+            if request["mode"] in ("operation-faults", "admission-limits", "read-limit", "process-restart"):
                 from citadel.operations.blob import AzureBlobLedger
                 from citadel.acceptance.faults import OperationProbes
                 ledger = AzureBlobLedger(container.get_blob_client(scope + "/ledger-v1.json"), control_plane=True)
@@ -460,7 +462,12 @@ async def run_gateway_matrix(config, request):
                         ("fault.fenced-explicit-retry", faults.fenced_retry),
                         ("fault.deadline-no-late-effect", faults.deadline_no_late_effect),
                     ]
-                    if request["mode"] == "read-limit":
+                    if request["mode"] == "process-restart":
+                        from .process_restart import process_restart
+                        async def restart(operation_id):
+                            return await process_restart(request, operation_id=operation_id)
+                        callbacks = [("fault.restart-no-replay", restart)]
+                    elif request["mode"] == "read-limit":
                         from .read_limit import read_boundary
                         async def read_limit(operation_id):
                             return await read_boundary(container, pool, enabled=True, workload=config.target,

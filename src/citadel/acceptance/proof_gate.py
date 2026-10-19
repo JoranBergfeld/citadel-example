@@ -187,6 +187,12 @@ def evaluate_check(check, report):
                 or control["runtime_identity"] in identities.values()
                 or control.get("operation_id") not in operations):
             return blocked
+        if check["check_id"] == "fault.restart-no-replay":
+            processes = observation.get("actual", {}).get("processes")
+            if (not isinstance(processes, list) or len(processes) != 2
+                    or any(not isinstance(process, dict) or process.get("operation_id") not in operations
+                           for process in processes)):
+                return blocked
         if (check["check_id"] in MODEL_BOUNDARY_CHECKS or check["check_id"] in counter_checks
                 or check["check_id"] == "limit.model_timeout_seconds"):
             nested = observation.get("actual")

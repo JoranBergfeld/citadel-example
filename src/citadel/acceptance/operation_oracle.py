@@ -19,6 +19,7 @@ OPERATION_CHECKS = {
     "fault.safe-read-exhaustion": {"fault.safe-read-exhaustion", "limit.safe_read_retries"},
     "limit.safe_read_timeout_seconds": {"limit.safe_read_timeout_seconds"},
 }
+RESTART_CHECKS = {"fault.restart-no-replay": {"fault.restart-no-replay"}}
 
 
 def operation_snapshot(document, actor, result):
@@ -32,6 +33,13 @@ def operation_snapshot(document, actor, result):
         "product_sha256": sha256(record["product"]) if record is not None and "product" in record else None,
         "sha256": sha256(record) if record is not None else None,
     }}
+    if "processes" in result:
+        projection["ledger_sha256"] = sha256(document)
+        budget = document["budgets"].get(result["operation_id"], {})
+        projection["budget_state"] = {key: budget.get(key) for key in
+                                      ("run_id", "deadline", "closed", "remaining")}
+        projection["budget_state"].update(agent_executions=len(budget.get("agents", {})),
+            model_active=budget.get("model") is not None, child_active=budget.get("child") is not None)
     if "missing_operation_id" in result:
         missing = operation_key(actor, "acceptance", result["missing_operation_id"])
         projection["missing_state"] = "missing" if missing not in document["operations"] else "present"
@@ -65,9 +73,10 @@ def evaluate_operation(observation, snapshot, evidence, *, runtime_identity, obs
                "reason": "durable_fault_state_or_service_correlation_missing"}
     actual, state = observation.get("actual"), snapshot.get("operation_state")
     group = observation.get("probe_id")
-    if (not isinstance(group, str) or group not in OPERATION_CHECKS
+    groups = OPERATION_CHECKS | RESTART_CHECKS
+    if (not isinstance(group, str) or group not in groups
             or not isinstance(observation.get("check_id"), str)
-            or observation.get("check_id") not in OPERATION_CHECKS[group]
+            or observation.get("check_id") not in groups[group]
             or any(not isinstance(observation.get(key), str)
                    or re.fullmatch("[A-Za-z0-9_-]{1,64}", observation[key]) is None
                    for key in ("operation_id", "run_id"))
@@ -92,6 +101,8 @@ def evaluate_operation(observation, snapshot, evidence, *, runtime_identity, obs
         run_id=observation.get("run_id"), operation_id=observation.get("operation_id"),
         caller=observation["caller"]):
         return blocked
+    if group == "fault.restart-no-replay":
+        return evaluate_restart(observation, snapshot, evidence, runtime_identity=runtime_identity)
     if group == "limit.safe_read_timeout_seconds":
         from .read_timeout import evaluate_timeout_reads
         return evaluate_timeout_reads(observation, snapshot, evidence, runtime_identity=runtime_identity)
@@ -158,3 +169,64 @@ def evaluate_operation(observation, snapshot, evidence, *, runtime_identity, obs
     return blocked | {"status": "pass" if valid else "fail",
         "business_state": state.get("state"),
         "reason": "verified_durable_fault" if valid else "durable_fault_invariant_failed"}
+
+
+def evaluate_restart(observation, snapshot, evidence, *, runtime_identity):
+    blocked = {"check_id": "fault.restart-no-replay", "status": "blocked",
+               "reason": "actual_process_death_restart_and_independent_unchanged_state_required"}
+    actual = observation["actual"]
+    try:
+        processes = actual["processes"]
+        if not isinstance(processes, list) or len(processes) != 2:
+            return blocked
+        for process, suffix, exit_code in zip(processes, ("-crashed", "-restarted"), (73, 0)):
+            value = process["actual"]
+            operation = observation["operation_id"] + suffix
+            if (process["operation_id"] != operation or process["probe_id"] != "fault.restart-no-replay"
+                    or process["check_id"] != "fault.restart-no-replay"
+                    or type(process["exit_code"]) is not int or process["exit_code"] != exit_code
+                    or process["run_id"] != observation["run_id"] or process["caller"] != "candidate-planner"
+                    or process["runtime_identity"] != runtime_identity or process["status_code"] != 201
+                    or value["operation_id"] != operation or value["state"] != "running"
+                    or type(value["artifact_count"]) is not int or value["artifact_count"] != 0
+                    or type(value["process_id"]) is not int or value["process_id"] <= 0
+                    or not isinstance(value["boot_id"], str) or re.fullmatch("[a-f0-9]{32}", value["boot_id"]) is None
+                    or not observation["started"] <= process["started"] <= process["finished"] <= observation["finished"]
+                    or not _matched(process, evidence, "storage", runtime_identity, "PutBlob",
+                        client_request_id=operation)):
+                return blocked
+            events = [row for row in evidence if isinstance(row.get("facts"), dict)
+                and row["facts"].get("sha256") == sha256(value)
+                and row["facts"].get("probe_id") == "fault.restart-no-replay"]
+            if not _matched(process, events, "application", runtime_identity, "execution",
+                    run_id=observation["run_id"], operation_id=operation, caller="candidate-planner"):
+                return blocked
+        first, second = [process["actual"] for process in processes]
+        state, budget = snapshot["operation_state"], snapshot["budget_state"]
+        valid = (processes[0]["finished"] <= processes[1]["started"]
+            and first["process_id"] != second["process_id"] and first["boot_id"] != second["boot_id"]
+            and second["replay"] == second["retried"] == second["response"] == "conflict"
+            and first["deadline"] == second["deadline"] == state["deadline"]
+            and type(state["deadline"]) in (int, float) and math.isfinite(state["deadline"])
+            and observation["finished"] < state["deadline"] <= observation["started"] + 900
+            and budget["deadline"] == state["deadline"] and budget["run_id"] == actual["operation_id"]
+            and budget["closed"] is False and type(budget["agent_executions"]) is int
+            and budget["agent_executions"] == 1
+            and budget["model_active"] is False and budget["child_active"] is False
+            and budget["remaining"] == {"agents": 41, "models": 128, "tokens": 1_000_000, "reads": 512}
+            and all(type(second[key]) in (int, float) and math.isfinite(second[key])
+                    for key in ("monotonic_started", "monotonic_finished"))
+            and second["monotonic_finished"] - second["monotonic_started"] >= 60
+            and state["state"] == actual["state"] == "running"
+            and state["input_hash"] == sha256({"inputs": {"kind": "fixed-process-restart"},
+                "run_id": actual["operation_id"], "deadline": state["deadline"]})
+            and type(state["generation"]) is int and state["generation"] == 1
+            and type(state["artifact_count"]) is int and type(actual["artifact_count"]) is int
+            and state["artifact_count"] == actual["artifact_count"] == 0 and state["product_sha256"] is None
+            and hash_value(actual["before_sha256"])
+            and actual["before_sha256"] == actual["after_sha256"] == snapshot["ledger_sha256"] == snapshot["sha256"]
+                == first["before_sha256"] == first["after_sha256"] == second["before_sha256"] == second["after_sha256"])
+        return blocked | {"status": "pass" if valid else "fail",
+            "reason": "actual_process_restart_preserved_admission_without_replay" if valid else "restart_state_changed"}
+    except (KeyError, TypeError, ValueError, IndexError):
+        return blocked

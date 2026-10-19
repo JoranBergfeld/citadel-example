@@ -21,6 +21,8 @@ from .model_counters import COUNTER_MODES, COUNTER_CHECKS, COUNTER_GROUPS, evalu
 
 
 def _groups(mode):
+    if mode == "process-restart":
+        return {"fault.restart-no-replay": {"fault.restart-no-replay"}}
     if mode == "model-timeout":
         return {"limit.model_timeout_seconds": {"limit.model_timeout_seconds"}}
     if mode in COUNTER_MODES:
@@ -58,6 +60,15 @@ def bind_operation_result(result, *, run_id, principal, account, mode="operation
                     f"{account}/planner-operations/acceptance/{run_id}/observations/{operation}.json".encode()).hexdigest()):
             raise Blocked("operation_worker_authority_or_target_conflict")
         ids.append(operation)
+        if mode == "process-restart":
+            processes = row["actual"].get("processes")
+            if (not isinstance(processes, list) or len(processes) != 2
+                    or any(not isinstance(process, dict) or process.get("operation_id") != operation + suffix
+                        or process.get("target") != hashlib.sha256(
+                            f"{account}/planner-operations/acceptance/{run_id}/observations/{operation}{suffix}.json".encode()).hexdigest()
+                        for process, suffix in zip(processes, ("-crashed", "-restarted")))):
+                raise Blocked("restart_process_receipt_binding_conflict")
+            ids.extend(identity(process["operation_id"]) for process in processes)
         if check == "limit.safe_read_timeout_seconds":
             steps = row["actual"].get("steps")
             if (not isinstance(steps, list) or len(steps) != 3 or any(not isinstance(step, dict)
@@ -113,6 +124,7 @@ class FaultAcceptance:
         phase_key = ("model_counter_" + COUNTER_MODES[mode] + "_phase" if mode in COUNTER_MODES else
                      "model_timeout_phase" if mode == "model-timeout" else
                      "model_boundary_phase" if mode == "model-limits" else "read_phase" if mode == "read-limit"
+                     else "restart_phase" if mode == "process-restart"
                      else "admission_phase" if admission else "operation_phase")
         if phase_key in report:
             raise Blocked("operation_probe_intent_requires_reconciliation")
@@ -179,6 +191,7 @@ class FaultAcceptance:
         phase = report.get("model_counter_" + COUNTER_MODES[mode] + "_phase" if mode in COUNTER_MODES else
                            "model_timeout_phase" if mode == "model-timeout" else
                            "model_boundary_phase" if mode == "model-limits" else "read_phase" if mode == "read-limit" else
+                           "restart_phase" if mode == "process-restart" else
                            "admission_phase" if admission else "operation_phase", {})
         snapshots = phase.get("snapshots", {})
         output = []
