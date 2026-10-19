@@ -289,6 +289,12 @@ before ARM. The derived `createApiCenter` parameter skips only the service PUT;
 workspace and inventory children still reconcile. No undocumented SKU field is
 sent, and the human plan-observation gate remains required.
 
+Team context-reader inventory constructs extension IDs from the actual secret
+ID and assignment name. This avoids the pinned Bicep compiler emitting an
+unnamed `copyIndex()` for the scope inside a named variable loop, which Azure
+rejects before deploying any team resources. The assignments and their scopes
+are unchanged.
+
 ## Local versus live validation
 
 Use the exact verified Bicep executable (`--version` must be **0.48.1**):

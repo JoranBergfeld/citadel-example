@@ -121,6 +121,13 @@ class TemplateTests(unittest.TestCase):
             self.assertTrue(vault["properties"]["enableRbacAuthorization"])
             self.assertEqual(vault["properties"]["softDeleteRetentionInDays"], 7)
 
+    def test_team_extension_role_inventory_preserves_its_named_variable_loop_index(self):
+        copies = self.module("team-")["variables"]["copy"]
+        readers = next(row for row in copies if row["name"] == "readerInventory")
+        self.assertIn("copyIndex('readerInventory')", readers["input"])
+        for row in copies:
+            self.assertNotIn("copyIndex()", json.dumps(row), row["name"])
+
     def test_gateway_has_no_wildcard_routes_and_verifies_every_backend_tls_identity(self):
         gateway = self.module("gateway-")
         for resource in gateway["resources"]:

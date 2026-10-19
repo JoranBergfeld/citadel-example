@@ -140,7 +140,8 @@ resource vaultDiagnostics 'Microsoft.Insights/diagnosticSettings@2021-05-01-prev
 var identityInventory = [for (w, i) in workloads: identities[i].id]
 var containerInventory = [for (c, i) in containersByTeam[team]: containers[i].id]
 var contextInventory = [for (w, i) in workloads: contextSecrets[i].id]
-var readerInventory = [for (w, i) in workloads: contextReaders[i].id]
+// The pinned compiler loses the scope's named copy index through an extension resource's .id.
+var readerInventory = [for (w, i) in workloads: extensionResourceId(contextSecrets[i].id, 'Microsoft.Authorization/roleAssignments', contextReaders[i].name)]
 output roleInventory array = [for (g, i) in grantsByTeam[team]: dataRoles[i].outputs.assignmentId]
 output credentialInventory array = [for (a, i) in agents: subscriptions[i].outputs.inventory]
 output inventory object = {
