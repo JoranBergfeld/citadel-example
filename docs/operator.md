@@ -27,6 +27,13 @@ Deployment then stops with `api_center_portal_observation_required`, before data
 bootstrap, image build or runtime activation. No provider plan field is fabricated,
 and no API, SKU or policy is changed.
 
+On same-ID retries, fresh protected inventory and an exact service GET must
+verify the existing API Center's ID, ownership tag, region and successful
+provisioning. The operator then skips only its service PUT, avoiding the live
+provider's undocumented required-SKU update error. Initial creation and child
+resource reconciliation remain enabled. A returned SKU is diagnostic metadata,
+not a substitute for the approved portal observation.
+
 The operator must observe the actual created resource, privately record the
 observation and supporting evidence, then explicitly resume the same deployment.
 There is no `--assume-free`/boolean bypass or automatic continuation. Local fixtures

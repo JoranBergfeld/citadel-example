@@ -279,6 +279,16 @@ effective inventory completeness remain operator-owned **live gates**.
 There is no invented `sku: Free` field, paid-plan substitution, API upgrade,
 native-import claim or local claim that the provider accepted these records.
 
+Live deployment exposed a stable-provider update incompatibility: initial service
+creation succeeded, but repeating the same service PUT failed with a required
+null SKU, even though SKU is absent from the pinned published schema. The operator
+therefore creates API Center only when absent from fresh protected inventory.
+For reuse it verifies the exact expected service ID, deployment tag, region and
+successful provisioning through the same `2024-03-01` GET. A mismatch blocks
+before ARM. The derived `createApiCenter` parameter skips only the service PUT;
+workspace and inventory children still reconcile. No undocumented SKU field is
+sent, and the human plan-observation gate remains required.
+
 ## Local versus live validation
 
 Use the exact verified Bicep executable (`--version` must be **0.48.1**):

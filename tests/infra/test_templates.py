@@ -162,6 +162,16 @@ class TemplateTests(unittest.TestCase):
         centers = [r for r in platform["resources"] if r["type"] == "Microsoft.ApiCenter/services"]
         self.assertEqual(len(centers), 1)
         self.assertEqual(centers[0]["apiVersion"], "2024-03-01")
+        self.assertEqual(centers[0]["condition"], "[parameters('createApiCenter')]")
+        self.assertTrue(self.template["parameters"]["createApiCenter"]["defaultValue"])
+        module = next(r for r in self.template["resources"]
+                      if r["type"] == "Microsoft.Resources/deployments"
+                      and r["name"].startswith("[format('platform-"))
+        self.assertEqual(module["properties"]["parameters"]["createApiCenter"],
+                         {"value": "[parameters('createApiCenter')]"})
+        workspace = next(r for r in platform["resources"]
+                         if r["type"] == "Microsoft.ApiCenter/services/workspaces")
+        self.assertNotIn("condition", workspace)
         self.assertNotIn("sku", centers[0])
         self.assertNotIn("sku", centers[0].get("properties", {}))
         self.assertEqual([r for r in platform["resources"] if r["type"].endswith("/apis")], [])

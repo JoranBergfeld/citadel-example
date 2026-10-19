@@ -25,12 +25,13 @@ class AzureFixture:
         self.groups, self.resources = [], {}
         self.fail_delete = None
         self.false_success = False
+        self.fail_after_center_create = False
         self.subscription = "/subscriptions/" + config["subscriptionId"]
         self.root = self.subscription + "/resourceGroups/citadel-test19-"
         self.platform = self.root + "platform/providers/"
         self.registry = self.platform + "Microsoft.ContainerRegistry/registries/actualcreated"
         self.workspace = self.platform + "Microsoft.OperationalInsights/workspaces/citadel-test19-logs"
-        self.center = self.platform + "Microsoft.ApiCenter/services/inventory"
+        self.center = self.platform + "Microsoft.ApiCenter/services/citadel-test19-inventory"
         self.vaults = {self.root + team + "/providers/Microsoft.KeyVault/vaults/" + team + "vault": {
             "properties": {"enableRbacAuthorization": True, "enableSoftDelete": True,
                            "softDeleteRetentionInDays": 7}}
@@ -119,6 +120,17 @@ class AzureFixture:
                     self.outputs["inventory"]["capabilities"] = {"state": "not_configured"}
                 for group in self.groups:
                     self.resources.setdefault(group["name"], [])
+                center_exists = any(row["id"] == self.center for row in
+                                    self.resources["citadel-test19-platform"])
+                if params.get("createApiCenter", True) and center_exists:
+                    raise Blocked("api_center_update_requires_undocumented_sku")
+                if not center_exists:
+                    self.resources["citadel-test19-platform"].append({
+                        "id": self.center, "type": "Microsoft.ApiCenter/services",
+                        "tags": {"citadel-deployment": "test19"}})
+                if self.fail_after_center_create:
+                    self.fail_after_center_create = False
+                    raise Blocked("azure_command_failed")
                 result = {k: {"value": copy.deepcopy(v)} for k, v in self.outputs.items()}
                 return {"properties": {"provisioningState": "Succeeded", "outputs": result}}
             return {"properties": {"provisioningState": "Succeeded"}}
@@ -248,6 +260,44 @@ class DeploymentTests(test_cli.CliCase):
                 + "/providers/Microsoft.CognitiveServices/locations/westeurope/" + suffix,
                 "2024-10-01"), self.fixture.calls)
 
+    def test_partial_foundation_retry_reuses_owned_api_center_without_skipping_portal_gate(self):
+        self.fixture.fail_after_center_create = True
+        code, report = self.deploy()
+        self.assertEqual((code, report.get("code")), (2, "azure_command_failed"), report)
+        self.assertTrue(next(params for action, params in self.fixture.parameters
+                             if action == "create").get("createApiCenter", True))
+        self.assertNotIn("outputs", json.loads((self.state / "state.json").read_text()))
+        code, report = self.deploy()
+        self.assertEqual((code, report.get("code")), (2, "api_center_portal_observation_required"), report)
+        creates = [params for action, params in self.fixture.parameters if action == "create"]
+        self.assertFalse(creates[-1]["createApiCenter"])
+        self.assertFalse(any(params["deployRuntime"] for params in creates))
+        self.assertEqual(self.fixture.blobs, {})
+
+    def test_existing_api_center_conflicts_block_before_another_arm_request(self):
+        self.fixture.fail_after_center_create = True
+        self.assertEqual(self.deploy()[0], 2)
+        requests = len(self.fixture.parameters)
+        original = self.fixture.rest
+        for change in (
+            {"id": self.fixture.center + "-other"},
+            {"tags": {"citadel-deployment": "other"}},
+            {"location": "eastus"},
+            {"properties": {"provisioningState": "Failed"}},
+        ):
+            with self.subTest(change=change):
+                def changed(method, resource, api, body=None):
+                    result = original(method, resource, api, body)
+                    if resource == self.fixture.center:
+                        result.update(change)
+                    return result
+                self.fixture.rest = changed
+                code, report = self.deploy()
+                self.assertEqual((code, report.get("code")),
+                                 (2, "existing_api_center_configuration_conflict"), report)
+                self.assertEqual(len(self.fixture.parameters), requests)
+        self.fixture.rest = original
+
     def test_foundation_checks_actual_vault_flags_before_requesting_portal_observation(self):
         vault = next(iter(self.fixture.vaults.values()))["properties"]
         vault["enablePurgeProtection"] = True
@@ -304,6 +354,7 @@ class DeploymentTests(test_cli.CliCase):
         self.assertEqual((code, report.get("status")), (0, "deployed_unverified"), report)
         creates = [p for action, p in self.fixture.parameters if action == "create"]
         self.assertEqual([p["deployRuntime"] for p in creates], [False, False, True])
+        self.assertEqual([p["createApiCenter"] for p in creates], [True, False, False])
         self.assertEqual(len(self.fixture.blobs), 15)
 
     def test_wrong_non_free_or_unbound_observations_never_unlock_runtime(self):

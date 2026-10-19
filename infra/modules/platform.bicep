@@ -6,6 +6,7 @@ param publisherEmail string
 param gatewayCertificatePfx string
 param collectorPrincipalIds array
 param modelCapacity int
+param createApiCenter bool = true
 var tags = { 'citadel-deployment': deploymentId }
 
 resource workspace 'Microsoft.OperationalInsights/workspaces@2022-10-01' = {
@@ -79,7 +80,7 @@ resource registry 'Microsoft.ContainerRegistry/registries@2023-07-01' = {
   sku: { name: 'Basic' }
   properties: { adminUserEnabled: false }
 }
-resource center 'Microsoft.ApiCenter/services@2024-03-01' = {
+resource center 'Microsoft.ApiCenter/services@2024-03-01' = if (createApiCenter) {
   name: 'citadel-${deploymentId}-inventory'
   location: location
   tags: tags

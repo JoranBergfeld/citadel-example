@@ -9,6 +9,8 @@ param location string = 'westeurope'
 param publisherEmail string
 @description('False uses the four exact existing deployment-owned groups; inventory ownership must be verified first.')
 param createResourceGroups bool = true
+@description('False reuses the exact API Center service verified by fresh operator inventory; child resources still reconcile.')
+param createApiCenter bool = true
 @description('False provisions foundation only, before image build/push. True requires real digest-pinned images.')
 param deployRuntime bool = true
 @description('Five immutable ACR image references and actual command/args arrays, keyed by workload name.')
@@ -78,6 +80,7 @@ module platform 'modules/platform.bicep' = {
     gatewayCertificatePfx: gatewayCertificatePfx
     collectorPrincipalIds: collectorPrincipalIds
     modelCapacity: modelCapacity
+    createApiCenter: createApiCenter
   }
   dependsOn: [platformGroup]
 }

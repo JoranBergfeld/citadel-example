@@ -165,6 +165,22 @@ class Lifecycle:
     def parameters(self, runtime=False):
         result = {key: self.config[key] for key in ("deploymentId", "location", "publisherEmail",
                   "createResourceGroups", "collectorPrincipalIds", "modelCapacity")}
+        center_prefix = (self.subscription + "/resourceGroups/" + self.groups["platform"]
+                         + "/providers/Microsoft.ApiCenter/services/").lower()
+        centers = [rid for rid in self.value.get("active", [])
+                   if rid.lower().startswith(center_prefix)
+                   and "/" not in rid[len(center_prefix):]]
+        center_id = center_prefix + "citadel-" + self.id + "-inventory"
+        if centers:
+            if len(centers) != 1 or centers[0].lower() != center_id:
+                raise Blocked("existing_api_center_identity_conflict")
+            center = self.native.rest("get", centers[0], "2024-03-01")
+            if (center.get("id", "").lower() != center_id
+                    or center.get("tags", {}).get("citadel-deployment") != self.id
+                    or center.get("location") != self.config["location"]
+                    or center.get("properties", {}).get("provisioningState") != "Succeeded"):
+                raise Blocked("existing_api_center_configuration_conflict")
+        result["createApiCenter"] = not centers
         result.update(self.credentials())
         result["deployRuntime"] = runtime
         result["applications"] = self.value.get("applications", {}) if runtime else {}
