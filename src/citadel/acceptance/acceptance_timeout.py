@@ -45,6 +45,8 @@ class CachedAcceptanceHold:
 
 
 class CachedAcceptanceRevision:
+    environment_name = "CITADEL_ACCEPTANCE_HOLD"
+
     def __init__(self, lifecycle, *, operation_id, run_id, deadline, admit):
         self.lifecycle, self.operation_id, self.admit = lifecycle, operation_id, admit
         self.request = {"run_id": run_id, "deadline": deadline, "mode": "cached-acceptance"}
@@ -69,7 +71,7 @@ class CachedAcceptanceRevision:
         replacement = copy.deepcopy(original)
         replacement["containers"][0]["env"].extend([
             {"name": "CITADEL_ACCEPTANCE_ENABLED", "value": "true"},
-            {"name": "CITADEL_ACCEPTANCE_HOLD", "value": json.dumps(self.request)}])
+            {"name": self.environment_name, "value": json.dumps(self.request)}])
         self.original, self.replacement = original, replacement
         intents[self.operation_id] = {"state": "dispatching", "original": original,
             "replacement_sha256": sha256(replacement), "deadline": self.request["deadline"],
@@ -83,12 +85,15 @@ class CachedAcceptanceRevision:
     def _ready(self, suffix, expected_template):
         expected = self.app["app"].rsplit("/", 1)[-1] + "--" + suffix
         for _ in range(40):
+            bound = getattr(self, "readiness_deadline", self.request["deadline"])
+            if time.time() >= bound:
+                raise Blocked("fixed_runtime_revision_readiness_deadline")
             self.admit()
             actual = self.lifecycle.native.rest("get", self.app["app"], "2025-01-01")["properties"]
             if (actual.get("latestRevisionName") == actual.get("latestReadyRevisionName") == expected
                     and template(actual["template"]) == expected_template):
                 return
-            time.sleep(min(15, max(0, self.request["deadline"] - time.time())))
+            time.sleep(min(15, max(0, bound - time.time())))
         raise Blocked("cached_acceptance_revision_readiness_unverified")
 
     def restore(self):

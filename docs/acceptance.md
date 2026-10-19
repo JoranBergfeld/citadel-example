@@ -513,7 +513,8 @@ actually fail. The private intent, 512-read pool and original 900-second deadlin
 are not replenished. Independent raw-ledger counters, queried model/Blob/APIM
 receipts and immutable publication hashes are required for all three exported
 limits. Malformed usage leaves admission unresolved; no automatic retry occurs.
-Other timeout/deadline and restart controls listed below remain unimplemented.
+The remaining timeout/deadline and restart controls are described below; source
+implementation is distinct from their still-required deployed proof.
 
 Three further fixed counter modes spend actual model attempts: eight responses
 before the ninth per-execution refusal; 128 responses across bounded executions
@@ -623,10 +624,10 @@ child routines; it is **not** a deployed process-termination or cloud-outcome cl
 This control kills the disposable operation-owning child, not the Container App
 host, and does not claim a Container Apps platform restart.
 
-Implemented providers currently cover 274 of 278 canonical checks; this is not
-a cloud pass count. Four still need actual drivers: the three rotation families
-and the actual 900-second workflow boundary. These implementation gaps keep the
-full gate blocked.
+Implemented providers now cover all 278 canonical checks; this is source-provider
+coverage, **not a cloud pass count**. The three rotation families and actual
+900-second workflow boundary have fixed-purpose drivers and fail-closed exported
+proof oracles. Missing deployed observations still block the full gate.
 
 1. Perform deployed validation of the implemented telemetry configuration,
    application ingestion counts and gateway/storage correlation proofs.
@@ -635,7 +636,8 @@ full gate blocked.
 2. Execute/verify the implemented storage/origin providers and read-only
    Reference Data execution; observe the implemented pre-application ingress evidence path,
    and collect deployed proof for the implemented direct-model/model-route controls.
-   Complete credential/certificate/context rotation providers and proof.
+   Execute the implemented credential/certificate/context rotation providers and
+   collect their independent deployed proof.
 3. Complete remaining deployed accounting/time boundaries and actual
    deployed verification of the process-restart probe. Implemented release-response-loss, concurrent release,
    version-conflict, exact-hash and immutable-version providers still require
@@ -653,7 +655,7 @@ plan observation remain operator/task-21 evidence conditions. Ordinary managed
 identities are not Entra Agent IDs. Agent 365, Conditional Access, Defender and
 Purview remain explicitly unexercised.
 
-### Resume validation and unresolved control contracts
+### Resume validation and approved control contracts
 
 The resumed work preserved all checkpoints at `c205a91`; integration
 `6fb4c89` is an ancestor and merging `integrate/citadel-sample` was already
@@ -667,54 +669,64 @@ with networking disabled, read-only root, dropped capabilities and
 `no-new-privileges`. Docker is **no longer a blocker**. No deployment, account
 configuration, credential rotation or resource creation was performed.
 
-The three rotation hooks still block retirement without their independent live
-controls. Finishing them requires exact staged current/retired material controls
-for the existing lifecycle rotation interface, actual allocated caller identities,
-queried gateway/backend rejection reasons and independent unchanged-state reads.
+The three rotation hooks block retirement without independent live controls.
+Their implemented providers use the existing staged lifecycle interface, actual
+allocated caller identities, queried gateway/backend rejection reasons and
+independent unchanged-state reads.
 Do not move a gateway private key into a workload or use operator authority as
 a workload identity. The workflow control still requires the unmodified
 production 900-second timer, its original nonreplenished accounting, independently
 queried expiry/refusal observations and unchanged business state. A shorter
 inherited deadline or the existing 45-second fencing probe is not that boundary.
-These are remaining implementation work, not cloud prerequisites established by
-this resume. The following material control contracts remain unresolved; no
-provider has silently implemented either alternative or weakened a gate:
+The two previously unresolved contracts were explicitly approved in
+[issue #7, comment 6265896306](https://github.com/JoranBergfeld/citadel-example/issues/7#issuecomment-6265896306)
+and recorded on
+[task #20, comment 6265897033](https://github.com/JoranBergfeld/citadel-example/issues/20#issuecomment-6265897033).
+Approval authorizes these fixed-purpose implementations, **not deployment now**.
+No live material has been rotated and no cloud success is inferred.
 
 1. **Retired certificate/context signer selection.** The existing
    `operator.rotation` interface replaces active APIM material and backend trust
-   together. Its hooks do not provide an independent stale signer. A complete
-   deployed proof needs a narrowly bounded, quiescent test that selects the owned
-   retired certificate **inside APIM** (using its exact owned Key Vault secret
+   together. Its acceptance hooks now provide a narrowly bounded, quiescent test
+   that selects the owned retired certificate **inside APIM** (using its exact owned Key Vault secret
    version), or the exact retired context key/key-ID pair, while keeping backend
    trust retired. This entails new temporary gateway signer-selection writes
    outside the existing prepare/finalize reconciliation, not an ordinary read-only
-   probe. Confirm that fixed-purpose control-plane contract before implementing
-   it; do not substitute operator TLS calls that export the platform private key
-   or copy it into a workload.
+   probe. The approved selector is implemented in `rotation_selector.py`; it
+   never exports the platform private key or copies it into a workload.
 
-   Proposed constraints: only the pending rotation's owned material, exact
+   Enforced constraints: only the pending rotation's owned material, exact
    inventoried APIM resource/API, existing allowed read-only capability and actual
    allocated caller; one persisted intent; at most 512 control reads and 900
    seconds; no caller/route/role/API-pin changes, arbitrary XML, URLs, durations or
    payloads. Verify the original selector/policy fingerprints before dispatch,
    restore that exact state and prove a fresh current-material allowed control.
+   Certificate capture lists secret-version metadata only; the selector verifies
+   APIM's public certificate fingerprint against already-owned lifecycle material.
+   It never fetches a platform secret value. Context selection accepts only the
+   pinned policy with its exact current key-ID substitution and allocated callers.
    Absent or ambiguous restoration retains the intent and blocks further work.
    Required independent evidence: allowed current-material gateway/backend
    receipts, actual retired-material certificate/context rejection reason with
    no backend execution, independently unchanged business ledgers and no
    unrelated configuration changes. A successful ARM update alone is not proof.
-   Subscription rotation does not need this signer-selection extension; its
-   allocated-caller current/retired-key provider is simply still unimplemented.
+   Subscription rotation uses the ordinary lifecycle interface, not signer
+   selection. Its actual allocated caller reads only its own current or exact
+   captured retired secret version. An APIM 401 alone is insufficient:
+   `SubscriptionKeyInvalid` and no backend dispatch must be independently queried.
+   All three oracles require unchanged planner/assessor/reviewer/author operation,
+   draft and finding ledgers, and independently correlated allowed, retired and
+   fresh restored controls. Ambiguous intents retain local run exclusion.
 
 2. **A full workflow lifetime versus the probe envelope.** `RevisionProbe.execute`,
    `worker.validate_request`, `worker.serve`, `ProbeLedger` and `publish_operation`
-   currently share the same at-most-900-second deadline, beginning before the
+   retain their same at-most-900-second deadline, beginning before the
    revision is deployed. A newly admitted real 900-second workflow cannot both
    exhaust its full production lifetime and publish/collect its terminal
    observation inside that earlier envelope. Shortening the workflow or resetting
    any budget would violate the required boundary.
 
-   Confirm a separate fixed control-plane envelope: at most 120 seconds for
+   The approved provider uses a separate fixed control-plane envelope: at most 120 seconds for
    setup; one newly admitted production workflow with its unchanged original
    900-second deadline, run identity and finite tickets; then at most 120 seconds
    of independent operator observation/restoration. The existing 600-second
@@ -726,15 +738,27 @@ provider has silently implemented either alternative or weakened a gate:
    Required evidence: actual production timer expiry, independently observed
    original admission/deadline/accounting, real post-expiry admission refusal,
    complete queried application/service receipts and before/after unchanged
-   business state. This is a control-contract decision, not evidence that the
-   actual 900-second provider already exists.
+   business state. `workflow_harness.py` installs only the owned, ready normal
+   Candidate Planner revision with a private disabled-by-default hold; it invokes
+   one fresh authenticated root through the real A2A client, then observes storage
+   independently. `workflow_timeout.py` holds that root under the unchanged
+   production timer in `Runtime._run`. On actual expiry it attempts accounting
+   admission against the original expired budget (which must refuse), then uses
+   existing definite metadata-only fencing/lease recovery. It never invokes a
+   model/peer or retries the root. The operator verifies exact revision restoration.
+   `workflow_oracle.py` rechecks original 900-second admission, monotonic timer
+   expiry, refusal/fence telemetry, unchanged budget and all six business ledgers.
+   Missing service rows, shortened lifetime, changed accounting, extra effects,
+   unverified restoration or an ambiguous terminal state cannot pass.
 
 The accepted exporter and read-only Reference Data console exceptions remain
 settled; neither is being reopened. No additional permission, dependency or API
-pin change is requested. The full acceptance gate remains blocked by all four
-unimplemented providers until these contracts are resolved and implemented.
+pin change is requested. All four providers are now wired into full acceptance;
+the full gate remains blocked until actual deployed evidence, the two complete
+consecutive passes and required human review are obtained.
 
-Local resume checks (CPython 3.12.15, retained exact source dataset):
+Prior checkpoint local resume checks (CPython 3.12.15, retained exact source dataset;
+these historical results predate the four approved providers):
 
 | Check | Result |
 | --- | --- |
@@ -760,3 +784,40 @@ operator fixture run observed a concurrent source-fingerprint change during
 proof refinement and failed closed; the full retained-data rerun passed with
 the source fingerprint checked unchanged before/after. These local results do
 not establish live controls or satisfy either cloud acceptance pass.
+
+Approved-provider local validation (CPython 3.12.15; same retained exact dataset):
+
+| Check | Result |
+| --- | --- |
+| Complete acceptance suite | 236 tests passed in 3154.822 seconds, no skips; discovery preceded the two final rotation regressions, covered below |
+| Final focused regressions / complete rotation suite | 32 / 10 tests passed |
+| Actual production 900-second workflow | Passed on the host and in the final immutable image; neither substitutes a shortened timer |
+| Complete operations / runtime suites | 30 / 27 tests; four / two explicit live-cloud skips |
+| Complete evidence / gateway / installed-stack suites | 18 / 16 / six tests passed |
+| Infrastructure/policy suite | 13 tests passed with unchanged Bicep 0.48.1 |
+| Complete operator suite | Earlier ordinary run: 42 passed; final consistent fake-external-clock run: 42 passed; raw-host reruns have the clock limitation below |
+| Final immutable image | Pinned offline build passed; six stack and seven provider tests passed, including the genuine production timer |
+| Host / final-image entrypoints | All five runtime configuration checks passed; actual unallocated child exits 2 without provider access or output |
+| Locked package build | Passed; wheel Python bytes match the final sources |
+| Whitespace / Python syntax | `git diff --check` / `compileall` passed |
+
+The final image is
+`sha256:22ce05c145ea6a64c06ca6587b3043a92c6b49f68f3105f4892acbaccbea1aff`,
+tested as `65532:65532`, network-disabled, read-only and without capabilities.
+Local provider tests fake external transports and, where explicitly needed,
+external clocks; they are implementation checks, not independent Azure evidence.
+The genuine timer tests retain the production 900-second runtime boundary.
+
+This host's UTC clock demonstrably moved backward between an operator fixture's
+observation and validation (observation `12:15:49.293741`, subsequent current time
+`12:15:48.680432`, both UTC on 2026-10-19). Final ordinary operator reruns therefore
+fail varying existing future-observation guards. Production guards remain
+unchanged. The complete 42-test fixture suite passed with one consistent
+monotonic-backed fake external UTC clock, including independent inventory
+timestamps; this does not claim that raw-host clock failures disappeared.
+
+Current local artifacts are indexed by `.build/approved-verification-index.json`
+and `.build/approved-provider-coverage.json`; the historical `resume-*` artifacts
+are preserved. All 278 canonical checks have source providers; zero cloud passes
+are claimed. No Azure resource deployment, live material rotation, two-pass cloud
+acceptance or human signoff was performed.

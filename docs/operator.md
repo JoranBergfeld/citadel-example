@@ -351,6 +351,25 @@ remain operator-owned; no automatic permanent erasure is claimed. Suspension
 patches only the exact inventoried APIM subscription and verifies its state.
 There is no automatic role escalation or purge to make rotation pass.
 
+The fixed acceptance controls are disabled on normal revisions. Finalization now
+uses the actual allocated caller's read-only gateway capability and independently
+queried APIM/backend receipts, plus unchanged business-ledger snapshots. For
+certificate/context retirement only, the approved test temporarily selects the
+pending deployment-owned retired signer **inside APIM**, leaving backend trust
+retired. It persists intent, verifies exact selector/policy restoration and
+requires a fresh current-material allowed control; it never exports the platform
+private key. Missing evidence, concurrent changes or ambiguous restoration retain
+exclusion and private diagnostics. A matching `finalize` may collect already
+observed controls within their original allowance; it never replays an ambiguous
+dispatch or authorizes unrelated changes. See [the approved control contracts](acceptance.md#resume-validation-and-approved-control-contracts).
+
+The workflow acceptance provider separately allows at most 120 seconds of setup,
+one unchanged production 900-second workflow and at most 120 seconds of independent
+observation/restoration. Its existing 600-second telemetry allowance is separate,
+shared with evidence collection and never replenished. No business dispatch,
+deadline extension, budget refund or root replay is permitted after expiry.
+These implementations do not authorize deployment or live rotation by themselves.
+
 ## Evidence, acceptance and manual teardown
 
 ```sh

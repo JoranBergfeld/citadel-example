@@ -49,6 +49,12 @@ def evaluate_check(check, report):
     if check["check_id"] in ("limit.a2a_http_timeout_seconds", "limit.acceptance_seconds"):
         from .http_timeout import evaluate_http_timeout
         return evaluate_http_timeout(check, report)
+    if check["check_id"].startswith("rotation."):
+        from .rotation_controls import evaluate_rotation
+        return evaluate_rotation(check, report)
+    if check["check_id"] == "limit.workflow_seconds":
+        from .workflow_oracle import evaluate_workflow
+        return evaluate_workflow(check, report)
     observation, control = actual.get("observation"), actual.get("control")
     operations = report.get("operation_ids", [])
     if (not isinstance(observation, dict) or not isinstance(control, dict)

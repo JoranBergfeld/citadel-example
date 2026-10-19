@@ -60,7 +60,17 @@ def reconcile(lifecycle, credentials):
 def rotate_command(lifecycle, args):
     if lifecycle.value["phase"] != "deployed_unverified":
         raise Blocked("runtime_deployment_required")
-    if any(r["state"] not in ("succeeded", "failed_no_commit") for r in lifecycle.value["runs"].values()):
+    path = lifecycle.state.directory / "rotation.json"
+    pending = read_private(path) if path.exists() else {}
+    control = lifecycle.value.get("rotation_controls", {}).get(pending.get("run_id"), {})
+    collectible = (args.command == "rotate" and args.stage == "finalize"
+        and (args.kind, args.target) == (pending.get("kind"), pending.get("target"))
+        and bool(control) and all(control.get(stage, {}).get("state") in (None, "observed", "verified")
+        for stage in ("new", "old"))
+        and pending.get("selector_intent", {}).get("state") in (None, "restored"))
+    if any(r["state"] not in ("succeeded", "failed_no_commit")
+           and not (collectible and key == pending.get("run_id"))
+           for key, r in lifecycle.value["runs"].items()):
         raise Blocked("credential_change_requires_quiescent_runs")
     lifecycle.inventory()
     credentials = lifecycle.credentials()
@@ -84,7 +94,6 @@ def rotate_command(lifecycle, args):
         raise Blocked("allocated_caller_required")
     if args.kind == "context" and target not in credentials["contextKeys"]:
         raise Blocked("allocated_backend_required")
-    path = lifecycle.state.directory / "rotation.json"
     if args.stage == "prepare":
         if path.exists():
             pending = read_private(path)
@@ -94,6 +103,8 @@ def rotate_command(lifecycle, args):
             pending = {"kind": args.kind, "target": target, "run_id": uuid4().hex,
                        "phase": "prepared", "old": copy.deepcopy(credentials),
                        "new": certificate(lifecycle.id) if args.kind == "certificate" else secrets.token_urlsafe(32)}
+            from citadel.acceptance.rotation_harness import capture_retired_secret
+            pending["old_secret_id"] = capture_retired_secret(lifecycle, args.kind, target, credentials)
             write_private(path, pending)
         if pending["phase"] != "prepared":
             return {"status": "rotation_staged", "liveProof": "required_before_retirement"}

@@ -97,11 +97,15 @@ class Accounting:
             for value in document["budgets"].values()
         ):
             raise OperationError("conflict", "One logical run at a time; no restart replay")
+        started = self.clock()
         record = self._new(run_id, min(deadline if deadline is not None else float("inf"),
-                                       self.clock() + 900), CEILINGS)
+                                       started + 900), CEILINGS)
         bind_run(document, run_id, record["deadline"])
         document["budgets"][run_id] = record
         await self._save(document, etag, record)
+        from citadel.acceptance.telemetry import emit
+        emit("workflow.admitted", status_code=200, facts={
+            "started": started, "deadline": record["deadline"], "sha256": sha256(record)})
         return deepcopy(record)
 
     async def status(self, budget_id):

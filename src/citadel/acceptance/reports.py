@@ -41,7 +41,7 @@ collection_windows collection_attempts last_collection
 state states completed_states remaining_reads identical_input changed_input response replay fenced stale retried
 completed missing_operation_id operation_state input_hash missing_state budget_state closed
 business_sha256 steps
-processes process_id boot_id exit_code ledger_sha256
+processes process_id boot_id exit_code ledger_sha256 origin_request_id
 agents models reads remaining candidates agents_sha256 candidates_sha256
 model_active child_active grant_present history_count grant_count overlap_state
 slot scope_sha256 allowed

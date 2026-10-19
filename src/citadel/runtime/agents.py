@@ -34,10 +34,11 @@ from .tickets import CAPACITY, TicketPool
 class Runtime:
     def __init__(self, workload, ledger, *, model, peers, gateway_url,
                  artifacts=None, drafts=None, tokens_per_minute=120000, clock=time.time,
-                 ticket_store=None, acceptance_hold=None):
+                 ticket_store=None, acceptance_hold=None, workflow_hold=None):
         self.workload, self.model, self.peers, self.clock = workload, model, peers, clock
         self.ledger = ScopedLedger(ledger)
         self.acceptance_hold = acceptance_hold
+        self.workflow_hold = workflow_hold
         self.ops = Operations(self.ledger, workload=workload, clock=clock)
         self.accounting = Accounting(self.ledger, workload=workload, clock=clock,
                                      tokens_per_minute=tokens_per_minute)
@@ -76,6 +77,8 @@ class Runtime:
                     or operation_id != run_id or payload["fixture"] not in (
                         "base-source", "missing-width-replacement", "no-alternative")):
                 raise OperationError("invalid_input", "Root run requires exact identity and fixture")
+            if self.workflow_hold is not None:
+                self.workflow_hold.validate(payload)
         elif "grant" not in payload or payload["grant"]["grant_id"] != operation_id:
             raise OperationError("invalid_input", "Child operation must be its authenticated grant")
         elif payload["grant"]["allowance"]["reads"] != CAPACITY[self.workload]:
@@ -126,8 +129,10 @@ class Runtime:
             await self._run(caller, payload, ownership, deadline)
 
     async def _run(self, caller, payload, ownership, deadline):
+        started, monotonic_started = self.clock(), asyncio.get_running_loop().time()
+        timer = asyncio.timeout(max(0, deadline - started))
         try:
-            async with asyncio.timeout(max(0, deadline - self.clock())):
+            async with timer:
                 await self.accounting.start_agent(payload["operation_id"], payload["operation_id"])
                 if self.workload == "candidate-planner":
                     product = await self._plan(payload, ownership, deadline)
@@ -151,6 +156,15 @@ class Runtime:
         except asyncio.CancelledError:
             raise
         except Exception as exc:
+            if isinstance(exc, TimeoutError) and timer.expired():
+                emit("workflow.timeout", status_code=0, facts={
+                    "started": started, "finished": self.clock(), "deadline": deadline,
+                    "monotonic_started": monotonic_started, "monotonic_deadline": timer.when(),
+                    "monotonic_finished": asyncio.get_running_loop().time()})
+                if self.workflow_hold is not None:
+                    async with asyncio.timeout(max(0, min(120, self.workflow_hold.deadline - self.clock()))):
+                        await self.workflow_hold.finish(self, payload)
+                    return
             code = exc.code if isinstance(exc, (OperationError, EvidenceError)) else "unavailable"
             logging.getLogger(__name__).warning("execution_incomplete workload=%s code=%s",
                                                 self.workload, code)
@@ -175,6 +189,8 @@ class Runtime:
                                         payload["operation_id"], evidence)
 
     async def _plan(self, payload, owner, deadline):
+        if self.workflow_hold is not None:
+            await self.workflow_hold.wait(self, payload, owner, deadline)
         commentary = await self._explain(payload, {"fixture": payload["fixture"], "target": 3, "pool_limit": 20})
         pool = await self.peers.reference(payload["fixture"], deadline)
         selected, assessed, references, read_scopes = [], [], [], []

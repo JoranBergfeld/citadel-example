@@ -39,6 +39,8 @@ def validate_request(request, *, enabled, workload, client_id):
         keys.add("versions")
     if isinstance(request, dict) and request.get("mode") == "direct-model":
         keys.add("model")
+    if isinstance(request, dict) and request.get("mode") == "rotation":
+        keys.add("rotation")
     if (enabled is not True or not isinstance(request, dict)
             or request.keys() != keys
             or type(request["schema_version"]) is not int or request["schema_version"] != 1
@@ -46,7 +48,7 @@ def validate_request(request, *, enabled, workload, client_id):
             or workload not in AGENTS or str(UUID(request["client_id"])) != str(UUID(client_id))
             or request["mode"] not in ("gateway-matrix", "operation-faults", "admission-limits", "read-limit", "release-faults",
                                       "draft-versions", "immutable-versions", "storage-boundaries", "origin-boundary",
-                                      "direct-model", "model-limits", "model-timeout", "process-restart", *COUNTER_MODES)
+                                      "direct-model", "model-limits", "model-timeout", "process-restart", "rotation", *COUNTER_MODES)
             or request["mode"] == "operation-faults" and workload not in ("candidate-planner", "briefing-author")
             or request["mode"] == "admission-limits" and workload != "candidate-planner"
             or request["mode"] == "read-limit" and workload != "candidate-planner"
@@ -65,6 +67,9 @@ def validate_request(request, *, enabled, workload, client_id):
     if "routes" in request:
         from .route_context import validate_route_context
         validate_route_context(request["routes"])
+    if request["mode"] == "rotation":
+        from .rotation_controls import validate_rotation
+        validate_rotation(request["rotation"], workload)
     if "release" in request:
         from .release_probes import validate_source
         validate_source(request["release"])
@@ -380,6 +385,26 @@ async def run_gateway_matrix(config, request):
             if not await store.open_pool(scope, exclusive=config.target == "candidate-planner"):
                 raise ValueError("Existing probe admission cannot be replayed")
             pool = TicketPool(store, scope, 512)
+            if request["mode"] == "rotation":
+                from .rotation_controls import rotation_read
+                control = request["rotation"]
+                with read_scope(pool, deadline=request["deadline"]):
+                    await pool.admit()
+                    async with SecretClient(config.vault, credential, api_version="2025-07-01",
+                            retry_total=0, connection_timeout=5, read_timeout=30) as vault:
+                        async with asyncio.timeout(max(0, min(30, request["deadline"] - time.time()))):
+                            secret = await vault.get_secret(config.subscription_secret,
+                                **({"version": control["secret_version"]} if control["secret_version"] else {}))
+                    async with httpx.AsyncClient(timeout=30, follow_redirects=False, trust_env=False) as client:
+                        result = await rotation_read(workload=config.target, gateway=config.gateway,
+                            key=secret.value, request=request, client=client, admit=pool.admit,
+                            principal_id=os.environ["AZURE_PRINCIPAL_ID"])
+                if config.target == "candidate-planner":
+                    await store.release_run(scope)
+                await container.get_blob_client(scope + "/observations.json").upload_blob(
+                    canonical_bytes({"schema_version": 1, "run_id": request["run_id"],
+                        "state": "complete", "observations": [result]}), overwrite=False, timeout=5)
+                return [result]
             if request["mode"] in ("model-limits", "model-timeout", *COUNTER_MODES):
                 return await run_model_limits(config, request, credential, pool, container, store)
             if request["mode"] in ("release-faults", "draft-versions", "immutable-versions"):

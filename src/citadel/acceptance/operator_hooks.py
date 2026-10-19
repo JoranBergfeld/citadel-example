@@ -161,6 +161,10 @@ class Harness:
                 report["finished"] = time.time()
                 self.save(report)
                 if scenario == "comparison" and scenario in report["scenarios"]:
+                    from .rotation_harness import RotationAcceptance
+                    RotationAcceptance(self.lifecycle).execute(report)
+                    report["finished"] = time.time()
+                    self.save(report)
                     from .poll_limits import PollAcceptance
                     PollAcceptance(self.lifecycle).execute(report)
                     report["finished"] = time.time()
@@ -211,6 +215,10 @@ class Harness:
                 report["finished"] = time.time()
                 self.save(report)
                 FaultAcceptance(self.lifecycle).execute(report, mode="process-restart")
+                report["finished"] = time.time()
+                self.save(report)
+                from .workflow_harness import WorkflowAcceptance
+                WorkflowAcceptance(self.lifecycle).execute(report)
                 report["finished"] = time.time()
                 self.save(report)
                 from .release_harness import ReleaseAcceptance
@@ -352,14 +360,10 @@ def run(*, lifecycle, check_id, run_id):
         from .bypass import BypassControls
         return BypassControls(lifecycle, export=lambda report: export_report(
             harness.directory, report)).run(run_id, fingerprints=fingerprints(lifecycle))
-    # These hooks cannot authorize retirement/continuation using route discovery,
-    # a local contract fixture, or the operator's broader storage credentials.
-    obligations = [check_id]
-    report = {"schema_version": 1, "run_id": run_id, "mode": "cloud", **fingerprints(lifecycle),
-              "acceptance": "blocked", "required_checks": obligations,
-              "checks": [{"check_id": key, "status": "blocked",
-                          "reason": "actual_identity_control_driver_required"} for key in obligations]}
-    return export_report(harness.directory, report)
+    from .rotation_harness import RotationAcceptance
+    return RotationAcceptance(lifecycle).control(
+        "new" if check_id == "rotation-new-material-allowed" else "old", run_id,
+        fingerprints=fingerprints(lifecycle), directory=harness.directory)
 
 
 def review(*, lifecycle, run_id, confirmation):
