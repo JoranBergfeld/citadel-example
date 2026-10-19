@@ -74,6 +74,10 @@ digests and pending-state markers are output.
   storage keys, blob public access, optional soft-delete/versioning or archive.
 - Vaults: RBAC, seven-day soft-delete, no purge protection. Conflicting policy
   blocks deployment; permanent purge needs separate approval/rights.
+  New-vault requests omit `enablePurgeProtection`: Azure rejects an explicit
+  `false`. The lifecycle reads all four actual vaults and verifies effective
+  RBAC, soft-delete, seven-day retention and disabled purge protection before
+  the portal gate and during deployed inventory verification.
 - Workloads receive only secret-scoped readers for their allocated context
   secret and (agents only) own subscription secret. No agent reads another
   agent's key or the platform gateway certificate.
@@ -83,6 +87,19 @@ digests and pending-state markers are output.
 - APIM alone receives Cognitive Services OpenAI User at the model account and
   read access to the exact platform certificate secret; it also has telemetry
   ingestion permission. Ordinary managed identities are **not Entra Agent IDs**.
+
+Container Apps diagnostics use `logAnalyticsDestinationType: Dedicated` and the
+actual `ContainerAppConsoleLogs`/`ContainerAppSystemLogs` tables, not legacy `_CL`
+tables. Console JSON is in `Log`. Every required table retains explicit 30-day
+Analytics settings; no unused `AzureDiagnostics` table is fabricated.
+
+Application Insights can create an untagged Failure Anomalies alert. The approved
+read-only `Microsoft.AlertsManagement/smartDetectorAlertRules@2021-04-01` inventory
+extension includes it only after its actual scope is exactly one deployment-tagged
+Insights component in the same owned group and its detector is
+`FailureAnomaliesDetector`. Scope is rechecked even after the alert enters inventory;
+foreign or ambiguous links block repair and teardown. No alert is created by this
+extension.
 
 ### Container-scoped Blob roles
 

@@ -31,16 +31,23 @@ class AzureFixture:
         self.registry = self.platform + "Microsoft.ContainerRegistry/registries/actualcreated"
         self.workspace = self.platform + "Microsoft.OperationalInsights/workspaces/citadel-test19-logs"
         self.center = self.platform + "Microsoft.ApiCenter/services/inventory"
+        self.vaults = {self.root + team + "/providers/Microsoft.KeyVault/vaults/" + team + "vault": {
+            "properties": {"enableRbacAuthorization": True, "enableSoftDelete": True,
+                           "softDeleteRetentionInDays": 7}}
+            for team in ("platform", "reference", "evidence", "planning")}
         self.center_created = "2026-01-01T00:00:00Z"
         self.gateway = "https://actual-gateway.azure-api.net"
         self.outputs = {
-            "inventory": {"deploymentId": "test19", "platform": {"resources": [self.registry, self.center, self.workspace]},
+            "inventory": {"deploymentId": "test19", "platform": {"resources": [
+                              self.registry, self.center, self.workspace, next(iter(self.vaults))]},
                           "capabilities": {"service": self.center, "workspace": self.center + "/workspaces/default",
                                            "restCapabilities": [self.center + "/workspaces/default/apis/released-findings",
                                                                 self.center + "/workspaces/default/apis/released-findings/deployments/gateway"]},
                           "gateway": {"subscriptions": []}},
             "teamInventory": [
-                {"resources": {"team": t, "resources": [self.root + t +
+                {"resources": {"team": t, "resources": [
+                    self.root + t + "/providers/Microsoft.KeyVault/vaults/" + t + "vault",
+                    self.root + t +
                     "/providers/Microsoft.Storage/storageAccounts/" + t + "fixture", *[
                         self.root + t + "/providers/Microsoft.Storage/storageAccounts/" + t
                         + "fixture/blobServices/default/containers/" + container for container in {
@@ -191,6 +198,8 @@ class AzureFixture:
 
     def rest(self, method, resource, api, body=None):
         self.calls.append(("rest", method, resource, api))
+        if resource in self.vaults:
+            return copy.deepcopy(self.vaults[resource])
         if resource == self.center:
             return {"id": self.center, "location": "westeurope",
                     "tags": {"citadel-deployment": "test19"},
@@ -238,6 +247,33 @@ class DeploymentTests(test_cli.CliCase):
             self.assertIn(("collection", self.fixture.subscription
                 + "/providers/Microsoft.CognitiveServices/locations/westeurope/" + suffix,
                 "2024-10-01"), self.fixture.calls)
+
+    def test_foundation_checks_actual_vault_flags_before_requesting_portal_observation(self):
+        vault = next(iter(self.fixture.vaults.values()))["properties"]
+        vault["enablePurgeProtection"] = True
+        code, report = self.deploy()
+        self.assertEqual((code, report.get("code")), (2, "vault_retention_or_authorization_conflict"), report)
+        self.assertFalse((self.state / "api-center-plan-request.json").exists())
+        vault["enablePurgeProtection"] = False
+        code, report = self.deploy()
+        self.assertEqual((code, report.get("code")), (2, "api_center_portal_observation_required"), report)
+
+    def test_inventory_verifies_provider_alert_scope_even_after_it_is_known(self):
+        self.assertEqual(self.deploy()[0], 2)
+        component = self.fixture.platform + "Microsoft.Insights/components/owned"
+        alert = self.fixture.platform + "Microsoft.AlertsManagement/smartDetectorAlertRules/generated"
+        self.fixture.resources["citadel-test19-platform"] += [
+            {"id": component, "type": "Microsoft.Insights/components",
+             "tags": {"citadel-deployment": "test19"}},
+            {"id": alert, "type": "microsoft.alertsmanagement/smartDetectorAlertRules"}]
+        self.fixture.app_documents[alert] = {"id": alert, "properties": {
+            "scope": [component], "detector": {"id": "FailureAnomaliesDetector"}}}
+        code, report = self.cli("inventory", "--state-dir", str(self.state), adapter=self.fixture)
+        self.assertEqual((code, report.get("status")), (0, "inventory"), report)
+        self.assertIn(("rest", "get", alert, "2021-04-01"), self.fixture.calls)
+        self.fixture.app_documents[alert]["properties"]["scope"].append(component + "-foreign")
+        code, report = self.cli("inventory", "--state-dir", str(self.state), adapter=self.fixture)
+        self.assertEqual((code, report.get("code")), (2, "provider_created_alert_ownership_conflict"), report)
 
     def record_observation(self, **changes):
         request = json.loads((self.state / "api-center-plan-request.json").read_text())

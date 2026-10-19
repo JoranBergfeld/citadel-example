@@ -27,12 +27,11 @@ var tableNames = [
   'AppEvents'
   'AppMetrics'
   'ApiManagementGatewayLogs'
-  'ContainerAppConsoleLogs_CL'
-  'ContainerAppSystemLogs_CL'
+  'ContainerAppConsoleLogs'
+  'ContainerAppSystemLogs'
   'ContainerAppHTTPLogs'
   'StorageBlobLogs'
   'AZKVAuditLogs'
-  'AzureDiagnostics'
 ]
 resource tables 'Microsoft.OperationalInsights/workspaces/tables@2022-10-01' = [for table in tableNames: {
   parent: workspace
@@ -65,6 +64,7 @@ resource environmentDiagnostics 'Microsoft.Insights/diagnosticSettings@2021-05-0
   name: 'citadel-logs'
   properties: {
     workspaceId: workspace.id
+    logAnalyticsDestinationType: 'Dedicated'
     logs: [
       { category: 'ContainerAppConsoleLogs', enabled: true }
       { category: 'ContainerAppSystemLogs', enabled: true }
@@ -141,7 +141,6 @@ resource vault 'Microsoft.KeyVault/vaults@2023-07-01' = {
     enableRbacAuthorization: true
     enableSoftDelete: true
     softDeleteRetentionInDays: 7
-    enablePurgeProtection: false
     accessPolicies: []
   }
 }

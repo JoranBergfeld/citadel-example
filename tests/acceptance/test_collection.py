@@ -53,8 +53,8 @@ class CollectionTests(unittest.TestCase):
                                                 "totalRetentionInDays": 30}}
                   for name in ("AppRequests", "AppDependencies", "AppTraces", "AppExceptions", "AppEvents",
                                "AppMetrics", "StorageBlobLogs", "ApiManagementGatewayLogs",
-                               "ContainerAppConsoleLogs_CL", "ContainerAppSystemLogs_CL", "ContainerAppHTTPLogs",
-                               "AZKVAuditLogs", "AzureDiagnostics")]
+                               "ContainerAppConsoleLogs", "ContainerAppSystemLogs", "ContainerAppHTTPLogs",
+                               "AZKVAuditLogs")]
         self.assertTrue(verify_retention(workspace, tables))
         self.assertFalse(verify_retention(workspace, tables[:-1]))
         tables[0]["properties"]["plan"] = "Basic"
@@ -112,7 +112,8 @@ class CollectionTests(unittest.TestCase):
         self.assertEqual(query.count("TimeGenerated <= end or e.method == 'exporter.health'"), 2)
         self.assertEqual(query.count("stream_id=tostring(e.stream_id), sequence=tolong(e.sequence)"), 2)
         self.assertIn("e=parse_json(Message)", query)
-        console_query = query.split("(ContainerAppConsoleLogs_CL", 1)[1]
+        console_query = query.split("(ContainerAppConsoleLogs |", 1)[1]
+        self.assertIn("e=parse_json(Log)", console_query)
         self.assertIn("source='console'", console_query)
         self.assertNotIn("source='application'", console_query)
 

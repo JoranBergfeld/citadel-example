@@ -87,6 +87,14 @@ class TemplateTests(unittest.TestCase):
         table = resources["Microsoft.OperationalInsights/workspaces/tables"]["properties"]
         self.assertEqual(table, {"plan": "Analytics", "retentionInDays": 30, "totalRetentionInDays": 30})
         self.assertIn("ContainerAppHTTPLogs", platform["variables"]["tableNames"])
+        self.assertIn("ContainerAppConsoleLogs", platform["variables"]["tableNames"])
+        self.assertIn("ContainerAppSystemLogs", platform["variables"]["tableNames"])
+        self.assertNotIn("AzureDiagnostics", platform["variables"]["tableNames"])
+        self.assertFalse(any(name.endswith("_CL") for name in platform["variables"]["tableNames"]))
+        environment_diagnostics = next(r for r in platform["resources"]
+            if r["type"] == "Microsoft.Insights/diagnosticSettings"
+            and any(log["category"] == "ContainerAppConsoleLogs" for log in r["properties"].get("logs", [])))
+        self.assertEqual(environment_diagnostics["properties"]["logAnalyticsDestinationType"], "Dedicated")
         self.assertTrue(any({"category": "ContainerAppHTTPLogs", "enabled": True}
             in resource["properties"].get("logs", []) for resource in platform["resources"]
             if resource["type"] == "Microsoft.Insights/diagnosticSettings"))
@@ -104,6 +112,14 @@ class TemplateTests(unittest.TestCase):
             "[reference('apim', '2024-05-01', 'full').identity.principalId]",
             "[reference(resourceId('Microsoft.ApiManagement/service', format('citadel-{0}-gateway', parameters('suffix'))), '2024-05-01', 'full').identity.principalId]",
         })
+
+    def test_new_vaults_omit_irreversible_purge_flag_and_keep_seven_day_soft_delete(self):
+        for name in ("platform-", "team-"):
+            vault = next(r for r in self.module(name)["resources"] if r["type"] == "Microsoft.KeyVault/vaults")
+            self.assertNotIn("enablePurgeProtection", vault["properties"])
+            self.assertTrue(vault["properties"]["enableSoftDelete"])
+            self.assertTrue(vault["properties"]["enableRbacAuthorization"])
+            self.assertEqual(vault["properties"]["softDeleteRetentionInDays"], 7)
 
     def test_gateway_has_no_wildcard_routes_and_verifies_every_backend_tls_identity(self):
         gateway = self.module("gateway-")

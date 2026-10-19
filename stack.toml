@@ -47,3 +47,7 @@ region = "westeurope"
 sku = "Standard"
 version_upgrade_option = "NoAutoUpgrade"
 verification = "public regional documentation only; live capacity, lifecycle and inference remain preflight gates"
+
+[inventory]
+smart_detector_read_api = "2021-04-01"
+approval = "https://github.com/JoranBergfeld/citadel-example/issues/7#issuecomment-6271455425"

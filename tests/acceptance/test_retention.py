@@ -30,8 +30,8 @@ class RetentionTests(unittest.TestCase):
         tables = [{"name": name, "properties": {"plan": "Analytics", "retentionInDays": 30,
                                                "totalRetentionInDays": 30}} for name in (
             "AppRequests", "AppDependencies", "AppTraces", "AppExceptions", "AppEvents", "AppMetrics",
-            "StorageBlobLogs", "ApiManagementGatewayLogs", "ContainerAppConsoleLogs_CL",
-            "ContainerAppSystemLogs_CL", "ContainerAppHTTPLogs", "AZKVAuditLogs", "AzureDiagnostics")]
+            "StorageBlobLogs", "ApiManagementGatewayLogs", "ContainerAppConsoleLogs",
+            "ContainerAppSystemLogs", "ContainerAppHTTPLogs", "AZKVAuditLogs")]
         calls = []
 
         def rest(method, resource, version):

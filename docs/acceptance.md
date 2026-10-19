@@ -428,7 +428,7 @@ No automatic publication or deletion occurs.
 
 Application instrumentation emits only allowlisted metadata, actual service request
 IDs and hashes. The existing Container Apps diagnostic path can export those records
-to `ContainerAppConsoleLogs_CL`; these records are explicitly `console`, not
+to the dedicated `ContainerAppConsoleLogs` table (`Log` column); these records are explicitly `console`, not
 `application` evidence. The collector queries `AppTraces` for application records,
 and actual `ApiManagementGatewayLogs` and `StorageBlobLogs`. Provider query errors, incomplete
 tables, mismatched request/identity/window/status correlation and excessive results

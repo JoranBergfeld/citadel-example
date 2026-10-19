@@ -287,6 +287,7 @@ class Lifecycle:
         self.capture_outputs(self.arm("create"))
         self.value["phase"] = "foundation_pending_runtime"
         self.state.save()
+        self.verify_vault_configuration()
         self.require_plan_observation()
         self.bootstrap()
         self.build(wheelhouse)
@@ -298,6 +299,21 @@ class Lifecycle:
         self.state.event("deploy", "deployed_unverified")
         return {"status": "deployed_unverified", "deploymentId": self.id,
                 "foundationIsReadiness": False, "acceptance": "blocked_task20_and_live_proof"}
+
+    def verify_vault_configuration(self):
+        vaults = [rid for rid in self.value["inventory"]
+                  if "/providers/Microsoft.KeyVault/vaults/" in rid
+                  and "/" not in rid.split("/providers/Microsoft.KeyVault/vaults/", 1)[1]]
+        if len(vaults) != 4:
+            raise Blocked("four_owned_vaults_required")
+        for rid in vaults:
+            properties = self.native.rest("get", rid, "2023-07-01")["properties"]
+            if (properties.get("enableRbacAuthorization") is not True
+                    or properties.get("enableSoftDelete") is not True
+                    or type(properties.get("softDeleteRetentionInDays")) is not int
+                    or properties["softDeleteRetentionInDays"] != 7
+                    or properties.get("enablePurgeProtection", False) is not False):
+                raise Blocked("vault_retention_or_authorization_conflict")
 
     def bootstrap(self):
         outputs = self.value["outputs"]
@@ -464,10 +480,25 @@ class Lifecycle:
         for group in groups:
             resources = self.native.az("resource", "list", "--resource-group", group["name"],
                                        "--subscription", self.config["subscriptionId"])
+            components = {r["id"].lower() for r in resources
+                          if r.get("type", "").lower() == "microsoft.insights/components"
+                          and r.get("tags", {}).get("citadel-deployment") == self.id
+                          and r["id"].lower().startswith(group["id"].lower() + "/")}
             for resource in resources:
                 rid = resource["id"]
                 owned = (resource.get("tags", {}).get("citadel-deployment") == self.id or rid.lower() in known
                          or any(rid.lower().startswith(parent + "/") for parent in known if "/providers/" in parent))
+                if resource.get("type", "").lower() == "microsoft.alertsmanagement/smartdetectoralertrules":
+                    alert = self.native.rest("get", rid, "2021-04-01")
+                    properties = alert.get("properties", {})
+                    scopes = properties.get("scope", [])
+                    if (alert.get("id", "").lower() != rid.lower()
+                            or len(scopes) != 1 or scopes[0].lower() not in components
+                            or properties.get("detector", {}).get("id") != "FailureAnomaliesDetector"):
+                        raise Blocked("provider_created_alert_ownership_conflict")
+                    self.value.setdefault("providerCreatedResources", {})[rid] = {
+                        "parent": scopes[0], "api": "2021-04-01"}
+                    owned = True
                 if not owned or not rid.lower().startswith(group["id"].lower() + "/"):
                     raise Blocked("unrelated_resource_protection")
                 active.append(rid)
@@ -493,6 +524,7 @@ class Lifecycle:
 
     def verify_inventory(self):
         self.inventory()
+        self.verify_vault_configuration()
         capabilities = self.value["outputs"]["inventory"]["capabilities"]
         center = self.native.rest("get", capabilities["service"], "2024-03-01")
         if center.get("properties", {}).get("provisioningState") != "Succeeded":

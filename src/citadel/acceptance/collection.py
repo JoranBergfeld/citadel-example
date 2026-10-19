@@ -10,8 +10,8 @@ from .oracle import SOURCES
 
 
 TABLES = {"AppRequests", "AppDependencies", "AppTraces", "AppExceptions", "AppEvents", "AppMetrics",
-          "StorageBlobLogs", "ApiManagementGatewayLogs", "ContainerAppConsoleLogs_CL",
-          "ContainerAppSystemLogs_CL", "ContainerAppHTTPLogs", "AZKVAuditLogs", "AzureDiagnostics"}
+          "StorageBlobLogs", "ApiManagementGatewayLogs", "ContainerAppConsoleLogs",
+          "ContainerAppSystemLogs", "ContainerAppHTTPLogs", "AZKVAuditLogs"}
 ROW_FIELDS = {"source", "request_id", "status_code", "runtime_identity", "observed",
               "run_id", "operation_id", "caller", "method", "target", "event_id", "facts",
               "client_request_id", "credential_sha256", "stream_id", "sequence"}
@@ -143,8 +143,8 @@ union
  run_id=tostring(e.run_id), operation_id=tostring(e.operation_id), caller=tostring(e.caller),
  method=tostring(e.method), target=tostring(e.target), event_id=tostring(e.event_id), facts=e.facts,
  stream_id=tostring(e.stream_id), sequence=tolong(e.sequence)),
-(ContainerAppConsoleLogs_CL | where TimeGenerated between (begin .. healthEnd)
- | extend e=parse_json(Log_s) | where e.schema == 'citadel.telemetry.v1'
+(ContainerAppConsoleLogs | where TimeGenerated between (begin .. healthEnd)
+ | extend e=parse_json(Log) | where e.schema == 'citadel.telemetry.v1'
  | where TimeGenerated <= end or e.method == 'exporter.health'
  | project source='console', request_id=tostring(e.request_id),
  status_code=toint(e.status_code), runtime_identity=tostring(e.runtime_identity),
