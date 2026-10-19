@@ -3,6 +3,7 @@ import copy
 import unittest
 
 from citadel.acceptance.worker import validate_request
+from tests.acceptance.storage_fixture import storage_accounts
 
 
 class WorkerTests(unittest.TestCase):
@@ -53,7 +54,7 @@ class WorkerTests(unittest.TestCase):
     def test_storage_mode_accepts_only_fixed_disposable_target_bindings(self):
         from citadel.acceptance.coverage import CONTAINERS
         request = self.request() | {"mode": "storage-boundaries",
-            "storage": {"suite_id": "suite1", "targets": {
+            "storage": {"suite_id": "suite1", "accounts": storage_accounts(), "targets": {
                 name: {"sha256": "a" * 64, "etag": '"known"'} for name in CONTAINERS}}}
         self.assertEqual(validate_request(request, enabled=True, workload=request["workload"],
                                           client_id=request["client_id"]), request)

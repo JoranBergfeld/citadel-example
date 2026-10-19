@@ -315,7 +315,22 @@ reads in the same **512-read** run pool. The CLI additionally persists its local
 finite poll count (maximum 64) and original 900-second deadline; it does not grant a
 new allowance or equate 400 source reads with total wire reads. Exhaustion, missing
 state, wrong ownership, changed hash, failure and indeterminacy are non-success.
-No automatic read retries, invocation retries or explicit failed-run replay are exposed.
+No automatic invocation retries or crash replay are exposed. An authenticated
+owner may send the **identical** nonblocking A2A `SendMessage` with metadata
+`{"citadel_recovery": true}` to fence/reconcile existing work. Only definite
+`failed_no_commit` releases global run exclusion; unresolved child/model
+admissions retain exclusion. Recovery accepts no caller-supplied service receipts.
+A separate identical message with `{"citadel_retry": true}` explicitly retries
+only that fenced identity within its original active deadline and remaining
+accounting. Recovery and retry flags cannot be combined. The demo CLI itself
+still only reconciles; rerunning it never enables retry.
+
+An explicit retry reacquires the global slot under its next fenced generation,
+charges another agent attempt and retains all previous model/token/read charges,
+per-execution counters and spent read tickets. It never recreates a budget,
+extends a deadline or refunds a ticket. Delayed cleanup from a prior generation
+cannot release a retried execution's lease. A fresh run may follow definite
+no-effect recovery, but a concurrent fresh run prevents retry admission.
 
 The first three cases map to the exact base/replacement/no-alternative fixtures.
 Bounded exhaustion is valid evidence, not a completed three-candidate comparison.
@@ -362,6 +377,29 @@ private key. Missing evidence, concurrent changes or ambiguous restoration retai
 exclusion and private diagnostics. A matching `finalize` may collect already
 observed controls within their original allowance; it never replays an ambiguous
 dispatch or authorizes unrelated changes. See [the approved control contracts](acceptance.md#resume-validation-and-approved-control-contracts).
+
+Briefing Author subscription rotation uses only its existing exact
+Release Reviewer finding-read route, with the genuine immutable finding hash
+and already-funded read pool. It never uses forbidden Reviewer discovery or
+allocates a replacement read grant. Missing source evidence or two remaining
+control reads blocks finalization.
+
+APIM certificate selection/restoration uses `PUT Certificate_CreateOrUpdate`
+with only the owned Key Vault selector, as required by the pinned
+[2024-05-01 certificate swagger](https://github.com/Azure/azure-rest-api-specs/blob/main/specification/apimanagement/resource-manager/Microsoft.ApiManagement/ApiManagement/stable/2024-05-01/apimcertificates.json).
+The certificate entity supports HEAD/GET/PUT/DELETE, not PATCH.
+Embedded rotations persist their owning acceptance run and charge that run's
+single 600-second collection ledger, including failed collection. Standalone
+rotations retain their own original bounded allowance; retry never resets it.
+
+Acceptance resolves each fixed container from the exact deployed inventory:
+Reference Data's account owns `reference`; Evidence Review's owns drafts,
+findings and assessor/reviewer operations; Exercise Planning's owns candidate
+lists, briefs and planner/author operations. Operator snapshots, target hashes,
+disposable probes, rotation and workflow observation all use that same mapping.
+Workload probes validate the three existing deployment-owned team endpoints
+against their own deployed account before identity/provider access; manifests
+cannot redirect them to another deployment or arbitrary destination.
 
 The workflow acceptance provider separately allows at most 120 seconds of setup,
 one unchanged production 900-second workflow and at most 120 seconds of independent

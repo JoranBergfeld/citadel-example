@@ -21,7 +21,7 @@ class RetiredSigner:
 
     def _write(self, resource, properties):
         self.admit()
-        method = "put" if "/policies/" in resource else "patch"
+        method = "put" if "/policies/" in resource or "/certificates/" in resource else "patch"
         self.lifecycle.native.rest(method, resource, "2024-05-01", {"properties": properties})
 
     def _certificate(self, properties):

@@ -3,6 +3,7 @@ import copy
 import json
 import time
 import unittest
+from tests.acceptance.storage_fixture import storage_inventory
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -175,8 +176,7 @@ class HttpTimeoutOracleTests(unittest.TestCase):
                     "id": "completed", "contextId": "completed", "status": {"state": "TASK_STATE_COMPLETED"}}}})
 
         run = {"state": "succeeded", "fixture": "base-source", "deadline": deadline, "reads": 2}
-        lifecycle = SimpleNamespace(id="deployment", value={"inventory": [
-            "/subscriptions/s/resourceGroups/g/providers/Microsoft.Storage/storageAccounts/allocated"],
+        lifecycle = SimpleNamespace(id="deployment", value={"inventory": storage_inventory(),
             "runs": {"completed": run}, "outputs": {"gatewayUrl": "https://gateway.example",
                 "appInventory": [{"app": "/subscriptions/s/resourceGroups/g/providers/Microsoft.App/containerApps/deployment-candidate-planner",
                                   "image": "registry/allocated@sha256:" + "a" * 64}]}},

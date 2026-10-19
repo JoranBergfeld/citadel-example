@@ -19,6 +19,7 @@ from citadel.runtime.configuration import endpoint, OPERATIONS
 from .coverage import CONTAINERS, STORAGE
 from .oracle import evaluate_control, hash_value
 from .telemetry import correlate, storage_response
+from .storage_accounts import validate_accounts
 
 
 def storage_target(suite_id):
@@ -33,10 +34,11 @@ def _target(value):
 
 
 def validate_storage_manifest(manifest):
-    if (not isinstance(manifest, dict) or set(manifest) != {"suite_id", "targets"}
+    if (not isinstance(manifest, dict) or set(manifest) != {"suite_id", "targets", "accounts"}
             or not isinstance(manifest["targets"], dict) or set(manifest["targets"]) != set(CONTAINERS)):
         raise ValueError("An exact fixed-container manifest is required")
     storage_target(manifest["suite_id"])
+    validate_accounts(manifest["accounts"])
     for target in manifest["targets"].values():
         if not isinstance(target, dict) or set(target) != {"sha256", "etag"}:
             raise ValueError("Storage manifests cannot supply payloads, credentials or destinations")
@@ -51,7 +53,8 @@ class StorageProbe:
         if (type(deadline) not in (float, int) or not math.isfinite(deadline)
                 or not time.time() < deadline <= time.time() + 900 or not callable(admit)):
             raise ValueError("Storage probes require bounded admission")
-        self.account = endpoint(account, ".blob.core.windows.net")
+        self.accounts = validate_accounts(account) if isinstance(account, dict) else {
+            container: endpoint(account, ".blob.core.windows.net") for container in CONTAINERS}
         self.credential, self.workload, self.deadline = credential, workload, deadline
         self.principal = hashlib.sha256(str(UUID(principal_id)).encode()).hexdigest()
         self.run_id, self.name = identity(run_id), storage_target(suite_id)
@@ -62,6 +65,7 @@ class StorageProbe:
         if container not in CONTAINERS or action not in ("read", "write"):
             raise ValueError("Only fixed storage-boundary capabilities may be probed")
         _target(target)
+        account = self.accounts[container]
         if time.time() >= self.deadline:
             raise OperationError("deadline", "No probe dispatch after its inherited deadline")
         await self.admit()
@@ -70,7 +74,7 @@ class StorageProbe:
                   "run_id": self.run_id, "operation_id": operation, "caller": self.workload,
                   "runtime_identity": self.principal, "container": container, "action": action,
                   "suite_id": self.suite_id,
-                  "target": hashlib.sha256(f"{self.account}/{container}/{self.name}".encode()).hexdigest(),
+                  "target": hashlib.sha256(f"{account}/{container}/{self.name}".encode()).hexdigest(),
                   "started": time.time(), "status": "blocked", "reason": "service_response_missing"}
         sent = False
 
@@ -90,7 +94,7 @@ class StorageProbe:
 
         options = {"transport": self.transport} if self.transport is not None else {}
         try:
-            async with BlobClient(self.account, container, self.name, credential=self.credential,
+            async with BlobClient(account, container, self.name, credential=self.credential,
                     api_version=API_VERSION, retry_total=0, retry_connect=0, retry_read=0, retry_status=0,
                     connection_timeout=5, read_timeout=30, max_single_get_size=MAX_LEDGER_BYTES + 1,
                     max_single_put_size=MAX_LEDGER_BYTES, **options) as client:
@@ -131,8 +135,9 @@ class StorageControls:
     """Operator observes/seeds isolated copies; never impersonates a workload."""
 
     def __init__(self, native, *, account, suite_id, admit):
-        self.native, self.account, self.suite_id, self.admit = native, endpoint(
-            account, ".blob.core.windows.net"), identity(suite_id), admit
+        self.native, self.suite_id, self.admit = native, identity(suite_id), admit
+        self.accounts = validate_accounts(account) if isinstance(account, dict) else {
+            container: endpoint(account, ".blob.core.windows.net") for container in CONTAINERS}
         self.name = storage_target(suite_id)
 
     def _record(self, container, action, name):
@@ -140,7 +145,7 @@ class StorageControls:
             raise ValueError("Unallocated observer target")
         record = {"caller": "operator", "suite_id": self.suite_id, "container": container,
                   "action": action, "operation_id": uuid4().hex, "started": time.time(),
-                  "target": hashlib.sha256(f"{self.account}/{container}/{name}".encode()).hexdigest()}
+                  "target": hashlib.sha256(f"{self.accounts[container]}/{container}/{name}".encode()).hexdigest()}
         sent = False
 
         def once(request):
@@ -159,7 +164,7 @@ class StorageControls:
 
     def _read(self, container, name):
         record, once, received = self._record(container, "read", name)
-        with self.native.blob(self.account, container, name) as blob:
+        with self.native.blob(self.accounts[container], container, name) as blob:
             result = blob.download_blob(offset=0, length=MAX_LEDGER_BYTES + 1, max_concurrency=1,
                                         raw_request_hook=once, raw_response_hook=received, timeout=30)
             content = result.readall()
@@ -183,7 +188,7 @@ class StorageControls:
                         or not source[container]):
                     raise OperationError("missing", "Known real disposable draft/finding products are required")
             record, once, received = self._record(container, "write", self.name)
-            with self.native.blob(self.account, container, self.name) as blob:
+            with self.native.blob(self.accounts[container], container, self.name) as blob:
                 blob.upload_blob(content, overwrite=False, max_concurrency=1, timeout=30,
                                  raw_request_hook=once, raw_response_hook=received)
             record.update(sha256=hashlib.sha256(content).hexdigest(), count=1, finished=time.time())
@@ -286,12 +291,14 @@ class StorageControls:
             raise OperationError("data_integrity", "Isolated draft-version state is malformed") from None
         return record, document
 
-    def route_context(self, run_ids):
+    def route_context(self, run_ids, *, minimum_finding_reads=1):
         from .route_context import build_route_context
         if not isinstance(run_ids, list) or not 0 < len(run_ids) <= 4:
             raise ValueError("Approved scenario run identities are required")
         for run_id in run_ids:
             identity(run_id)
+        if type(minimum_finding_reads) is not int or not 1 <= minimum_finding_reads <= 2:
+            raise ValueError("Only the existing one- or two-read controls are supported")
         documents, observations = {}, []
         for actor, container in {**OPERATIONS, "findings": "findings"}.items():
             record, content = self._read(container, "ledger-v1.json")
@@ -318,22 +325,27 @@ class StorageControls:
             for row in rows:
                 operation = identity(row["operation_id"])
                 scope = owner + "/invoke/" + operation
-                name = f"read-tickets/{sha256(scope)}/{CAPACITY[actor] - 1:03}.json"
-                record, once, received = self._record(OPERATIONS[actor], "read", name)
-                try:
-                    with self.native.blob(self.account, OPERATIONS[actor], name) as blob:
-                        content = blob.download_blob(offset=0, length=10, max_concurrency=1,
-                            raw_request_hook=once, raw_response_hook=received, timeout=30).readall()
-                    if content not in (b"spent", b"delegated"):
-                        raise ValueError("Existing ticket marker is malformed")
-                    record.update(state="spent", sha256=hashlib.sha256(content).hexdigest(), count=1)
-                except ResourceNotFoundError:
-                    if record.get("status_code") != 404:
-                        raise ValueError("Missing marker requires an actual service response") from None
-                    record.update(state="unspent", count=0)
+                required = minimum_finding_reads if actor == "release-reviewer" else 1
+                unspent = 0
+                for index in range(CAPACITY[actor] - required, CAPACITY[actor]):
+                    name = f"read-tickets/{sha256(scope)}/{index:03}.json"
+                    record, once, received = self._record(OPERATIONS[actor], "read", name)
+                    try:
+                        with self.native.blob(self.accounts[OPERATIONS[actor]], OPERATIONS[actor], name) as blob:
+                            content = blob.download_blob(offset=0, length=10, max_concurrency=1,
+                                raw_request_hook=once, raw_response_hook=received, timeout=30).readall()
+                        if content not in (b"spent", b"delegated"):
+                            raise ValueError("Existing ticket marker is malformed")
+                        record.update(state="spent", sha256=hashlib.sha256(content).hexdigest(), count=1)
+                    except ResourceNotFoundError:
+                        if record.get("status_code") != 404:
+                            raise ValueError("Missing marker requires an actual service response") from None
+                        record.update(state="unspent", count=0)
+                        unspent += 1
+                    record["finished"] = time.time()
+                    tickets.append(record)
+                if unspent == required:
                     available[actor].add(operation)
-                record["finished"] = time.time()
-                tickets.append(record)
         return {"context": build_route_context(documents, run_ids=run_ids, available=available),
                 "observations": observations, "ticket_reads": tickets}
 

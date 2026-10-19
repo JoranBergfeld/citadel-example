@@ -1,5 +1,6 @@
 import time
 import unittest
+from tests.acceptance.storage_fixture import storage_inventory
 import copy
 import json
 import os
@@ -211,7 +212,7 @@ class AdmissionControllerTests(unittest.TestCase):
             "identityPrincipalId": "11111111-1111-1111-1111-111111111111",
             "image": "registry.example/image@sha256:" + "a" * 64}
         lifecycle = SimpleNamespace(id="d", native=native, state=SimpleNamespace(save=lambda: None), value={
-            "inventory": ["/subscriptions/s/resourceGroups/g/providers/Microsoft.Storage/storageAccounts/planning"],
+            "inventory": storage_inventory(planning="planning"),
             "outputs": {"appInventory": [app]}})
         report = {"run_id": "suite", "operation_ids": []}
         FaultAcceptance(lifecycle).execute(report, mode="admission-limits")

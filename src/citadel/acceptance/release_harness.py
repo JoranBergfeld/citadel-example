@@ -13,6 +13,7 @@ from .release_oracle import evaluate_release, release_snapshot
 from .release_probes import RELEASE_CHECKS
 from .revision import RevisionProbe
 from .storage_probes import StorageControls
+from .storage_accounts import storage_accounts
 from .version_oracle import evaluate_version, version_snapshot
 
 
@@ -90,12 +91,11 @@ class ReleaseAcceptance:
         actor, phase_key = (("evidence-assessor", "version_phase") if versions else ("release-reviewer", "release_phase"))
         if phase_key in report:
             raise Blocked("release_probe_intent_requires_reconciliation")
-        accounts = [resource for resource in self.lifecycle.value["inventory"]
-            if "/providers/Microsoft.Storage/storageAccounts/" in resource and "/blobServices/" not in resource]
+        accounts = storage_accounts(self.lifecycle)
         apps = [app for app in self.lifecycle.value["outputs"]["appInventory"]
                 if app["app"].rsplit("/", 1)[-1] == self.lifecycle.id + "-" + actor]
         comparison = report.get("scenarios", {}).get("comparison", {}).get("operation_id")
-        if len(accounts) != 1 or len(apps) != 1 or comparison not in report["operation_ids"]:
+        if len(apps) != 1 or comparison not in report["operation_ids"]:
             raise Blocked("exact_completed_release_source_and_inventory_required")
         phase = {"state": "dispatching", "deadline": time.time() + 900, "read_attempts": 0,
                  "observations": [], "snapshots": {}}
@@ -113,9 +113,9 @@ class ReleaseAcceptance:
         native.deadline = min(previous or float("inf"), time.monotonic() + 900)
         try:
             app, run_id = apps[0], uuid4().hex
-            account = "https://" + accounts[0].rsplit("/", 1)[-1] + ".blob.core.windows.net"
+            account = accounts["assessor-operations" if versions else "reviewer-operations"]
             principal = hashlib.sha256(str(UUID(app["identityPrincipalId"])).encode()).hexdigest()
-            controls = StorageControls(native, account=account, suite_id=report["run_id"], admit=admit)
+            controls = StorageControls(native, account=accounts, suite_id=report["run_id"], admit=admit)
             phase["source"] = (controls.version_source if versions else controls.release_source)([comparison])
             phase["before"] = controls.products()
             report["operation_ids"].extend([run_id, phase["source"]["observation"]["operation_id"],

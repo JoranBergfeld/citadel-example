@@ -1,5 +1,6 @@
 import copy
 import unittest
+from tests.acceptance.storage_fixture import storage_inventory
 import time
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -141,8 +142,7 @@ class PollLimitTests(unittest.TestCase):
                       "input_hash": "a" * 64, "result": {"sha256": "b" * 64}})
 
         run = {"state": "succeeded", "deadline": time.time() + 900, "reads": 2}
-        lifecycle = SimpleNamespace(value={"inventory": [
-            "/subscriptions/s/resourceGroups/g/providers/Microsoft.Storage/storageAccounts/allocated"],
+        lifecycle = SimpleNamespace(value={"inventory": storage_inventory(),
             "runs": {"scenario1": run}, "outputs": {"gatewayUrl": "https://gateway.example"}},
             state=SimpleNamespace(save=lambda: None), native=Native(), credentials=lambda: {
                 "callerStates": {"operator": "active"}, "callerKeys": {"operator": {"primary": "own-operator-key"}}})
@@ -176,8 +176,7 @@ class PollLimitTests(unittest.TestCase):
             raise Blocked("actual_observer_unavailable")
 
         run = {"state": "succeeded", "deadline": time.time() + 900, "reads": 2}
-        lifecycle = SimpleNamespace(value={"inventory": [
-            "/subscriptions/s/resourceGroups/g/providers/Microsoft.Storage/storageAccounts/allocated"],
+        lifecycle = SimpleNamespace(value={"inventory": storage_inventory(),
             "runs": {"scenario1": run}, "outputs": {"gatewayUrl": "https://gateway.example"}},
             state=SimpleNamespace(save=lambda: None), native=SimpleNamespace(blob=blob))
         report = {"run_id": "suite", "operation_ids": ["scenario1"],

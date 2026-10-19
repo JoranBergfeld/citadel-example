@@ -94,7 +94,9 @@ class Accounting:
         document, etag = await self.ledger.read()
         if run_id in document["budgets"] or any(
             not value["closed"] and value["deadline"] > self.clock()
-            for value in document["budgets"].values()
+            and (document["operations"].get("operator/invoke/" + existing, {}).get("state") != "failed_no_commit"
+                 or value["model"] is not None or value["child"] is not None)
+            for existing, value in document["budgets"].items()
         ):
             raise OperationError("conflict", "One logical run at a time; no restart replay")
         started = self.clock()
@@ -112,14 +114,14 @@ class Accounting:
         _, _, record = await self._load(budget_id, active=False)
         return deepcopy(record)
 
-    async def start_agent(self, budget_id, execution_id):
+    async def start_agent(self, budget_id, execution_id, *, retry=False):
         identity(execution_id)
         document, etag, record = await self._load(budget_id)
         self._idle(record)
-        if execution_id in record["agents"]:
+        if execution_id in record["agents"] and not retry:
             raise OperationError("conflict", "Agent execution cannot be replayed")
         self._charge(record, agents=1)
-        record["agents"][execution_id] = 0
+        record["agents"].setdefault(execution_id, 0)
         await self._save(document, etag, record)
 
     async def candidate(self, budget_id, ident):

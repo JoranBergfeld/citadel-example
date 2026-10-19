@@ -44,6 +44,8 @@ def validate_request(config, request, *, enabled):
     identity(request["run_id"])
     if request["mode"] == "storage-boundaries":
         validate_storage_manifest(request["storage"])
+        from .storage_accounts import probe_accounts
+        probe_accounts(request["storage"], config.target, config.blob)
     elif request["mode"] == "origin-boundary":
         endpoint(request["origin"], ".azurecontainerapps.io")
     else:
@@ -68,7 +70,8 @@ async def execute(config, request, *, enabled, principal_id,
         async with asyncio.timeout(max(0, request["deadline"] - time.time())):
             async with credential_factory(client_id=config.client_id, retry_total=0) as credential:
                 if request["mode"] == "storage-boundaries":
-                    probe = StorageProbe(account=config.blob, credential=credential,
+                    from .storage_accounts import probe_accounts
+                    probe = StorageProbe(account=probe_accounts(request["storage"], config.target, config.blob), credential=credential,
                         workload="reference-data", principal_id=principal, enabled=True,
                         run_id=request["run_id"], suite_id=request["storage"]["suite_id"],
                         deadline=request["deadline"], admit=admit, transport=storage_transport)

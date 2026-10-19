@@ -41,7 +41,13 @@ class AzureFixture:
                           "gateway": {"subscriptions": []}},
             "teamInventory": [
                 {"resources": {"team": t, "resources": [self.root + t +
-                    "/providers/Microsoft.Storage/storageAccounts/" + t + "fixture"]}}
+                    "/providers/Microsoft.Storage/storageAccounts/" + t + "fixture", *[
+                        self.root + t + "/providers/Microsoft.Storage/storageAccounts/" + t
+                        + "fixture/blobServices/default/containers/" + container for container in {
+                            "reference": ("reference",),
+                            "evidence": ("drafts", "findings", "assessor-operations", "reviewer-operations"),
+                            "planning": ("candidate-lists", "briefs", "planner-operations", "author-operations"),
+                        }[t]]]}}
                 for t in ("reference", "evidence", "planning")],
             "appInventory": [], "gatewayUrl": self.gateway,
         }
@@ -429,6 +435,25 @@ class DeploymentTests(test_cli.CliCase):
             for identifier in CHECKS:
                 check = {"check_id": identifier, "expected": "evidence", "actual": actual}
                 self.assertEqual(evaluate_check(check, report)["status"], "pass")
+
+    def test_acceptance_fingerprints_bind_each_business_container_to_its_actual_team_account(self):
+        from citadel.acceptance.operator_hooks import fingerprints
+        from citadel.operator.lifecycle import Lifecycle
+        from citadel.operator.state import State
+        self.assert_deployed()
+        with State(self.state).locked() as state:
+            lifecycle = Lifecycle(state, adapter=self.fixture)
+            lifecycle.value["inventory"] += [
+                self.fixture.platform + "Microsoft.Insights/components/insights",
+                self.fixture.platform + "Microsoft.ApiManagement/service/gateway/diagnostics/applicationinsights",
+                self.fixture.platform + "Microsoft.CognitiveServices/accounts/model/deployments/citadel-gpt-41-mini",
+            ]
+            proof = fingerprints(lifecycle)
+            for container, team in (("planner-operations", "planning"), ("author-operations", "planning"),
+                                    ("assessor-operations", "evidence"), ("reviewer-operations", "evidence"),
+                                    ("drafts", "evidence"), ("findings", "evidence")):
+                expected = "https://" + team + "fixture.blob.core.windows.net/" + container + "/ledger-v1.json"
+                self.assertEqual(proof["storage_targets"][container], hashlib.sha256(expected.encode()).hexdigest())
 
     def test_foundation_actual_created_registry_digest_runtime_and_fifteen_bootstrap_objects(self):
         self.observe_fixture_plan()

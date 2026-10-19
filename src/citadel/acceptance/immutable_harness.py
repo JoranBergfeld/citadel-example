@@ -14,6 +14,7 @@ from .oracle import hash_value
 from .release_probes import validate_versions
 from .revision import RevisionProbe
 from .storage_probes import StorageControls
+from .storage_accounts import storage_accounts
 
 
 class ImmutableAcceptance:
@@ -31,11 +32,10 @@ class ImmutableAcceptance:
         row = prior["observations"][0]
         descriptor = validate_versions({"run_id": row["run_id"], "operation_id": row["operation_id"],
                                         "drafts": row["actual"]["drafts"]})
-        accounts = [resource for resource in self.lifecycle.value["inventory"]
-            if "/providers/Microsoft.Storage/storageAccounts/" in resource and "/blobServices/" not in resource]
+        accounts = storage_accounts(self.lifecycle)
         apps = [app for app in self.lifecycle.value["outputs"]["appInventory"]
                 if app["app"].rsplit("/", 1)[-1] == self.lifecycle.id + "-release-reviewer"]
-        if len(accounts) != 1 or len(apps) != 1:
+        if len(apps) != 1:
             raise Blocked("exact_immutable_reviewer_inventory_required")
         phase = {"state": "dispatching", "deadline": prior["deadline"], "read_attempts": 0,
                  "source": {"versions": descriptor}, "observations": [], "snapshots": {}}
@@ -53,9 +53,9 @@ class ImmutableAcceptance:
         native.deadline = min(previous or float("inf"), time.monotonic() + max(0, phase["deadline"] - time.time()))
         try:
             app, run_id = apps[0], uuid4().hex
-            account = "https://" + accounts[0].rsplit("/", 1)[-1] + ".blob.core.windows.net"
+            account = accounts["reviewer-operations"]
             principal = hashlib.sha256(str(UUID(app["identityPrincipalId"])).encode()).hexdigest()
-            controls = StorageControls(native, account=account, suite_id=report["run_id"], admit=admit)
+            controls = StorageControls(native, account=accounts, suite_id=report["run_id"], admit=admit)
             before, _ = controls.version_state(descriptor["run_id"], descriptor["operation_id"])
             original = prior["snapshots"][descriptor["operation_id"]]
             if before["sha256"] != original["sha256"] or before["target"] != original["target"]:

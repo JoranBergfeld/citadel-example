@@ -60,7 +60,8 @@ class Operations:
     def _status(record):
         return deepcopy({key: record[key] for key in (
             "operation_id", "run_id", "state", "input_hash", "deadline", "generation", "result",
-        )})
+        )} | ({"admission_generation": record["admission_generation"]}
+               if "admission_generation" in record else {}))
 
     async def accept(self, caller, action, operation_id, inputs, *, run_id, deadline):
         key = operation_key(caller, action, operation_id)
@@ -222,8 +223,10 @@ class Operations:
         if self.clock() < (record["lease_until"] or record["deadline"]):
             raise OperationError("conflict", "A live owner cannot be recovered")
         record["generation"] += 1
-        record["state"] = ("indeterminate" if any(
-            item["state"] != "failed_no_commit" for item in record["external"].values()
+        budget = document["budgets"].get(record["operation_id"], {})
+        record["state"] = ("indeterminate" if (
+            any(item["state"] != "failed_no_commit" for item in record["external"].values())
+            or budget.get("model") is not None or budget.get("child") is not None
         ) else "failed_no_commit")
         # Recovery changes only status/fences, never business artifacts, after the run deadline.
         await self.ledger.commit(document, etag, deadline=self.clock() + 30)
@@ -261,12 +264,16 @@ class Operations:
         external["state"] = status["state"]
         await self.ledger.commit(document, etag, deadline=min(record["deadline"], record["lease_until"]))
 
-    async def retry(self, caller, action, operation_id):
+    async def retry(self, caller, action, operation_id, *, admission_generation=None):
         document, etag = await self.ledger.read()
         record = self._record(document, operation_key(caller, action, operation_id))
         self._deadline(record["deadline"])
         if record["state"] != "failed_no_commit":
             raise OperationError("conflict", "Only fenced failed_no_commit permits explicit retry")
+        if admission_generation is not None:
+            if type(admission_generation) is not int or admission_generation != record["generation"] + 1:
+                raise OperationError("conflict", "Run admission must belong to the next fenced execution")
+            record["admission_generation"] = admission_generation
         record.update(state="pending", worker=None, lease_until=None)
         await self.ledger.commit(document, etag, deadline=record["deadline"])
         return self._status(record)
@@ -288,7 +295,9 @@ class Operations:
                         and external["state"] != status["state"])):
                 raise OperationError("conflict", "Downstream receipt conflicts with recorded execution")
             external["state"] = status["state"]
-        if all(item["state"] == "failed_no_commit" for item in record["external"].values()):
+        budget = document["budgets"].get(record["operation_id"], {})
+        if (all(item["state"] == "failed_no_commit" for item in record["external"].values())
+                and budget.get("model") is None and budget.get("child") is None):
             record["state"] = "failed_no_commit"
         await self.ledger.commit(document, etag, deadline=self.clock() + 30)
         return self._status(record)

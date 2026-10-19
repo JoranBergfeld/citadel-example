@@ -349,6 +349,9 @@ async def run_gateway_matrix(config, request):
     """No supplied credentials, identity substitution, developer fallback or raw URL."""
     validate_request(request, enabled=os.environ.get("CITADEL_ACCEPTANCE_ENABLED") == "true",
                      workload=config.target, client_id=config.client_id)
+    if request["mode"] == "storage-boundaries":
+        from .storage_accounts import probe_accounts
+        probe_accounts(request["storage"], config.target, config.blob)
     direct_model = request["mode"] == "direct-model"
     if direct_model and request["model"]["deployment"] != config.model_deployment:
         raise ValueError("Model control cannot change the allocated model deployment")
@@ -412,7 +415,8 @@ async def run_gateway_matrix(config, request):
             if request["mode"] == "storage-boundaries":
                 from .storage_probes import StorageProbe
                 from .coverage import CONTAINERS, STORAGE
-                probe = StorageProbe(account=config.blob, credential=credential,
+                from .storage_accounts import probe_accounts
+                probe = StorageProbe(account=probe_accounts(request["storage"], config.target, config.blob), credential=credential,
                     workload=config.target, principal_id=os.environ["AZURE_PRINCIPAL_ID"],
                     enabled=True, run_id=request["run_id"],
                     suite_id=request["storage"]["suite_id"], deadline=request["deadline"],

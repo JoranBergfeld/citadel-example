@@ -39,6 +39,7 @@ class MemoryTicketStore:
     """Test-only conditional marker/lease transport; share it across process doubles."""
     def __init__(self):
         self.pools, self.markers, self.active = set(), set(), None
+        self.active_generation = 0
         self.cursors = {}
         self.lock = asyncio.Lock()
 
@@ -50,6 +51,7 @@ class MemoryTicketStore:
                 raise OperationError("conflict", "Another durable run owns admission")
             if exclusive:
                 self.active = scope
+                self.active_generation = 0
             self.pools.add(scope)
             return True
 
@@ -65,9 +67,15 @@ class MemoryTicketStore:
             self.markers.add(key)
             return True
 
-    async def release_run(self, scope):
+    async def acquire_run(self, scope, *, generation=0):
         async with self.lock:
-            if self.active == scope:
+            if self.active is not None and (self.active, self.active_generation) != (scope, generation):
+                raise OperationError("conflict", "Another fenced generation owns admission")
+            self.active, self.active_generation = scope, generation
+
+    async def release_run(self, scope, *, generation=0):
+        async with self.lock:
+            if (self.active, self.active_generation) == (scope, generation):
                 self.active = None
 
     async def bind_finding(self, scope, artifact_id, version):

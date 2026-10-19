@@ -12,7 +12,7 @@ from mcp.client.streamable_http import streamable_http_client
 
 from citadel.evidence import ReferenceData
 from citadel.gateway import TrustConfiguration
-from citadel.runtime.reference import reference_application
+from citadel.runtime.reference import reference_application, RetrievedReference
 
 
 KEY = "runtime-test-only-context-secret-32bytes"
@@ -49,6 +49,27 @@ def reference(count=4):
         countries=[{"code": "BE", "name": "Belgium"}],
         regions=[{"code": "BE-VAN", "name": "Antwerp", "iso_country": "BE"}],
     )
+
+
+class RetrievedEvidenceTests(unittest.TestCase):
+    def test_one_airport_evidence_supports_only_assessment_projection_and_exact_reads(self):
+        from citadel.evidence import EvidenceError
+        data = reference()
+        retrieved = RetrievedReference(data.lookup_airport("EB01"), data.list_runways("EB01"))
+        for capability in ("search_airports", "fixture_gate", "export_rows", "with_overlay"):
+            self.assertFalse(hasattr(retrieved, capability), "Retrieved evidence is not an entire dataset")
+        assessed = retrieved.assess_airport("EB01")
+        self.assertEqual(assessed["classification"], "complete")
+        self.assertEqual(assessed["gap_reasons"], [])
+        draft = {"schema_version": 1, "artifact_id": "draft", "version": 1, "run_id": "run",
+                 "operation_id": "assessment", "airport_ident": "EB01", "private_notes": "private", **assessed}
+        projected = retrieved.shareable_projection(draft)
+        self.assertEqual(projected["classification"], "complete")
+        self.assertNotIn("private_notes", projected)
+        with self.assertRaises(EvidenceError):
+            retrieved.assess_airport("EB02")
+        with self.assertRaises(EvidenceError):
+            retrieved.shareable_projection(draft | {"classification": "invented"})
 
 
 class ReferenceProtocolTests(unittest.IsolatedAsyncioTestCase):

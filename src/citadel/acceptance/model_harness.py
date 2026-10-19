@@ -16,6 +16,7 @@ from .model_admission import ModelAdmission
 from .model_probes import INPUT_BOUND, OUTPUT_BOUND, model_origin
 from .revision import RevisionProbe
 from .storage_probes import StorageControls
+from .storage_accounts import storage_accounts
 
 
 def bind_model_result(result, *, workload, worker_id, run_id, principal, origin):
@@ -73,12 +74,11 @@ class ModelAcceptance:
                 if "/Microsoft.CognitiveServices/accounts/" in rid and "/deployments/" not in rid]
             deployments = [rid for rid in value["inventory"] if len(accounts) == 1
                            and rid == accounts[0] + "/deployments/citadel-gpt-41-mini"]
-            storage = [rid for rid in value["inventory"]
-                if "/Microsoft.Storage/storageAccounts/" in rid and "/blobServices/" not in rid]
+            storage = storage_accounts(self.lifecycle)
             apps = {app["app"].rsplit("/", 1)[-1].removeprefix(self.lifecycle.id + "-"): app
                     for app in value["outputs"]["appInventory"]}
             quota = self.lifecycle.config["modelTokensPerMinute"]
-            if (len(accounts) != 1 or len(deployments) != 1 or len(storage) != 1
+            if (len(accounts) != 1 or len(deployments) != 1
                     or set(apps) != set(STORAGE) or len(value["outputs"]["appInventory"]) != 5
                     or type(quota) is not int or not INPUT_BOUND + OUTPUT_BOUND <= quota <= 120000
                     or quota > value["preflight"]["verifiedTokensPerMinute"]):
@@ -95,8 +95,8 @@ class ModelAcceptance:
                     or deployed["properties"].get("versionUpgradeOption") != "NoAutoUpgrade"):
                 raise Blocked("actual_model_control_deployment_conflict")
             admission = ModelAdmission(phase, save=self.lifecycle.state.save, tokens_per_minute=quota)
-            account = "https://" + storage[0].rsplit("/", 1)[-1] + ".blob.core.windows.net"
-            controls = StorageControls(native, account=account, suite_id=report["run_id"], admit=admit)
+            account = storage["planner-operations"]
+            controls = StorageControls(native, account=storage, suite_id=report["run_id"], admit=admit)
             phase["state"] = "acquiring"
             self.lifecycle.state.save()
             with native.blob(account, "planner-operations", "active-run-slot.json") as blob:

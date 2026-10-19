@@ -9,7 +9,7 @@ from mcp.types import CallToolResult, TextContent, Tool, ToolAnnotations
 from starlette.applications import Starlette
 from starlette.routing import Route
 
-from citadel.evidence import EvidenceError, ReferenceData
+from citadel.evidence import EvidenceError, EvidenceAssessment
 from citadel.evidence.manifests import sha256
 from citadel.gateway import GatewayTrust
 from citadel.acceptance.telemetry import correlate, emit
@@ -80,7 +80,7 @@ def reference_application(reference, trust):
     ], lifespan=lifespan), trust)
 
 
-class RetrievedReference(ReferenceData):
+class RetrievedReference(EvidenceAssessment):
     """Reuse deterministic rules on evidence read through the authorized MCP seam.
 
     The source is authenticated Reference Data, not model/body-claimed evidence.

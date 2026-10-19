@@ -13,6 +13,7 @@ from .oracle import hash_value
 from .scenario_proof import scenario_snapshot, evaluate_scenario_proof
 from .scenarios import FIXTURES
 from .storage_probes import StorageControls
+from .storage_accounts import storage_accounts
 
 
 class ScenarioAcceptance:
@@ -28,10 +29,7 @@ class ScenarioAcceptance:
         run = self.lifecycle.value["runs"][run_id]
         if run["state"] != "succeeded":
             raise Blocked("completed_actual_scenario_required")
-        accounts = [resource for resource in self.lifecycle.value["inventory"]
-            if "/providers/Microsoft.Storage/storageAccounts/" in resource and "/blobServices/" not in resource]
-        if len(accounts) != 1:
-            raise Blocked("exact_scenario_storage_inventory_required")
+        accounts = storage_accounts(self.lifecycle)
         phase = {"state": "observing", "deadline": run["deadline"], "started": run["deadline"] - 900,
                  "read_attempts": 0, "control": {"observations": []}}
         phases[scenario] = phase
@@ -47,8 +45,7 @@ class ScenarioAcceptance:
         previous = getattr(native, "deadline", None)
         native.deadline = min(previous or float("inf"), time.monotonic() + max(0, phase["deadline"] - time.time()))
         try:
-            account = "https://" + accounts[0].rsplit("/", 1)[-1] + ".blob.core.windows.net"
-            controls = StorageControls(native, account=account, suite_id=report["run_id"], admit=admit)
+            controls = StorageControls(native, account=accounts, suite_id=report["run_id"], admit=admit)
             documents = {}
             for actor, container in {**OPERATIONS, "drafts": "drafts", "findings": "findings"}.items():
                 record, content = controls._read(container, "ledger-v1.json")

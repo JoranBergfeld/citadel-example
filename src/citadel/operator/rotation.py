@@ -97,12 +97,20 @@ def rotate_command(lifecycle, args):
     if args.stage == "prepare":
         if path.exists():
             pending = read_private(path)
+            owner = getattr(args, "acceptance_run_id", None)
+            if owner is not None and owner != pending.get("acceptance_run_id"):
+                raise Blocked("rotation_collection_owner_conflict")
             if (pending["kind"], pending["target"]) != (args.kind, target):
                 raise Blocked("another_rotation_requires_reconciliation")
         else:
             pending = {"kind": args.kind, "target": target, "run_id": uuid4().hex,
                        "phase": "prepared", "old": copy.deepcopy(credentials),
                        "new": certificate(lifecycle.id) if args.kind == "certificate" else secrets.token_urlsafe(32)}
+            acceptance_run_id = getattr(args, "acceptance_run_id", None)
+            if acceptance_run_id is not None:
+                if acceptance_run_id not in lifecycle.value.get("acceptance_attempts", {}):
+                    raise Blocked("matching_acceptance_collection_owner_required")
+                pending["acceptance_run_id"] = acceptance_run_id
             from citadel.acceptance.rotation_harness import capture_retired_secret
             pending["old_secret_id"] = capture_retired_secret(lifecycle, args.kind, target, credentials)
             write_private(path, pending)

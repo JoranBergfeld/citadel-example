@@ -17,20 +17,44 @@ KINDS = ("subscription", "certificate", "context")
 LEDGERS = ("planner-operations", "assessor-operations", "reviewer-operations",
            "author-operations", "drafts", "findings")
 TARGETS = {"candidate-planner": "evidence-assessor", "evidence-assessor": "release-reviewer",
-           "release-reviewer": "reference-data", "operator": "candidate-planner"}
+           "release-reviewer": "reference-data", "operator": "candidate-planner",
+           "briefing-author": "release-reviewer"}
 
 
 def validate_rotation(value, workload):
     keys = {"kind", "target", "credential_sha256", "secret_version"}
+    finding_read = workload == "briefing-author" and isinstance(value, dict) and value.get("kind") == "subscription"
+    if finding_read:
+        keys |= {"finding", "read_scope"}
     if (not isinstance(value, dict) or set(value) != keys or value["kind"] not in KINDS
             or value["target"] not in INVOCATION_CALLERS
-            or workload not in INVOCATION_CALLERS[value["target"]]
+            or (value["target"] != "release-reviewer" if finding_read
+                else workload not in INVOCATION_CALLERS[value["target"]])
             or not hash_value(value["credential_sha256"])
             or value["secret_version"] is not None and (
                 value["kind"] != "subscription" or not isinstance(value["secret_version"], str)
                 or re.fullmatch("[a-f0-9]{32}", value["secret_version"]) is None)):
         raise ValueError("Exact allocated read-only rotation control required")
+    if finding_read:
+        finding, scope = value["finding"], value["read_scope"]
+        if (not isinstance(finding, dict) or set(finding) != {"artifact_id", "version", "sha256"}
+                or type(finding["version"]) is not int or not 1 <= finding["version"] <= 2147483647
+                or not hash_value(finding["sha256"]) or not isinstance(scope, dict)
+                or set(scope) != {"operation_id", "run_id"}):
+            raise ValueError("Exact existing funded finding required")
+        for identifier in (finding["artifact_id"], scope["operation_id"], scope["run_id"]):
+            identity(identifier)
     return value
+
+
+def rotation_path(control):
+    if "finding" in control:
+        return f"/findings/{control['finding']['artifact_id']}/versions/{control['finding']['version']}"
+    return "/mcp" if control["target"] == "reference-data" else "/.well-known/agent-card.json"
+
+
+def rotation_method(actor, target):
+    return "findings-read" if actor == "briefing-author" else "initialize" if target == "reference-data" else "discovery"
 
 
 async def rotation_read(*, workload, gateway, key, request, client, admit, principal_id=None):
@@ -40,7 +64,7 @@ async def rotation_read(*, workload, gateway, key, request, client, admit, princ
     await admit()
     deadline, started, operation = request["deadline"], time.time(), uuid4().hex
     target = control["target"]
-    path = "/mcp" if target == "reference-data" else "/.well-known/agent-card.json"
+    path = rotation_path(control)
     url = gateway + "/" + target + path
     method = "POST" if path == "/mcp" else "GET"
     payload = ({"jsonrpc": "2.0", "id": operation, "method": "initialize",
@@ -51,7 +75,8 @@ async def rotation_read(*, workload, gateway, key, request, client, admit, princ
     async with asyncio.timeout(max(0, min(30, deadline - time.time()))):
         response = await client.request(method, url, json=payload, follow_redirects=False, headers={
             "Ocp-Apim-Subscription-Key": key, "x-citadel-run-id": request["run_id"],
-            "x-citadel-operation-id": operation, "Accept": "application/json, text/event-stream"})
+            "x-citadel-operation-id": operation, "Accept": "application/json, text/event-stream",
+            **({"x-citadel-read-pool": control["read_scope"]["operation_id"]} if "finding" in control else {})})
         content = await response.aread()
     if len(content) > 1024 * 1024:
         raise ValueError("Rotation response exceeds the fixed bound")
@@ -61,6 +86,8 @@ async def rotation_read(*, workload, gateway, key, request, client, admit, princ
         if method == "POST":
             allowed = (body.get("jsonrpc") == "2.0" and body.get("id") == operation
                 and body.get("result", {}).get("protocolVersion") == "2025-11-25" and "error" not in body)
+        elif "finding" in control:
+            allowed = sha256(body) == control["finding"]["sha256"]
         else:
             interfaces = body.get("supportedInterfaces", [])
             allowed = (len(interfaces) == 1 and interfaces[0].get("url") == gateway + "/" + target + "/a2a"
@@ -92,7 +119,10 @@ def evaluate_rotation(check, report):
         actor, target = value["caller"], value["name"]
         identities, operations = report["runtime_identities"], report["operation_ids"]
         rows = value["observations"]
-        if (kind not in KINDS or actor not in INVOCATION_CALLERS[target] or len(rows) != 3
+        if (kind not in KINDS
+                or not (actor in INVOCATION_CALLERS[target]
+                        or kind == "subscription" and actor == "briefing-author" and target == "release-reviewer")
+                or len(rows) != 3
                 or value["run_id"] not in operations or value["state"] != "restored"
                 or not hash_value(value["before_sha256"])
                 or value["before_sha256"] != value["after_sha256"]):
@@ -126,11 +156,11 @@ def evaluate_rotation(check, report):
                 return blocked
             service = gateway[0]
             if index == 1 and any(e.get("source") == "application"
-                    and e.get("method") in ("initialize", "discovery")
+                    and e.get("method") in ("initialize", "discovery", "findings-read")
                     and e.get("request_id") == row["request_id"] for e in evidence):
                 return blocked
             if index != 1:
-                method = "initialize" if target == "reference-data" else "discovery"
+                method = rotation_method(actor, target)
                 if (row["status_code"] != 200 or row["actual"] != "read_only_control"
                         or service.get("credential_sha256") != report["subscription_bindings"][actor]
                         or service.get("caller") != actor

@@ -58,6 +58,45 @@ class BlobProvider:
 
 
 class StorageControlTests(unittest.TestCase):
+    def test_observer_routes_each_container_to_its_inventoried_team_account(self):
+        from citadel.acceptance.storage_accounts import storage_accounts
+        groups = {
+            "reference": ("reference",),
+            "evidence": ("drafts", "findings", "assessor-operations", "reviewer-operations"),
+            "planning": ("candidate-lists", "briefs", "planner-operations", "author-operations"),
+        }
+        inventory, expected = [], {}
+        for team, containers in groups.items():
+            account = "/owned/providers/Microsoft.Storage/storageAccounts/" + team + "fixture"
+            inventory.append(account)
+            for container in containers:
+                inventory.append(account + "/blobServices/default/containers/" + container)
+                expected[container] = "https://" + team + "fixture.blob.core.windows.net"
+        lifecycle = SimpleNamespace(value={"inventory": inventory})
+        accounts = storage_accounts(lifecycle)
+        self.assertEqual(accounts, expected)
+        provider, destinations = BlobProvider(), []
+        original = provider.blob
+
+        def blob(account, container, name):
+            self.assertEqual(account, expected[container], "Cross-team reads must use the owning account")
+            destinations.append((account, container))
+            return original(account, container, name)
+
+        provider.blob = blob
+        controls = StorageControls(provider, account=accounts, suite_id="suite1", admit=lambda: None)
+        controls.prepare()
+        controls.snapshot()
+        self.assertEqual({container for _, container in destinations}, set(CONTAINERS))
+        for row in controls.products().values():
+            self.assertEqual(row["target"], hashlib.sha256(
+                (expected[row["container"]] + "/" + row["container"] + "/ledger-v1.json").encode()).hexdigest())
+        lifecycle.value["inventory"] += [
+            "/owned/providers/Microsoft.Storage/storageAccounts/planningfixture/blobServices/default/containers/drafts"]
+        from citadel.operator.state import Blocked
+        with self.assertRaises(Blocked):
+            storage_accounts(lifecycle)
+
     def test_release_source_selects_an_observed_comparison_finding_without_exporting_the_payload(self):
         from citadel.evidence.manifests import sha256
         provider, admissions = BlobProvider(), []

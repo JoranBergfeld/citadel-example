@@ -816,8 +816,84 @@ unchanged. The complete 42-test fixture suite passed with one consistent
 monotonic-backed fake external UTC clock, including independent inventory
 timestamps; this does not claim that raw-host clock failures disappeared.
 
-Current local artifacts are indexed by `.build/approved-verification-index.json`
+Pre-review local artifacts are indexed by `.build/approved-verification-index.json`
 and `.build/approved-provider-coverage.json`; the historical `resume-*` artifacts
 are preserved. All 278 canonical checks have source providers; zero cloud passes
 are claimed. No Azure resource deployment, live material rotation, two-pass cloud
 acceptance or human signoff was performed.
+
+### Integration-review corrections
+
+The subsequent review corrected deployed account ownership across every
+acceptance driver and exported target binding: containers resolve to their
+actual Reference Data, Evidence Review or Exercise Planning storage account,
+not a fictitious shared account. Missing, duplicated or inconsistent ownership
+fails closed. Cross-team disposable SDK probes use only those fixed deployment
+accounts, validated against their own application's account.
+
+Certificate selection/restoration now uses the pinned APIM 2024-05-01
+[`Certificate_CreateOrUpdate` PUT contract](https://github.com/Azure/azure-rest-api-specs/blob/main/specification/apimanagement/resource-manager/Microsoft.ApiManagement/ApiManagement/stable/2024-05-01/apimcertificates.json);
+fixtures reject unsupported PATCH.
+Briefing Author subscription controls use only an exact, hash-verified finding
+with its already-funded Reviewer read pool, never forbidden discovery. Embedded
+rotations and subsequent parent collection share one persisted, nonreplenished
+600-second allowance; standalone rotations retain their separate original cap.
+
+Authenticated runtime recovery releases the global lease only after definite
+fenced no-effect reconciliation. Explicit A2A retry requires a separate
+`citadel_retry` request with the same owner, identity and inputs, original
+unexpired budget and remaining finite tickets. Each retry charges an additional
+agent attempt, preserves previous model/read/token charges and acquires a
+generation-owned global lease that stale cleanup cannot release. Ambiguous
+model/child admissions retain exclusion and forbid retry. No automatic replay
+or caller-claimed downstream reconciliation was added.
+
+Retrieved MCP evidence now implements only the narrow assessment/projection
+rules over exact airport/runway reads; it no longer inherits uninitialized full
+dataset capabilities. Operation modes have one local registration for phase,
+coverage and evaluator selection; independent proof validators remain unchanged.
+
+Review validation retains fake external cloud transports and uses
+monotonic-backed external UTC for acceptance/operator fixtures, without
+shortening real elapsed timers or relaxing production observation guards.
+A raw-host acceptance run passed 242 checks but lost one timing-bound owner-status
+receipt; that test passed nine isolated repeats. Independent native-clock sampling
+observed UTC move backward by 2.790330648 seconds. The raw run, repeat diagnostics
+and clock sample remain in `.build/review-acceptance-raw-clock.log`,
+`.build/review-owner-clock-diagnostic.log` and
+`.build/review-host-clock-sample.json`; the missing receipt was not accepted as
+proof or converted into a pass.
+
+The unchanged genuine production 900-second timer test is excluded from the
+review rerun by explicit request; its previous host/image results remain
+historical evidence under the preceding commit, not new cloud proof. The
+current-source fake-clock cancellation/deadline controls still verify refusal,
+nonreplay and original-budget preservation.
+
+Coherent review validation against the unchanged source fingerprint:
+
+| Host suite | Tests run | Explicit live-cloud skips |
+| --- | ---: | ---: |
+| Acceptance | 243 | 0 |
+| Operator | 43 | 0 |
+| Runtime | 38 | 2 |
+| Operations | 30 | 4 |
+| Evidence | 18 | 0 |
+| Gateway | 16 | 0 |
+| Stack | 6 | 0 |
+| Infrastructure/policy | 13 | 0 |
+
+All other host checks passed. The pinned offline image additionally passed
+55 focused review-control tests and six stack tests with networking disabled,
+read-only root, UID/GID 65532, dropped capabilities and no-new-privileges.
+Read-only repository test/policy fixtures were supplied separately; only
+`/app/.build` was writable. Both host and image validated all five configuration
+entrypoints and refused an unallocated child before provider access. Wheel and
+image bytes matched all 95 current Python source files; syntax and whitespace
+checks passed. Pins, permissions and production timeout durations are unchanged.
+
+Current review artifacts are `.build/review-verification-index.json` and
+`.build/review-provider-coverage.json`, binding the source commit/fingerprint,
+immutable image ID, exact suite counts, qualifications and retained failure
+diagnostics. They report 278/278 source providers, not cloud passes. No Azure
+deployment, live rotation, two-pass cloud acceptance or human signoff occurred.

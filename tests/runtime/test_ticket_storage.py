@@ -16,6 +16,7 @@ from citadel.runtime.state import ScopedLedger, read_scope
 from citadel.runtime.tickets import AzureTicketStore, TicketPool
 from test_storage import BlobResponse, FixtureCredential
 import test_read_tickets as owner_tests
+import test_recovery as recovery_tests
 
 
 class TicketWire(AsyncHttpTransport):
@@ -212,3 +213,24 @@ class AzureOwnerReadBudgetTests(owner_tests.ExternalReadBudgetTests):
         ledger = ObservedLedger(self.client.get_blob_client("ledger-v1.json"))
         ledger.ticket_store = AzureTicketStore(self.client)
         return ledger
+
+
+class AzureRecoveryTests(recovery_tests.RuntimeRecoveryTests):
+    async def asyncSetUp(self):
+        self.now = [1000.0]
+        self.wire = TicketWire(clock=lambda: self.now[0])
+        self.client = TicketSDKTests().container(self.wire)
+        await self.client.__aenter__()
+        self.ledger = AzureBlobLedger(self.client.get_blob_client("ledger-v1.json"),
+                                      clock=lambda: self.now[0], control_plane=True)
+        wire = self.wire
+
+        class ObservedStore(AzureTicketStore):
+            @property
+            def markers(self):
+                return {path for path in wire.blobs if "/read-tickets/" in path}
+
+        self.ledger.ticket_store = ObservedStore(self.client)
+
+    async def asyncTearDown(self):
+        await self.client.close()

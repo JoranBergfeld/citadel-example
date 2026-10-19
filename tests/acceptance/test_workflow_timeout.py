@@ -3,6 +3,7 @@ import io
 import json
 import time
 import unittest
+from tests.acceptance.storage_fixture import storage_inventory
 from unittest.mock import patch
 
 import httpx
@@ -351,7 +352,7 @@ class WorkflowProviderTests(unittest.TestCase):
             credentials=lambda: {"callerStates": {"operator": "active"},
                                  "callerKeys": {"operator": {"primary": "allocated-operator"}}},
             value={"runs": {}, "inventory": [
-                "/subscriptions/s/resourceGroups/g/providers/Microsoft.Storage/storageAccounts/owned",
+                *storage_inventory(planning="owned"),
                 "/subscriptions/s/resourceGroups/g/providers/Microsoft.OperationalInsights/workspaces/owned"],
                 "outputs": {"gatewayUrl": "https://gateway.test", "appInventory": [{
                     "app": "/owned/sample-candidate-planner", "image": "owned@sha256:" + "a" * 64}]}})

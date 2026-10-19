@@ -1,4 +1,5 @@
 import unittest
+from tests.acceptance.storage_fixture import storage_inventory
 from types import SimpleNamespace
 
 from citadel.acceptance.model_harness import ModelAcceptance, bind_model_result
@@ -12,7 +13,6 @@ class ModelHarnessTests(unittest.TestCase):
         from citadel.acceptance.coverage import STORAGE
         now, calls = [time.time()], []
         model = "/subscriptions/s/resourceGroups/g/providers/Microsoft.CognitiveServices/accounts/model"
-        storage = "/subscriptions/s/resourceGroups/g/providers/Microsoft.Storage/storageAccounts/allocated"
 
         class Blob:
             url = "https://allocated.blob.core.windows.net/planner-operations/active-run-slot.json"
@@ -46,7 +46,7 @@ class ModelHarnessTests(unittest.TestCase):
 
         lifecycle = SimpleNamespace(id="d", config={"modelTokensPerMinute": 6000, "modelCapacity": 6},
             value={"runs": {}, "preflight": {"verifiedTokensPerMinute": 6000},
-                "inventory": [model, model + "/deployments/citadel-gpt-41-mini", storage],
+                "inventory": [model, model + "/deployments/citadel-gpt-41-mini", *storage_inventory()],
                 "outputs": {"appInventory": [{"app": "/d-" + actor} for actor in STORAGE]}},
             native=SimpleNamespace(rest=rest, blob=lambda *args: Blob()),
             state=SimpleNamespace(save=lambda: None))
@@ -71,7 +71,7 @@ class ModelHarnessTests(unittest.TestCase):
         lifecycle = SimpleNamespace(id="d", config={"modelTokensPerMinute": 6000, "modelCapacity": 6},
             value={"runs": {}, "preflight": {"verifiedTokensPerMinute": 6000}, "inventory": [
                 account, account + "/deployments/citadel-gpt-41-mini",
-                "/subscriptions/s/resourceGroups/g/providers/Microsoft.Storage/storageAccounts/allocated"],
+                *storage_inventory()],
                 "outputs": {"appInventory": [{"app": "/d-" + actor} for actor in (
                     "candidate-planner", "evidence-assessor", "release-reviewer",
                     "briefing-author", "reference-data")]}},

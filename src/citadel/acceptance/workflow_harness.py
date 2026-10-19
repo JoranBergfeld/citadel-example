@@ -14,6 +14,7 @@ from .acceptance_timeout import CachedAcceptanceRevision
 from .collection import AzureQuery, Collector, collection_remaining
 from .rotation_controls import LEDGERS
 from .storage_probes import StorageControls
+from .storage_accounts import storage_accounts
 from .workflow_oracle import CHECK, evaluate_workflow
 
 
@@ -58,10 +59,7 @@ class WorkflowAcceptance:
         lifecycle, started, run = self.lifecycle, time.time(), uuid4().hex
         if any(row["state"] not in ("succeeded", "failed_no_commit") for row in lifecycle.value["runs"].values()):
             raise Blocked("workflow_control_requires_quiescence")
-        accounts = [r for r in lifecycle.value["inventory"]
-            if "/providers/Microsoft.Storage/storageAccounts/" in r and "/blobServices/" not in r]
-        if len(accounts) != 1:
-            raise Blocked("exact_workflow_storage_inventory_required")
+        accounts = storage_accounts(lifecycle)
         phase = {"run_id": run, "state": "dispatching", "started": started, "finished": started,
             "deadline": started + 1140, "read_attempts": 0, "before": [], "after": []}
         report["workflow_timeout_phase"] = phase
@@ -88,8 +86,7 @@ class WorkflowAcceptance:
             lifecycle.state.save()
             return row
 
-        controls = StorageControls(native, account="https://" + accounts[0].rsplit("/", 1)[-1]
-            + ".blob.core.windows.net", suite_id=report["run_id"], admit=admit)
+        controls = StorageControls(native, account=accounts, suite_id=report["run_id"], admit=admit)
 
         def snapshot(side):
             for container in LEDGERS:

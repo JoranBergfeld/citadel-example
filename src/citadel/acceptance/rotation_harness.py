@@ -16,9 +16,10 @@ from .collection import AzureQuery, Collector, collection_remaining
 from .oracle import hash_value
 from .reports import export_report
 from .revision import RevisionProbe
-from .rotation_controls import LEDGERS, TARGETS, evaluate_rotation, rotation_read
+from .rotation_controls import LEDGERS, TARGETS, evaluate_rotation, rotation_read, rotation_path, rotation_method
 from .rotation_selector import RetiredSigner
 from .storage_probes import StorageControls
+from .storage_accounts import storage_accounts
 
 
 def capture_retired_secret(lifecycle, kind, target, credentials):
@@ -59,7 +60,7 @@ def capture_retired_secret(lifecycle, kind, target, credentials):
 
 def allowed_control(row, report, backend):
     actor, evidence = row["caller"], report["evidence"]
-    method = "initialize" if backend == "reference-data" else "discovery"
+    method = rotation_method(actor, backend)
     gateway = [e for e in evidence if e.get("source") == "gateway"
         and e.get("request_id") == row.get("request_id") and e.get("target") == row["target"]
         and e.get("status_code") == 200 and e.get("caller") == actor
@@ -109,8 +110,11 @@ class RotationAcceptance:
                 **fingerprints, "operation_ids": [run_id], "evidence": [], "checks": [],
                 "started": time.time(), "finished": time.time(), "deadline": time.time() + 900,
                 "read_attempts": 0, "observations": [], "caller": actor, "name": backend,
+                "acceptance_run_id": pending.get("acceptance_run_id"),
                 "required_checks": ["rotation." + kind + "-allowed-and-revoked"]}
         record = records[run_id]
+        if record.get("acceptance_run_id") != pending.get("acceptance_run_id"):
+            raise Blocked("rotation_collection_owner_conflict")
         if record["fingerprint"] != fingerprints["fingerprint"]:
             raise Blocked("rotation_control_inputs_changed")
         if record.get(stage, {}).get("state") != "verified":
@@ -134,17 +138,24 @@ class RotationAcceptance:
                 record[stage] = {"state": "dispatching"}
                 lifecycle.state.save()
                 if stage == "new":
+                    if actor == "briefing-author":
+                        controls = StorageControls(native, account=storage_accounts(lifecycle),
+                            suite_id=run_id, admit=admit)
+                        runs = [key for key, row in lifecycle.value["runs"].items()
+                                if row["state"] == "succeeded" and row.get("fixture") == "base-source"][-4:]
+                        source = controls.route_context(runs, minimum_finding_reads=2)
+                        record["finding_control"] = source["context"]["finding_controls"]["briefing-author"]
+                        record["source_reads"] = source["observations"] + source["ticket_reads"]
+                        record["operation_ids"].extend(row["operation_id"] for row in record["source_reads"])
+                        lifecycle.state.save()
                     record["observations"].append(self._read(record, kind, actor, backend, admit))
                     record[stage]["state"] = "observed"
                 else:
                     if record.get("new", {}).get("state") != "verified":
                         raise Blocked("verified_current_rotation_control_required")
-                    accounts = [r for r in lifecycle.value["inventory"]
-                        if "/Microsoft.Storage/storageAccounts/" in r and "/blobServices/" not in r]
-                    if len(accounts) != 1:
-                        raise Blocked("exact_rotation_storage_inventory_required")
+                    accounts = storage_accounts(lifecycle)
                     controls = StorageControls(native,
-                        account="https://" + accounts[0].rsplit("/", 1)[-1] + ".blob.core.windows.net",
+                        account=accounts,
                         suite_id=run_id, admit=admit)
                     record["before"] = [controls._read(container, "ledger-v1.json")[0] for container in LEDGERS]
                     record["operation_ids"].extend(row["operation_id"] for row in record["before"])
@@ -195,6 +206,8 @@ class RotationAcceptance:
         control = {"kind": kind, "target": backend, "credential_sha256": hashlib.sha256(key.encode()).hexdigest(),
             "secret_version": pending["old_secret_id"].rsplit("/", 1)[-1]
                 if retired and kind == "subscription" and actor != "operator" else None}
+        if actor == "briefing-author":
+            control.update(record["finding_control"])
         record["operation_ids"].append(operation)
         lifecycle.state.save()
         if actor == "operator":
@@ -219,7 +232,7 @@ class RotationAcceptance:
             principal = hashlib.sha256(str(UUID(apps[0]["identityPrincipalId"])).encode()).hexdigest()
             if row.get("runtime_identity") != principal:
                 raise Blocked("rotation_executing_identity_conflict")
-        suffix = "/mcp" if backend == "reference-data" else "/.well-known/agent-card.json"
+        suffix = rotation_path(control)
         if (row.get("caller") != actor or row.get("run_id") != operation
                 or row.get("check_id") != record["required_checks"][0]
                 or row.get("credential_sha256") != control["credential_sha256"]
@@ -233,11 +246,15 @@ class RotationAcceptance:
         return row
 
     def _collect(self, record, admit):
-        remaining = min(collection_remaining(record, time.time()), record["deadline"] - time.time())
+        owner_id = record.get("acceptance_run_id")
+        owner = record if owner_id is None else self.lifecycle.value.get("acceptance_attempts", {}).get(owner_id)
+        if owner is None:
+            raise Blocked("matching_acceptance_collection_owner_required")
+        remaining = min(collection_remaining(owner, time.time()), record["deadline"] - time.time())
         if remaining <= 0:
             raise Blocked("rotation_original_collection_allowance_exhausted")
-        windows = record.setdefault("collection_windows", {})
-        key = str(len(windows))
+        windows = owner.setdefault("collection_windows", {})
+        key = "rotation-" + record.get("run_id", "") + "-" + str(len(windows))
         windows[key] = {"started": time.time(), "finished": None}
         self.lifecycle.state.save()
         try:
@@ -258,7 +275,10 @@ class RotationAcceptance:
         from citadel.operator.rotation import rotate_command
         for kind, target in (("subscription", "candidate-planner"), ("certificate", None),
                              ("context", "evidence-assessor")):
-            args = SimpleNamespace(command="rotate", kind=kind, target=target, stage="prepare")
+            if collection_remaining(report, time.time()) <= 0:
+                raise Blocked("rotation_original_collection_allowance_exhausted")
+            args = SimpleNamespace(command="rotate", kind=kind, target=target, stage="prepare",
+                                   acceptance_run_id=report["run_id"])
             rotate_command(self.lifecycle, args)
             pending = read_private(self.lifecycle.state.directory / "rotation.json")
             args.stage = "finalize"

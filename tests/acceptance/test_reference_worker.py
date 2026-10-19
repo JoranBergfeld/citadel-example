@@ -11,6 +11,7 @@ import httpx2
 from citadel.acceptance.coverage import CONTAINERS
 from citadel.acceptance.reference_worker import execute
 from tests.acceptance.test_storage_probes import Response, StorageTransport, DATA, HASH
+from tests.acceptance.storage_fixture import storage_accounts
 
 
 class ReferenceTransport(StorageTransport):
@@ -31,12 +32,12 @@ class ReferenceWorkerTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.config = SimpleNamespace(target="reference-data",
             client_id="11111111-1111-1111-1111-111111111111",
-            blob="https://allocated.blob.core.windows.net",
+            blob="https://referencefixture.blob.core.windows.net",
             operations_container=None, subscription_secret=None)
         self.principal = "22222222-2222-2222-2222-222222222222"
         self.request = {"schema_version": 1, "run_id": "reference1", "workload": "reference-data",
             "client_id": self.config.client_id, "deadline": time.time() + 120,
-            "mode": "storage-boundaries", "storage": {"suite_id": "suite1", "targets": {
+            "mode": "storage-boundaries", "storage": {"suite_id": "suite1", "accounts": storage_accounts(), "targets": {
                 container: {"sha256": HASH, "etag": '"verified-fixture"'} for container in CONTAINERS}}}
 
     async def test_one_shot_readonly_identity_executes_real_sdk_boundaries_without_a_secret_or_writable_ledger(self):
@@ -66,6 +67,12 @@ class ReferenceWorkerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(calls[0], ("identity", {"client_id": self.config.client_id, "retry_total": 0}))
         self.assertEqual({item[1] for item in calls if item[0] == "scope"}, {("https://storage.azure.com/.default",)})
         self.assertTrue(all("/acceptance/suite1/storage-boundary-v1.json" in item.url for item in transport.requests))
+        self.assertEqual({request.url.split("/")[2] for request in transport.requests}, {
+            "referencefixture.blob.core.windows.net", "evidencefixture.blob.core.windows.net",
+            "planningfixture.blob.core.windows.net"})
+        for request in transport.requests:
+            container = request.url.split("/")[3]
+            self.assertTrue(request.url.startswith(storage_accounts()[container] + "/" + container + "/"))
         self.assertFalse(any("dispatch.json" in item.url or "read-tickets" in item.url for item in transport.requests))
         self.assertNotIn("fixture-reference-token", str(result))
 
@@ -82,6 +89,16 @@ class ReferenceWorkerTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(ValueError):
             await execute(self.config, self.request, enabled=True,
                 principal_id=self.principal, credential_factory=forbidden)
+
+    async def test_cross_account_probe_manifest_cannot_select_another_deployment_or_arbitrary_endpoint(self):
+        def forbidden(**options):
+            raise AssertionError("Unallocated storage selection must fail before identity/provider access")
+
+        for endpoint in ("https://evidenceother.blob.core.windows.net", "https://other.example"):
+            accounts = storage_accounts() | {"drafts": endpoint}
+            with self.subTest(endpoint=endpoint), self.assertRaises(ValueError):
+                await execute(self.config, self.request | {"storage": self.request["storage"] | {"accounts": accounts}},
+                    enabled=True, principal_id=self.principal, credential_factory=forbidden)
 
     async def test_reference_origin_probes_use_real_mcp_initialize_without_subscription_or_gateway_private_key(self):
         requests = []

@@ -6,6 +6,7 @@ import os
 import sys
 import time
 import unittest
+from tests.acceptance.storage_fixture import storage_inventory
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -173,7 +174,7 @@ class ReadControllerTests(unittest.TestCase):
             "identityPrincipalId": "11111111-1111-1111-1111-111111111111",
             "image": "registry.example/image@sha256:" + "a" * 64}
         lifecycle = SimpleNamespace(id="d", native=native, state=SimpleNamespace(save=lambda: None), value={
-            "inventory": ["/subscriptions/s/resourceGroups/g/providers/Microsoft.Storage/storageAccounts/planning"],
+            "inventory": storage_inventory(planning="planning"),
             "outputs": {"appInventory": [app]}})
         report = {"run_id": "suite", "operation_ids": [], "operation_phase": {"state": "observed"}}
         FaultAcceptance(lifecycle).execute(report, mode="read-limit")

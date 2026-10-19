@@ -5,6 +5,7 @@ import hashlib
 import json
 import time
 import unittest
+from tests.acceptance.storage_fixture import storage_inventory
 from types import SimpleNamespace
 
 from citadel.acceptance.release_probes import ReleaseProbes
@@ -140,7 +141,7 @@ class ReleaseHarnessTests(unittest.TestCase):
                "image": "registry.example/image@sha256:" + "a" * 64}
         lifecycle = SimpleNamespace(id="d", native=native,
             state=SimpleNamespace(save=lambda: saves.append(1)), value={
-                "inventory": ["/subscriptions/s/resourceGroups/g/providers/Microsoft.Storage/storageAccounts/allocated"],
+                "inventory": storage_inventory(evidence="allocated", planning="planningfixture"),
                 "outputs": {"appInventory": [app]}})
         report = {"run_id": "suite", "operation_ids": ["comparison"],
                   "scenarios": {"comparison": {"operation_id": "comparison"}}}

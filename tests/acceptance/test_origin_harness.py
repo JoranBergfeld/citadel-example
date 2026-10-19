@@ -1,6 +1,7 @@
 import hashlib
 import time
 import unittest
+from tests.acceptance.storage_fixture import storage_inventory
 from types import SimpleNamespace
 
 import httpx
@@ -56,7 +57,7 @@ class OriginHarnessTests(unittest.IsolatedAsyncioTestCase):
         inherited = time.time() + 120
         lifecycle = SimpleNamespace(native=native, value={
             "runs": {"real-run": {"state": "succeeded", "deadline": inherited}},
-            "inventory": ["/subscriptions/s/resourceGroups/g/providers/Microsoft.Storage/storageAccounts/allocated"],
+            "inventory": storage_inventory(),
             "outputs": {"appInventory": [], "gatewayUrl": "https://gateway.example"}},
             state=SimpleNamespace(save=lambda: saves.append(len(native.requests))),
             credentials=lambda: {"callerStates": {"operator": "active"},

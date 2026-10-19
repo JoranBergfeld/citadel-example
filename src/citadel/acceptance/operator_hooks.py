@@ -15,6 +15,7 @@ from .collection import AzureQuery, Collector, collection_remaining
 from .coverage import required_checks
 from .reports import acceptance_status, automated_status, confirm_narrative, export_report, report_directory
 from .scenarios import FIXTURES, evaluate_scenario
+from .storage_accounts import storage_accounts
 
 
 HOOKS = {"full-acceptance", "denied-bypass-controls", "rotation-new-material-allowed",
@@ -48,11 +49,7 @@ def fingerprints(lifecycle):
     scenarios = scenario_inputs(source)
     inventory = inventory_inputs(lifecycle)
     telemetry = telemetry_inputs(lifecycle)
-    accounts = [resource for resource in lifecycle.value["inventory"]
-        if "/providers/Microsoft.Storage/storageAccounts/" in resource and "/blobServices/" not in resource]
-    if len(accounts) != 1:
-        raise Blocked("exact_scenario_storage_inventory_required")
-    account = "https://" + accounts[0].rsplit("/", 1)[-1] + ".blob.core.windows.net"
+    accounts = storage_accounts(lifecycle)
     gateway = lifecycle.value["outputs"]["gatewayUrl"]
     result = {"software": software, "configuration": sha256(lifecycle.config),
               "manifest": actual, "image": [image.split("@", 1)[1] for image in images],
@@ -71,10 +68,10 @@ def fingerprints(lifecycle):
                   for actor in (*OPERATIONS, "reference-data")} | {
                       "model": hashlib.sha256((gateway + "/openai/v1/chat/completions").encode()).hexdigest()},
               "storage_targets": {container: hashlib.sha256(
-                  (account + "/" + container + "/ledger-v1.json").encode()).hexdigest()
+                  (accounts[container] + "/" + container + "/ledger-v1.json").encode()).hexdigest()
                   for container in (*OPERATIONS.values(), "drafts", "findings")} | {
                       "active-run-slot": hashlib.sha256(
-                          (account + "/planner-operations/active-run-slot.json").encode()).hexdigest()},
+                          (accounts["planner-operations"] + "/planner-operations/active-run-slot.json").encode()).hexdigest()},
               "runtime_identities": {
                   app["app"].split("/")[-1].removeprefix(lifecycle.id + "-"):
                       hashlib.sha256(str(UUID(app["identityPrincipalId"])).encode()).hexdigest()

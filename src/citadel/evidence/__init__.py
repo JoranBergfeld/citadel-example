@@ -100,7 +100,74 @@ def _index(rows, field):
     return result
 
 
-class ReferenceData:
+class EvidenceAssessment:
+    """Assessment/projection rules over provenance-bound airport and runway reads."""
+
+    def assess_airport(self, ident):
+        resolved = self.lookup_airport(ident)
+        airport = resolved["airport"]
+        runways = self.list_runways(ident)["runways"]
+        gaps = []
+        for field in AIRPORT_FIELDS:
+            gaps.extend(f"airport.{field}: {reason}" for reason in airport[field]["quality_reasons"])
+        if not any(row["closed"]["parsed"] is False for row in runways):
+            gaps.append("airport.runways: no_recorded_open_runway")
+        for row in runways:
+            fields = ("closed",)
+            if row["closed"]["parsed"] is False:
+                fields += ("length_ft", "width_ft", "surface", "lighted")
+            for field in fields:
+                gaps.extend(
+                    f"runway[{row['id']['parsed']}].{field}: {reason}"
+                    for reason in row[field]["quality_reasons"]
+                )
+        return {
+            "classification": "insufficient_evidence" if gaps else "complete",
+            "gap_reasons": gaps,
+            "caveats": list(CAVEATS) + gaps,
+            "evidence": {key: resolved[key] for key in ("airport", "country", "region")}
+                        | {"runways": runways},
+            "provenance": self.provenance,
+        }
+
+    def shareable_projection(self, draft):
+        """Recheck facts and project them; does not approve, publish or persist."""
+        if not isinstance(draft, dict):
+            raise EvidenceError("invalid_input", "Expected a structured assessment draft")
+        if type(draft.get("schema_version")) is not int or draft["schema_version"] != 1:
+            raise EvidenceError("unsupported_version", "Unsupported draft schema version")
+        if type(draft.get("version")) is not int or draft["version"] < 1:
+            raise EvidenceError("invalid_input", "Draft version must be a positive integer")
+        for field in ("artifact_id", "run_id", "operation_id", "airport_ident"):
+            value = draft.get(field)
+            if not isinstance(value, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", value):
+                raise EvidenceError("invalid_input", f"Invalid draft identity: {field}")
+        actual = self.assess_airport(draft["airport_ident"])
+        allowed = {
+            "artifact_id", "version", "schema_version", "run_id", "operation_id", "airport_ident",
+            "evidence", "classification", "gap_reasons", "caveats", "provenance",
+            "private_notes", "prompts", "reviewer_deliberation", "credentials", "storage_path",
+        }
+        if draft.keys() - allowed:
+            raise EvidenceError("data_integrity", "Unsupported structured draft fields or claims")
+        try:
+            for field in ("evidence", "classification", "gap_reasons", "caveats", "provenance"):
+                if field not in draft or canonical_bytes(draft[field]) != canonical_bytes(actual[field]):
+                    raise EvidenceError("data_integrity", f"Draft differs from source evidence: {field}")
+            digest = sha256(draft)
+        except (TypeError, ValueError) as exc:
+            if isinstance(exc, EvidenceError):
+                raise
+            raise EvidenceError("invalid_input", "Draft is not canonical JSON data") from exc
+        return {
+            "schema_version": 1, "run_id": draft["run_id"], "operation_id": draft["operation_id"],
+            "airport_ident": draft["airport_ident"],
+            "draft": {"artifact_id": draft["artifact_id"], "version": draft["version"], "sha256": digest},
+            **actual,
+        }
+
+
+class ReferenceData(EvidenceAssessment):
     """Read-only public evidence boundary; responses contain detached values."""
 
     @classmethod
@@ -249,33 +316,6 @@ class ReferenceData:
             "provenance": self.provenance,
         }
 
-    def assess_airport(self, ident):
-        resolved = self.lookup_airport(ident)
-        airport = resolved["airport"]
-        runways = self.list_runways(ident)["runways"]
-        gaps = []
-        for field in AIRPORT_FIELDS:
-            gaps.extend(f"airport.{field}: {reason}" for reason in airport[field]["quality_reasons"])
-        if not any(row["closed"]["parsed"] is False for row in runways):
-            gaps.append("airport.runways: no_recorded_open_runway")
-        for row in runways:
-            fields = ("closed",)
-            if row["closed"]["parsed"] is False:
-                fields += ("length_ft", "width_ft", "surface", "lighted")
-            for field in fields:
-                gaps.extend(
-                    f"runway[{row['id']['parsed']}].{field}: {reason}"
-                    for reason in row[field]["quality_reasons"]
-                )
-        return {
-            "classification": "insufficient_evidence" if gaps else "complete",
-            "gap_reasons": gaps,
-            "caveats": list(CAVEATS) + gaps,
-            "evidence": {key: resolved[key] for key in ("airport", "country", "region")}
-                        | {"runways": runways},
-            "provenance": self.provenance,
-        }
-
     def fixture_gate(self):
         """Assess each member of the fixed first-20 pool exactly once."""
         matches = [
@@ -372,40 +412,4 @@ class ReferenceData:
             "status": "complete" if len(selected) == 3 else "bounded_pool_exhausted",
             "pool_count": len(pool), "selected_identifiers": selected,
             "assessed": assessed, "provenance": self.provenance,
-        }
-
-    def shareable_projection(self, draft):
-        """Recheck facts and project them; does not approve, publish or persist."""
-        if not isinstance(draft, dict):
-            raise EvidenceError("invalid_input", "Expected a structured assessment draft")
-        if type(draft.get("schema_version")) is not int or draft["schema_version"] != 1:
-            raise EvidenceError("unsupported_version", "Unsupported draft schema version")
-        if type(draft.get("version")) is not int or draft["version"] < 1:
-            raise EvidenceError("invalid_input", "Draft version must be a positive integer")
-        for field in ("artifact_id", "run_id", "operation_id", "airport_ident"):
-            value = draft.get(field)
-            if not isinstance(value, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", value):
-                raise EvidenceError("invalid_input", f"Invalid draft identity: {field}")
-        actual = self.assess_airport(draft["airport_ident"])
-        allowed = {
-            "artifact_id", "version", "schema_version", "run_id", "operation_id", "airport_ident",
-            "evidence", "classification", "gap_reasons", "caveats", "provenance",
-            "private_notes", "prompts", "reviewer_deliberation", "credentials", "storage_path",
-        }
-        if draft.keys() - allowed:
-            raise EvidenceError("data_integrity", "Unsupported structured draft fields or claims")
-        try:
-            for field in ("evidence", "classification", "gap_reasons", "caveats", "provenance"):
-                if field not in draft or canonical_bytes(draft[field]) != canonical_bytes(actual[field]):
-                    raise EvidenceError("data_integrity", f"Draft differs from source evidence: {field}")
-            digest = sha256(draft)
-        except (TypeError, ValueError) as exc:
-            if isinstance(exc, EvidenceError):
-                raise
-            raise EvidenceError("invalid_input", "Draft is not canonical JSON data") from exc
-        return {
-            "schema_version": 1, "run_id": draft["run_id"], "operation_id": draft["operation_id"],
-            "airport_ident": draft["airport_ident"],
-            "draft": {"artifact_id": draft["artifact_id"], "version": draft["version"], "sha256": digest},
-            **actual,
         }

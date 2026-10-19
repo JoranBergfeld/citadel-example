@@ -19,8 +19,8 @@ from citadel.acceptance.reports import sanitize
 from citadel.evidence.manifests import sha256
 
 
-def proof_fixture(kind="subscription"):
-    actor, backend, run = "candidate-planner", "evidence-assessor", "rotation-control"
+def proof_fixture(kind="subscription", *, actor="candidate-planner", backend="evidence-assessor"):
+    run = "rotation-control"
     identities = dict(zip(("candidate-planner", "evidence-assessor", "release-reviewer",
         "briefing-author", "reference-data"), (value * 64 for value in "abcde")))
     target, observer = "7" * 64, "f" * 64
@@ -41,7 +41,7 @@ def proof_fixture(kind="subscription"):
         evidence.append(row | {"source": "application", "method": "rotation.probe",
             "observed": row["finished"], "facts": {"sha256": sha256(row), "probe_id": check_id}})
         if status == 200:
-            evidence.append(row | {"source": "application", "method": "discovery",
+            evidence.append(row | {"source": "application", "method": "findings-read" if actor == "briefing-author" else "discovery",
                 "runtime_identity": identities[backend], "observed": row["finished"]})
         elif kind != "subscription":
             evidence.append(row | {"source": "application", "method": "authorization.denied",
@@ -72,6 +72,59 @@ def proof_fixture(kind="subscription"):
 
 
 class RotationControlTests(unittest.TestCase):
+    def test_exported_author_rotation_requires_real_finding_reads_not_forbidden_discovery(self):
+        check, report = proof_fixture(actor="briefing-author", backend="release-reviewer")
+        self.assertEqual(evaluate_check(sanitize(check), sanitize(report))["status"], "pass")
+        for row in report["evidence"]:
+            if row.get("method") == "findings-read":
+                row["method"] = "discovery"
+        self.assertEqual(evaluate_check(sanitize(check), sanitize(report))["status"], "blocked")
+
+    def test_embedded_rotations_spend_the_parent_collection_allowance_even_after_missing_queries(self):
+        from contextlib import contextmanager
+        from citadel.acceptance.rotation_harness import RotationAcceptance
+        from citadel.acceptance.collection import collection_remaining
+        from citadel.operator.state import Blocked, write_private
+        directory = Path(".build") / ("rotation-shared-" + uuid4().hex)
+        directory.mkdir(mode=0o700)
+        clock, queries = [1000.0], []
+        parent = {"run_id": "suite", "collection_windows": {"prior": {"started": 100, "finished": 300}}}
+
+        class Native:
+            def rest(self, *args):
+                return {"properties": {"customerId": "11111111-1111-1111-1111-111111111111"}}
+
+            @contextmanager
+            def document(self, body):
+                yield "query.json"
+
+            def az(self, *args, **options):
+                queries.append(options["timeout"])
+                clock[0] += 200
+                raise Blocked("fixture_query_unavailable")
+
+        lifecycle = SimpleNamespace(native=Native(), state=SimpleNamespace(directory=directory, save=lambda: None),
+            value={"runs": {}, "acceptance_attempts": {"suite": parent}, "rotation_controls": {},
+                "inventory": ["/owned/Microsoft.OperationalInsights/workspaces/owned"]})
+        try:
+            with patch("time.time", lambda: clock[0]):
+                for run in ("subscription", "certificate", "context"):
+                    write_private(directory / "rotation.json", {"run_id": run, "kind": "subscription",
+                        "target": "candidate-planner", "phase": "staged", "acceptance_run_id": "suite"})
+                    lifecycle.value["runs"] = {run: {"state": "control_intent"}}
+                    lifecycle.value["rotation_controls"][run] = {
+                        "fingerprint": "a" * 64, "acceptance_run_id": "suite", "new": {"state": "observed"},
+                        "read_attempts": 0, "deadline": 1900, "started": 900, "evidence": []}
+                    with self.assertRaises(Blocked):
+                        RotationAcceptance(lifecycle).control("new", run,
+                            fingerprints={"fingerprint": "a" * 64}, directory=directory)
+                self.assertEqual(len(queries), 2, "Third rotation must not receive a new 600-second allowance")
+                self.assertEqual(collection_remaining(parent, clock[0]), 0)
+        finally:
+            for file in directory.iterdir():
+                file.unlink()
+            directory.rmdir()
+
     def test_retired_stage_can_collect_existing_verified_current_control_without_replaying_it(self):
         from citadel.acceptance.rotation_harness import RotationAcceptance
         from citadel.operator.state import Blocked, write_private
@@ -255,7 +308,9 @@ class RotationControlTests(unittest.TestCase):
             def rest(self, method, resource, api, body=None):
                 if method == "get" and resource in values:
                     return copy.deepcopy(values[resource])
-                if method == "patch" and resource == certificate:
+                if method == "put" and resource == certificate:
+                    if api != "2024-05-01" or set(body["properties"]) != {"keyVault"}:
+                        raise AssertionError("Pinned Certificate_CreateOrUpdate key-vault contract required")
                     writes.append((resource, copy.deepcopy(body)))
                     values[resource]["properties"].update(copy.deepcopy(body["properties"]))
                     values[resource]["properties"]["thumbprint"] = fingerprint(
@@ -330,6 +385,44 @@ class RotationControlTests(unittest.TestCase):
 
 
 class RotationWorkerTests(unittest.IsolatedAsyncioTestCase):
+    async def test_author_subscription_control_reads_one_exact_funded_finding_not_discovery(self):
+        from citadel.acceptance.rotation_controls import rotation_read, TARGETS
+        from citadel.operations.testing import MemoryLedger
+        from citadel.runtime.agents import Runtime, agent_application
+        from test_reference import signed, trust
+        self.assertEqual(TARGETS.get("briefing-author"), "release-reviewer")
+        ledger, artifacts = MemoryLedger(), MemoryLedger()
+        finding = {"schema_version": 1, "airport_ident": "EB01", "classification": "complete"}
+        artifacts.document["findings"] = {"owned": {"1": finding}}
+        await ledger.ticket_store.open_pool("evidence-assessor/invoke/review")
+        await ledger.ticket_store.bind_finding("evidence-assessor/invoke/review", "owned", 1)
+        runtime = Runtime("release-reviewer", ledger, artifacts=artifacts,
+            gateway_url="https://gateway.test", model=None, peers=None)
+        calls = []
+
+        async def authorize(request):
+            calls.append((request.method, request.url.path, request.headers.get("x-citadel-read-pool")))
+            request.url = request.url.copy_with(path=request.url.path.removeprefix("/release-reviewer"))
+            request.headers.update(signed(request.content, "release-reviewer", request.url.path,
+                                          "briefing-author", request.method))
+
+        async def admit():
+            pass
+
+        request = {"run_id": "author-control", "deadline": time.time() + 120, "rotation": {
+            "kind": "subscription", "target": "release-reviewer",
+            "credential_sha256": hashlib.sha256(b"owned-author-key").hexdigest(), "secret_version": None,
+            "finding": {"artifact_id": "owned", "version": 1, "sha256": sha256(finding)},
+            "read_scope": {"run_id": "comparison", "operation_id": "review"}}}
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=agent_application(
+                runtime, trust("release-reviewer"))), event_hooks={"request": [authorize]}) as client:
+            row = await rotation_read(workload="briefing-author", gateway="https://gateway.test",
+                key="owned-author-key", request=request, client=client, admit=admit)
+        self.assertEqual(row["status_code"], 200)
+        self.assertEqual(row["actual"], "read_only_control")
+        self.assertEqual(calls, [("GET", "/release-reviewer/findings/owned/versions/1", "review")])
+        self.assertEqual(artifacts.document["findings"], {"owned": {"1": finding}})
+
     async def test_public_worker_retrieves_only_own_version_and_sends_real_fixed_wire_exchange(self):
         from azure.storage.blob.aio import ContainerClient
         from citadel.acceptance.worker import run_gateway_matrix

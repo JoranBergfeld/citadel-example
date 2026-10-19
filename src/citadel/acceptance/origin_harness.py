@@ -16,6 +16,7 @@ from .origin_probes import MODES, evaluate_origin
 from .oracle import hash_value
 from .revision import RevisionProbe
 from .storage_probes import StorageControls
+from .storage_accounts import storage_accounts
 from .telemetry import gateway_request_id
 
 
@@ -108,10 +109,7 @@ class BoundaryAcceptance:
         if (original.get("state") != "succeeded" or type(deadline) not in (float, int)
                 or not math.isfinite(deadline) or not time.time() < deadline <= time.time() + 900):
             raise Blocked("unexpired_completed_comparison_controls_required")
-        accounts = [rid for rid in self.lifecycle.value["inventory"]
-                    if "/providers/Microsoft.Storage/storageAccounts/" in rid and "/blobServices/" not in rid]
-        if len(accounts) != 1:
-            raise Blocked("exact_storage_account_required")
+        accounts = storage_accounts(self.lifecycle)
         phase = {"state": "dispatching", "deadline": deadline, "read_attempts": 0,
                  "snapshots": {}, "origins": [], "gateway": [], "identities": {}}
         report["boundary_phase"] = phase
@@ -131,8 +129,7 @@ class BoundaryAcceptance:
             self.lifecycle.state.save()
             return rows
 
-        account = "https://" + accounts[0].split("/")[-1] + ".blob.core.windows.net"
-        controls = StorageControls(self.lifecycle.native, account=account, suite_id=report["run_id"], admit=admit)
+        controls = StorageControls(self.lifecycle.native, account=accounts, suite_id=report["run_id"], admit=admit)
         native = self.lifecycle.native
         previous = getattr(native, "deadline", None)
         native.deadline = min(previous or float("inf"), time.monotonic() + max(0, deadline - time.time()))

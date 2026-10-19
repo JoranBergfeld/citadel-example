@@ -1,5 +1,6 @@
 import copy
 import unittest
+from tests.acceptance.storage_fixture import storage_inventory
 from contextlib import nullcontext
 from types import SimpleNamespace
 
@@ -92,8 +93,7 @@ class BypassTests(unittest.TestCase):
             calls.append(arguments)
             raise Blocked("external_storage_fixture_unavailable")
 
-        lifecycle = SimpleNamespace(value={"inventory": [
-            "/subscriptions/s/resourceGroups/g/providers/Microsoft.Storage/storageAccounts/allocated"],
+        lifecycle = SimpleNamespace(value={"inventory": storage_inventory(),
             "runs": {}, "outputs": {"appInventory": []}},
             native=SimpleNamespace(blob=blob), state=SimpleNamespace(save=lambda: saves.append(True)))
 

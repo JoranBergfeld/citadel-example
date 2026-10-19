@@ -14,6 +14,7 @@ from citadel.operations import identity
 from .telemetry import correlate, emit, gateway_request_id
 from .oracle import hash_value
 from citadel.operator.state import Blocked
+from .storage_accounts import storage_accounts
 from citadel.operations import OperationError
 
 
@@ -55,10 +56,7 @@ class PollAcceptance:
         if run["state"] != "succeeded" or any(row["state"] not in ("succeeded", "failed_no_commit")
                                             for row in self.lifecycle.value["runs"].values()):
             raise Blocked("completed_quiescent_comparison_required")
-        accounts = [resource for resource in self.lifecycle.value["inventory"]
-                    if "/providers/Microsoft.Storage/storageAccounts/" in resource and "/blobServices/" not in resource]
-        if len(accounts) != 1:
-            raise Blocked("exact_poll_observer_inventory_required")
+        accounts = storage_accounts(self.lifecycle)
         phase = {"state": "observing", "run_id": run_id, "started": time.time(), "deadline": run["deadline"],
                  "read_attempts": 0, "before": [], "after": [], "observations": []}
         report["poll_phase"] = phase
@@ -77,8 +75,7 @@ class PollAcceptance:
             from .storage_probes import StorageControls
             from citadel.runtime.configuration import OPERATIONS
             from citadel.operator.scenarios import PlannerClient
-            controls = StorageControls(native, account="https://" + accounts[0].rsplit("/", 1)[-1]
-                + ".blob.core.windows.net", suite_id=report["run_id"], admit=admit)
+            controls = StorageControls(native, account=accounts, suite_id=report["run_id"], admit=admit)
 
             def snapshot(side):
                 for container in (*OPERATIONS.values(), "drafts", "findings"):

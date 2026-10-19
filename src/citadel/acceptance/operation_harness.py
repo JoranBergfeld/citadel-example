@@ -2,6 +2,7 @@
 
 import hashlib
 import time
+from collections import namedtuple
 from uuid import UUID, uuid4
 
 from azure.core.exceptions import AzureError
@@ -13,6 +14,7 @@ from .operation_oracle import OPERATION_CHECKS, evaluate_operation, operation_sn
 from .oracle import hash_value
 from .revision import RevisionProbe
 from .storage_probes import StorageControls
+from .storage_accounts import storage_accounts
 from .admission_limits import ADMISSION_CHECKS, admission_snapshot, evaluate_admission
 from .read_limit import read_snapshot, evaluate_read_boundary
 from .model_limits import MODEL_BOUNDARY_CHECKS, evaluate_model_boundaries
@@ -20,27 +22,28 @@ from .model_timeout import evaluate_model_timeout
 from .model_counters import COUNTER_MODES, COUNTER_CHECKS, COUNTER_GROUPS, evaluate_model_counter
 
 
-def _groups(mode):
-    if mode == "process-restart":
-        return {"fault.restart-no-replay": {"fault.restart-no-replay"}}
-    if mode == "model-timeout":
-        return {"limit.model_timeout_seconds": {"limit.model_timeout_seconds"}}
-    if mode in COUNTER_MODES:
-        key = COUNTER_CHECKS[COUNTER_MODES[mode]]
-        return {key: COUNTER_GROUPS[COUNTER_MODES[mode]]}
-    if mode == "model-limits":
-        return {"limit.input_tokens_attempt": MODEL_BOUNDARY_CHECKS}
-    if mode == "read-limit":
-        return {"limit.read_attempts_run": {"limit.read_attempts_run"}}
-    if mode == "admission-limits":
-        return {"limit.agent_executions": ADMISSION_CHECKS}
-    if mode == "operation-faults":
-        return OPERATION_CHECKS
-    raise ValueError("Only fixed operation, read and bounded admission modes are supported")
+Mode = namedtuple("Mode", "phase groups evaluate")
+MODES = {
+    "operation-faults": Mode("operation_phase", OPERATION_CHECKS, evaluate_operation),
+    "process-restart": Mode("restart_phase", {"fault.restart-no-replay": {"fault.restart-no-replay"}}, evaluate_operation),
+    "model-timeout": Mode("model_timeout_phase", {"limit.model_timeout_seconds": {"limit.model_timeout_seconds"}}, evaluate_model_timeout),
+    "model-limits": Mode("model_boundary_phase", {"limit.input_tokens_attempt": MODEL_BOUNDARY_CHECKS}, evaluate_model_boundaries),
+    "read-limit": Mode("read_phase", {"limit.read_attempts_run": {"limit.read_attempts_run"}}, evaluate_read_boundary),
+    "admission-limits": Mode("admission_phase", {"limit.agent_executions": ADMISSION_CHECKS}, evaluate_admission),
+    **{mode: Mode("model_counter_" + counter + "_phase",
+                  {COUNTER_CHECKS[counter]: COUNTER_GROUPS[counter]}, evaluate_model_counter)
+       for mode, counter in COUNTER_MODES.items()},
+}
+
+
+def registration(mode):
+    if mode not in MODES:
+        raise ValueError("Only fixed operation, read and bounded admission modes are supported")
+    return MODES[mode]
 
 
 def bind_operation_result(result, *, run_id, principal, account, mode="operation-faults"):
-    groups = _groups(mode)
+    groups = registration(mode).groups
     if (not isinstance(result, dict) or type(result.get("schema_version")) is not int
             or result["schema_version"] != 1 or result.get("run_id") != run_id
             or result.get("state") not in ("complete", "blocked")
@@ -119,20 +122,15 @@ class FaultAcceptance:
         self.lifecycle = lifecycle
 
     def execute(self, report, *, mode="operation-faults"):
-        _groups(mode)
+        selected = registration(mode)
         admission = mode == "admission-limits"
-        phase_key = ("model_counter_" + COUNTER_MODES[mode] + "_phase" if mode in COUNTER_MODES else
-                     "model_timeout_phase" if mode == "model-timeout" else
-                     "model_boundary_phase" if mode == "model-limits" else "read_phase" if mode == "read-limit"
-                     else "restart_phase" if mode == "process-restart"
-                     else "admission_phase" if admission else "operation_phase")
+        phase_key = selected.phase
         if phase_key in report:
             raise Blocked("operation_probe_intent_requires_reconciliation")
-        accounts = [resource for resource in self.lifecycle.value["inventory"]
-            if "/providers/Microsoft.Storage/storageAccounts/" in resource and "/blobServices/" not in resource]
+        accounts = storage_accounts(self.lifecycle)
         apps = [app for app in self.lifecycle.value["outputs"]["appInventory"]
                 if app["app"].rsplit("/", 1)[-1] == self.lifecycle.id + "-candidate-planner"]
-        if len(accounts) != 1 or len(apps) != 1:
+        if len(apps) != 1:
             raise Blocked("exact_operation_probe_inventory_required")
         phase = {"state": "dispatching", "deadline": time.time() + 900, "read_attempts": 0,
                  "observations": [], "snapshots": {}}
@@ -151,7 +149,7 @@ class FaultAcceptance:
         try:
             app, run_id = apps[0], uuid4().hex
             principal = hashlib.sha256(str(UUID(app["identityPrincipalId"])).encode()).hexdigest()
-            account = "https://" + accounts[0].rsplit("/", 1)[-1] + ".blob.core.windows.net"
+            account = accounts["planner-operations"]
             report["operation_ids"].append(run_id)
             self.lifecycle.state.save()
             if mode in COUNTER_MODES and COUNTER_MODES[mode] != "execution":
@@ -166,7 +164,7 @@ class FaultAcceptance:
             report["operation_ids"].extend(operations)
             phase["observations"] = result["observations"]
             self.lifecycle.state.save()
-            controls = StorageControls(native, account=account, suite_id=report["run_id"], admit=admit)
+            controls = StorageControls(native, account=accounts, suite_id=report["run_id"], admit=admit)
             snapshot, document = controls.operation_state(run_id)
             report["operation_ids"].append(snapshot["operation_id"])
             for row in phase["observations"]:
@@ -186,13 +184,9 @@ class FaultAcceptance:
 
     @staticmethod
     def evaluate(report, evidence, *, mode="operation-faults"):
-        groups = _groups(mode)
-        admission = mode == "admission-limits"
-        phase = report.get("model_counter_" + COUNTER_MODES[mode] + "_phase" if mode in COUNTER_MODES else
-                           "model_timeout_phase" if mode == "model-timeout" else
-                           "model_boundary_phase" if mode == "model-limits" else "read_phase" if mode == "read-limit" else
-                           "restart_phase" if mode == "process-restart" else
-                           "admission_phase" if admission else "operation_phase", {})
+        selected = registration(mode)
+        groups = selected.groups
+        phase = report.get(selected.phase, {})
         snapshots = phase.get("snapshots", {})
         output = []
         for row in phase.get("observations", []):
@@ -206,11 +200,7 @@ class FaultAcceptance:
             snapshot = snapshot | {"runtime_identity": observer}
             for check in sorted(groups.get(row.get("probe_id"), set())):
                 observation = row | {"check_id": check}
-                evaluator = (evaluate_model_counter if mode in COUNTER_MODES else
-                             evaluate_model_timeout if mode == "model-timeout" else
-                             evaluate_model_boundaries if mode == "model-limits" else
-                             evaluate_read_boundary if mode == "read-limit" else evaluate_admission if admission else evaluate_operation)
-                result = evaluator(observation, snapshot, evidence,
+                result = selected.evaluate(observation, snapshot, evidence,
                     runtime_identity=report.get("runtime_identities", {}).get("candidate-planner"),
                     observer_identity=observer, **({
                         "subscription": report.get("subscription_bindings", {}).get("candidate-planner"),

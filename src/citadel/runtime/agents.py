@@ -66,7 +66,9 @@ class Runtime:
         return TicketPool(self.ticket_store, f"{identity(caller)}/invoke/{identity(operation_id)}",
                           CAPACITY[self.workload], clock=self.clock)
 
-    async def accept(self, caller, payload, *, recover=False):
+    async def accept(self, caller, payload, *, recover=False, retry=False):
+        if recover and retry:
+            raise OperationError("invalid_input", "Recovery and explicit retry are separate admissions")
         if caller not in INVOCATION_CALLERS[self.workload]:
             raise OperationError("forbidden", "Caller cannot invoke this workload")
         if not isinstance(payload, dict):
@@ -85,7 +87,7 @@ class Runtime:
             raise OperationError("invalid_input", "Child read grant does not match its finite pool")
         async with asyncio.timeout(10):
             pool = self.pool(caller, operation_id)
-            if recover:
+            if recover or retry:
                 await self.ticket_store.require_pool(pool.scope)
                 fresh = False
             else:
@@ -97,24 +99,47 @@ class Runtime:
                     bound = await self.ops.accept(caller, "invoke", operation_id, payload,
                                                   run_id=run_id, deadline=current["deadline"])
                     if recover:
-                        return await self.ops.fence(caller, "invoke", operation_id)
-                    if bound["state"] == "succeeded" and self.workload == "candidate-planner":
-                        await self.ticket_store.release_run(pool.scope)
-                    return bound
-                if not fresh:
-                    raise OperationError("indeterminate", "Existing admission has no reconciled operation state")
-                if self.workload == "candidate-planner":
-                    budget = await self.accounting.start_run(run_id)
-                    deadline = budget["deadline"]
+                        recovered = await self.ops.fence(caller, "invoke", operation_id)
+                        if recovered["state"] == "indeterminate":
+                            recovered = await self.ops.recover_external(caller, "invoke", operation_id, {})
+                        if (self.workload == "candidate-planner"
+                                and recovered["state"] in ("succeeded", "failed_no_commit")):
+                            await self.ticket_store.release_run(
+                                pool.scope, generation=recovered.get("admission_generation", 0))
+                        return recovered
+                    if not retry:
+                        if bound["state"] == "succeeded" and self.workload == "candidate-planner":
+                            await self.ticket_store.release_run(
+                                pool.scope, generation=bound.get("admission_generation", 0))
+                        return bound
+                    if bound["state"] != "failed_no_commit":
+                        raise OperationError("conflict", "Explicit retry requires fenced failed_no_commit")
+                    budget = await self.accounting.status(operation_id)
+                    if self.clock() >= budget["deadline"] or budget["closed"]:
+                        raise OperationError("deadline", "Explicit retry retains the original active budget")
+                    if budget["model"] is not None or budget["child"] is not None:
+                        raise OperationError("indeterminate", "Outstanding admissions forbid retry")
+                    generation = bound["generation"] + 1
+                    if self.workload == "candidate-planner":
+                        await self.ticket_store.acquire_run(pool.scope, generation=generation)
+                    accepted = await self.ops.retry(caller, "invoke", operation_id,
+                        admission_generation=generation if self.workload == "candidate-planner" else None)
+                    deadline = accepted["deadline"]
                 else:
-                    grant = payload["grant"]
-                    if grant["run_id"] != run_id:
-                        raise OperationError("invalid_input", "Run differs from inherited grant")
-                    await self.accounting.adopt(grant, authenticated_issuer=caller)
-                    deadline = grant["deadline"]
-                with read_scope(pool, deadline=deadline, cache=snapshots.get()):
+                    if not fresh:
+                        raise OperationError("indeterminate", "Existing admission has no reconciled operation state")
+                    if self.workload == "candidate-planner":
+                        budget = await self.accounting.start_run(run_id)
+                        deadline = budget["deadline"]
+                    else:
+                        grant = payload["grant"]
+                        if grant["run_id"] != run_id:
+                            raise OperationError("invalid_input", "Run differs from inherited grant")
+                        await self.accounting.adopt(grant, authenticated_issuer=caller)
+                        deadline = grant["deadline"]
                     accepted = await self.ops.accept(caller, "invoke", operation_id, payload,
                                                      run_id=run_id, deadline=deadline)
+                with read_scope(pool, deadline=deadline, cache=snapshots.get()):
                     ownership = await self.ops.claim(caller, "invoke", operation_id,
                                                      worker=uuid4().hex, lease_seconds=180)
                     self.renew_at[ownership.key] = self.clock() + 90
@@ -133,7 +158,8 @@ class Runtime:
         timer = asyncio.timeout(max(0, deadline - started))
         try:
             async with timer:
-                await self.accounting.start_agent(payload["operation_id"], payload["operation_id"])
+                await self.accounting.start_agent(payload["operation_id"], payload["operation_id"],
+                                                  retry=ownership.generation > 1)
                 if self.workload == "candidate-planner":
                     product = await self._plan(payload, ownership, deadline)
                     finding, rejection = None, None
@@ -152,7 +178,8 @@ class Runtime:
                                         rejection=rejection, receipt=receipt,
                                         read_scope=result.get("read_scope") if product is None else None)
                 if self.workload == "candidate-planner":
-                    await self.ticket_store.release_run(self.pool(caller, payload["operation_id"]).scope)
+                    await self.ticket_store.release_run(self.pool(caller, payload["operation_id"]).scope,
+                        generation=0 if ownership.generation == 1 else ownership.generation)
         except asyncio.CancelledError:
             raise
         except Exception as exc:
@@ -384,7 +411,8 @@ class DurableHandler(RequestHandler):
                 with correlate(payload["run_id"], payload["operation_id"], context.state["caller"]):
                     status = await self.runtime.accept(
                         context.state["caller"], payload,
-                        recover=MessageToDict(params.metadata).get("citadel_recovery") is True)
+                        recover=MessageToDict(params.metadata).get("citadel_recovery") is True,
+                        retry=MessageToDict(params.metadata).get("citadel_retry") is True)
                     if status["state"] == "succeeded":
                         context.state["scope"]["citadel.cached"] = True
                     emit("SendMessage.cached" if status["state"] == "succeeded" else "SendMessage",

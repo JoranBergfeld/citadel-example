@@ -4,9 +4,30 @@ from types import SimpleNamespace
 
 from citadel.acceptance.operation_harness import FaultAcceptance, bind_operation_result
 from citadel.operator.state import Blocked
+from tests.acceptance.storage_fixture import storage_inventory
 
 
 class OperationHarnessTests(unittest.TestCase):
+    def test_each_fixed_mode_reads_its_own_phase_and_keeps_missing_independent_proof_blocked(self):
+        for mode, phase, probe in (
+            ("operation-faults", "operation_phase", "fault.dropped-committed-write"),
+            ("process-restart", "restart_phase", "fault.restart-no-replay"),
+            ("admission-limits", "admission_phase", "limit.agent_executions"),
+            ("read-limit", "read_phase", "limit.read_attempts_run"),
+            ("model-limits", "model_boundary_phase", "limit.input_tokens_attempt"),
+            ("model-timeout", "model_timeout_phase", "limit.model_timeout_seconds"),
+            ("model-execution-limit", "model_counter_execution_phase", "limit.model_attempts_execution"),
+            ("model-run-limit", "model_counter_run_phase", "limit.model_attempts_run"),
+            ("model-token-limit", "model_counter_tokens_phase", "limit.tokens_run"),
+        ):
+            with self.subTest(mode=mode):
+                report = {phase: {"observations": [{"probe_id": probe, "check_id": probe, "actual": {}}]}}
+                result = FaultAcceptance.evaluate(report, [], mode=mode)
+                self.assertIn(probe, {row["check_id"] for row in result})
+                self.assertTrue(all(row["status"] == "blocked" for row in result))
+        with self.assertRaises(ValueError):
+            FaultAcceptance.evaluate({}, [], mode="arbitrary")
+
     def result(self):
         return {"schema_version": 1, "run_id": "worker1", "state": "complete", "observations": [
             {"check_id": check, "probe_id": check, "run_id": "worker1", "operation_id": "op" + str(index),
@@ -44,8 +65,7 @@ class OperationHarnessTests(unittest.TestCase):
             calls.append(args)
             raise Blocked("external_provider_unavailable")
 
-        lifecycle = SimpleNamespace(id="d", value={"inventory": [
-            "/subscriptions/s/resourceGroups/g/providers/Microsoft.Storage/storageAccounts/allocated"],
+        lifecycle = SimpleNamespace(id="d", value={"inventory": storage_inventory(),
             "outputs": {"appInventory": [{"app": "/d-candidate-planner",
                 "identityPrincipalId": "11111111-1111-1111-1111-111111111111"}]}},
             state=SimpleNamespace(save=lambda: None), native=SimpleNamespace(rest=rest))

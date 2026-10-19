@@ -13,6 +13,7 @@ from azure.core.exceptions import AzureError
 from citadel.evidence.manifests import sha256
 from citadel.operations import OperationError
 from citadel.operator.state import Blocked
+from .storage_accounts import storage_accounts
 from .oracle import hash_value
 from .telemetry import gateway_request_id
 
@@ -37,10 +38,7 @@ class HttpTimeoutAcceptance:
                        for row in self.lifecycle.value["runs"].values())
                 or run["deadline"] - time.time() < 185):
             raise Blocked("completed_quiescent_comparison_with_original_time_required")
-        accounts = [resource for resource in self.lifecycle.value["inventory"]
-            if "/providers/Microsoft.Storage/storageAccounts/" in resource and "/blobServices/" not in resource]
-        if len(accounts) != 1:
-            raise Blocked("exact_http_timeout_observer_inventory_required")
+        accounts = storage_accounts(self.lifecycle)
         operation = uuid4().hex
         phase = {"state": "observing", "run_id": run_id, "operation_id": operation,
             "started": time.time(), "deadline": run["deadline"], "read_attempts": 0,
@@ -63,8 +61,7 @@ class HttpTimeoutAcceptance:
             from .storage_probes import StorageControls
             from citadel.runtime.configuration import OPERATIONS
             from citadel.operator.scenarios import PlannerClient
-            controls = StorageControls(native, account="https://" + accounts[0].rsplit("/", 1)[-1]
-                + ".blob.core.windows.net", suite_id=report["run_id"], admit=admit)
+            controls = StorageControls(native, account=accounts, suite_id=report["run_id"], admit=admit)
 
             def snapshot(side):
                 for container in (*OPERATIONS.values(), "drafts", "findings"):

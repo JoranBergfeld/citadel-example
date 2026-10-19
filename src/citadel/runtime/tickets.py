@@ -21,6 +21,12 @@ CAPACITY = {"candidate-planner": 512, "evidence-assessor": 20,
             "release-reviewer": 11, "briefing-author": 16}
 
 
+def run_lease_scope(scope, generation):
+    if type(generation) is not int or generation < 0:
+        raise OperationError("invalid_input", "Invalid fenced admission generation")
+    return scope if generation == 0 else scope + "/generation/" + str(generation)
+
+
 class TicketPool:
     def __init__(self, store, scope, capacity, *, clock=time.time):
         self.store, self.scope, self.capacity, self.clock = store, scope, capacity, clock
@@ -93,11 +99,7 @@ class AzureTicketStore:
             if exc.code != "missing":
                 raise
         if exclusive:
-            try:
-                # Lifecycle-preinitialized; absence never authorizes a new run.
-                await self._acquire(self.container.get_blob_client("active-run-slot.json"), scope)
-            except HttpResponseError:
-                raise OperationError("conflict", "Durable run admission unavailable or already owned") from None
+            await self.acquire_run(scope)
         descriptor = self._descriptor(scope)
         created = False
         try:
@@ -125,9 +127,20 @@ class AzureTicketStore:
         except AzureError:
             raise OperationError("indeterminate", "Read-ticket admission response was ambiguous") from None
 
-    async def release_run(self, scope):
+    async def acquire_run(self, scope, *, generation=0):
         try:
-            await self._lease(self.container.get_blob_client("active-run-slot.json"), scope).release(timeout=5)
+            # Lifecycle-preinitialized; absence never authorizes a new run.
+            await self._acquire(self.container.get_blob_client("active-run-slot.json"),
+                                run_lease_scope(scope, generation))
+        except HttpResponseError:
+            raise OperationError("conflict", "Durable run admission unavailable or already owned") from None
+        except AzureError:
+            raise OperationError("indeterminate", "Run admission acquisition was ambiguous") from None
+
+    async def release_run(self, scope, *, generation=0):
+        try:
+            await self._lease(self.container.get_blob_client("active-run-slot.json"),
+                              run_lease_scope(scope, generation)).release(timeout=5)
         except HttpResponseError as exc:
             if exc.status_code != 412:
                 raise OperationError("indeterminate", "Completed run admission release was not reconciled") from None

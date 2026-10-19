@@ -1,6 +1,7 @@
 import copy
 import os
 import unittest
+from tests.acceptance.storage_fixture import storage_inventory
 
 from citadel.acceptance.scenarios import expected_scenario, evaluate_scenario
 from citadel.evidence import ReferenceData
@@ -77,7 +78,7 @@ class ProtocolScenarioOracleTests(unittest.IsolatedAsyncioTestCase):
                 provider.objects[container, "ledger-v1.json"] = json.dumps(documents[actor]).encode()
             original = dict(provider.objects)
             lifecycle = SimpleNamespace(native=provider, state=SimpleNamespace(save=lambda: saves.append(1)),
-                value={"inventory": ["/subscriptions/s/resourceGroups/g/providers/Microsoft.Storage/storageAccounts/allocated"],
+                value={"inventory": storage_inventory(),
                        "runs": {"run1": {"state": "succeeded", "deadline": time.time() + 600}}})
             captured = {"run_id": "suite1", "operation_ids": ["run1"]}
             ScenarioAcceptance(lifecycle).execute(captured, "replacement", product, source=source, run_id="run1")

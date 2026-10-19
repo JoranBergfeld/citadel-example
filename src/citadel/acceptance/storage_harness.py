@@ -12,6 +12,7 @@ from .coverage import CONTAINERS
 from .oracle import hash_value
 from .revision import RevisionProbe
 from .storage_probes import StorageControls, evaluate_storage, storage_target
+from .storage_accounts import storage_accounts
 
 
 def bind_storage_result(result, *, actor, run_id, suite_id, principal, account):
@@ -30,7 +31,7 @@ def bind_storage_result(result, *, actor, run_id, suite_id, principal, account):
                 or row.get("caller") != actor or row.get("runtime_identity") != principal
                 or row.get("run_id") != run_id or row.get("suite_id") != suite_id
                 or row.get("check_id") != expected or row.get("target") != hashlib.sha256(
-                    f"{account}/{container}/{storage_target(suite_id)}".encode()).hexdigest()):
+                    f"{account[container] if isinstance(account, dict) else account}/{container}/{storage_target(suite_id)}".encode()).hexdigest()):
             raise Blocked("storage_worker_identity_or_target_binding_conflict")
         ids.append(identity(row.get("operation_id")))
         if row.get("control") is not True:
@@ -50,10 +51,7 @@ class StorageAcceptance:
     def execute(self, report):
         if "storage_phase" in report:
             raise Blocked("storage_probe_intent_requires_reconciliation")
-        accounts = [rid for rid in self.lifecycle.value["inventory"]
-                    if "/providers/Microsoft.Storage/storageAccounts/" in rid and "/blobServices/" not in rid]
-        if len(accounts) != 1:
-            raise Blocked("exact_storage_account_required")
+        accounts = storage_accounts(self.lifecycle)
         phase = {"state": "dispatching", "deadline": time.time() + 900, "read_attempts": 0,
                  "seeds": {}, "snapshots": {}, "observations": [], "identities": {}}
         report["storage_phase"] = phase
@@ -66,8 +64,7 @@ class StorageAcceptance:
             phase["read_attempts"] += count
             self.lifecycle.state.save()
 
-        account = "https://" + accounts[0].split("/")[-1] + ".blob.core.windows.net"
-        controls = StorageControls(self.lifecycle.native, account=account, suite_id=report["run_id"], admit=admit)
+        controls = StorageControls(self.lifecycle.native, account=accounts, suite_id=report["run_id"], admit=admit)
         native = self.lifecycle.native
         previous = getattr(native, "deadline", None)
         native.deadline = min(previous or float("inf"), time.monotonic() + 900)
@@ -91,11 +88,11 @@ class StorageAcceptance:
                 else:
                     selected = driver
                 result = selected.execute(app, actor, operation, mode="storage-boundaries",
-                    deadline=phase["deadline"], storage={"suite_id": report["run_id"], "targets": {
+                    deadline=phase["deadline"], storage={"suite_id": report["run_id"], "accounts": accounts, "targets": {
                         name: {"sha256": before[name]["sha256"], "etag": before[name]["etag"]}
                         for name in CONTAINERS}})
                 physical_ids = bind_storage_result(result, actor=actor, run_id=operation,
-                    suite_id=report["run_id"], principal=phase["identities"][actor], account=account)
+                    suite_id=report["run_id"], principal=phase["identities"][actor], account=accounts)
                 if set(physical_ids) & set(report["operation_ids"]):
                     raise Blocked("storage_worker_operation_identity_reused")
                 report["operation_ids"].extend(physical_ids)
