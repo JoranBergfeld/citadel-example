@@ -8,6 +8,7 @@ import time
 from citadel.evidence.manifests import sha256
 from citadel.operations import OperationError, identity
 from citadel.operations.limits import Accounting
+from citadel.operator.model_metadata import regional_standard_sku
 from citadel.runtime.model import INSTRUCTIONS
 from .admission_limits import business_hash
 from .faults import rejected
@@ -40,12 +41,8 @@ def observe_model_quota(lifecycle, *, admit, run_id):
         lifecycle.subscription + "/providers/Microsoft.CognitiveServices/locations/westeurope/models", "2024-10-01")
     if regional.get("nextLink"):
         raise ValueError("Regional model metadata requires unbudgeted pagination")
-    models = [row for row in regional["value"] if row.get("model", {}).get("name") == "gpt-4.1-mini"
-              and row["model"].get("version") == "2025-04-14"]
-    skus = [sku for row in models for sku in row.get("skus", []) if sku.get("name") == "Standard"]
-    if len(skus) != 1:
-        raise ValueError("Exact regional Standard model SKU required")
-    rates = [rate for rate in skus[0].get("rateLimits", []) if rate.get("key") == "token"]
+    _, sku = regional_standard_sku(regional["value"])
+    rates = [rate for rate in sku.get("rateLimits", []) if rate.get("key") == "token"]
     if len(rates) != 1:
         raise ValueError("Exact actual token quota metadata required")
     rate = rates[0]

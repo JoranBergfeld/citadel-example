@@ -89,14 +89,9 @@ class AzureFixture:
             return [{"namespace": name, "registrationState": "Registered"} for name in (
                 "Microsoft.Resources", "Microsoft.Authorization", "Microsoft.App", "Microsoft.ManagedIdentity",
                 "Microsoft.ContainerRegistry", "Microsoft.Storage", "Microsoft.KeyVault", "Microsoft.ApiManagement",
-                "Microsoft.CognitiveServices", "Microsoft.ApiCenter", "Microsoft.Insights", "Microsoft.OperationalInsights")]
+                "Microsoft.CognitiveServices", "Microsoft.ApiCenter", "microsoft.insights", "Microsoft.OperationalInsights")]
         if args[:3] == ("policy", "assignment", "list"):
             return []
-        if args[:3] == ("cognitiveservices", "model", "list"):
-            return [{"model": {"name": "gpt-4.1-mini", "version": "2025-04-14"}, "skus": [{
-                "name": "Standard", "rateLimits": [{"key": "token", "count": 1000, "renewalPeriod": 60}]}]}]
-        if args[:3] == ("cognitiveservices", "usage", "list"):
-            return [{"name": {"value": "OpenAI.Standard.gpt-4.1-mini"}, "currentValue": 0, "limit": 120}]
         if args[:3] == ("deployment", "sub", "list"):
             return []
         if args[:2] == ("deployment", "sub"):
@@ -184,6 +179,14 @@ class AzureFixture:
             return [{"actions": ["*"], "dataActions": ["*"]}]
         if resource.endswith("/environments"):
             return self.environments
+        if resource.endswith("/locations/westeurope/models"):
+            return [{"kind": "OpenAI", "model": {
+                "name": "gpt-4.1-mini", "version": "2025-04-14", "skus": [{
+                    "name": "Standard", "usageName": "OpenAI.Standard.gpt4.1-mini",
+                    "rateLimits": [{"key": "request", "count": 1, "renewalPeriod": 60},
+                                   {"key": "token", "count": 1000, "renewalPeriod": 60}]}]}}]
+        if resource.endswith("/locations/westeurope/usages"):
+            return [{"name": {"value": "OpenAI.Standard.gpt4.1-mini"}, "currentValue": 0, "limit": 120}]
         raise AssertionError("Unexpected collection")
 
     def rest(self, method, resource, api, body=None):
@@ -227,6 +230,14 @@ class DeploymentTests(test_cli.CliCase):
 
     def deploy(self):
         return self.cli("deploy", "--state-dir", str(self.state), "--confirm-paid", adapter=self.fixture)
+
+    def test_preflight_uses_pinned_raw_model_catalog_and_sku_usage_name(self):
+        code, report = self.cli("preflight", "--state-dir", str(self.state), adapter=self.fixture)
+        self.assertEqual((code, report.get("status")), (0, "preflight_pass"), report)
+        for suffix in ("models", "usages"):
+            self.assertIn(("collection", self.fixture.subscription
+                + "/providers/Microsoft.CognitiveServices/locations/westeurope/" + suffix,
+                "2024-10-01"), self.fixture.calls)
 
     def record_observation(self, **changes):
         request = json.loads((self.state / "api-center-plan-request.json").read_text())

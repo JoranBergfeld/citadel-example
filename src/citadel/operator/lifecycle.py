@@ -17,6 +17,7 @@ from citadel.evidence.preparation import ARTIFACT_NAMES
 from citadel.gateway.configuration import validate_deployment_inputs
 from citadel.operations import empty_ledger
 from .native import Native
+from .model_metadata import regional_standard_sku
 from .state import Blocked, ROOT, digest, read_private, source_fingerprint, write_private, write_private_bytes, public_output
 
 
@@ -199,8 +200,8 @@ class Lifecycle:
         if existing:
             self.inventory()
         providers = self.native.az("provider", "list", "--subscription", self.config["subscriptionId"])
-        registered = {p["namespace"] for p in providers if p["registrationState"] == "Registered"}
-        if set(PROVIDERS) - registered:
+        registered = {p["namespace"].lower() for p in providers if p["registrationState"] == "Registered"}
+        if {name.lower() for name in PROVIDERS} - registered:
             raise Blocked("required_provider_registration_missing")
         subscription_permissions = self.native.collection(
             self.subscription + "/providers/Microsoft.Authorization/permissions", "2022-04-01")
@@ -229,23 +230,23 @@ class Lifecycle:
                 raise Blocked("operator_registry_push_or_telemetry_permissions_missing")
         policies = self.native.az("policy", "assignment", "list", "--scope", self.subscription,
                                   "--disable-scope-strict-match")
-        models = self.native.az("cognitiveservices", "model", "list", "--location", "westeurope",
-                                "--subscription", self.config["subscriptionId"])
-        candidates = [m for m in models if m.get("model", {}).get("name") == "gpt-4.1-mini"
-                      and m["model"].get("version") == "2025-04-14"]
-        skus = [s for m in candidates for s in m.get("skus", []) if s.get("name") == "Standard"]
-        if len(skus) != 1:
-            raise Blocked("pinned_regional_standard_model_unavailable")
-        limits = [r for r in skus[0].get("rateLimits", []) if r.get("key") == "token"]
+        region = self.subscription + "/providers/Microsoft.CognitiveServices/locations/westeurope"
+        models = self.native.collection(region + "/models", "2024-10-01")
+        try:
+            candidates, sku = regional_standard_sku(models)
+        except ValueError:
+            raise Blocked("pinned_regional_standard_model_unavailable") from None
+        limits = [r for r in sku.get("rateLimits", []) if r.get("key") == "token"]
         if len(limits) != 1 or not limits[0].get("renewalPeriod"):
             raise Blocked("independent_model_tpm_metadata_missing")
         verified_tpm = int(limits[0]["count"] * 60 / limits[0]["renewalPeriod"]) * self.config["modelCapacity"]
         if not self.config["modelTokensPerMinute"] <= verified_tpm <= 120000:
             raise Blocked("configured_tpm_not_independently_verified")
-        usages = self.native.az("cognitiveservices", "usage", "list", "--location", "westeurope",
-                                "--subscription", self.config["subscriptionId"])
-        usage = [u for u in usages if u.get("name", {}).get("value", "").lower() ==
-                 "openai.standard.gpt-4.1-mini"]
+        usages = self.native.collection(region + "/usages", "2024-10-01")
+        usage_name = sku.get("usageName")
+        if not isinstance(usage_name, str) or not usage_name:
+            raise Blocked("regional_model_quota_metadata_missing")
+        usage = [u for u in usages if u.get("name", {}).get("value", "").lower() == usage_name.lower()]
         existing_capacity = 0
         model_ids = [r for r in self.value["inventory"]
                      if "/Microsoft.CognitiveServices/accounts/" in r and "/deployments/" in r]

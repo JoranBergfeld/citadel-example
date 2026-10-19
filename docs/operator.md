@@ -154,6 +154,10 @@ Contributor alone is never assumed able to assign roles or load Blob data.
 Policy conflicts, missing providers/permissions, unavailable pins, retired/absent
 models or absent quota block. No automatic registration, role elevation, policy
 exception, region/SKU substitution, or purge is performed.
+Regional model and quota checks use raw ARM `2024-10-01` responses: the exact
+`OpenAI` model's nested `model.skus` and the Standard SKU's actual `usageName`.
+Azure CLI's model-list SDK projection drops token-rate keys and is not used as
+quota evidence. Acceptance uses the same raw catalog interpretation.
 
 The actual deployment graph is:
 

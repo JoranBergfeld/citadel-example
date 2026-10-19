@@ -17,8 +17,12 @@ class ModelCounterTests(unittest.IsolatedAsyncioTestCase):
         from citadel.evidence.manifests import sha256
         deployment = ("/subscriptions/allocated/resourceGroups/platform/providers/"
                       "Microsoft.CognitiveServices/accounts/model/deployments/citadel-gpt-41-mini")
-        regional = {"value": [{"model": {"name": "gpt-4.1-mini", "version": "2025-04-14"}, "skus": [
-            {"name": "Standard", "rateLimits": [{"key": "token", "count": 1000, "renewalPeriod": 60}]}]}]}
+        regional = {"value": [{"kind": "OpenAI", "model": {
+            "name": "gpt-4.1-mini", "version": "2025-04-14", "skus": [
+                {"name": "Standard", "usageName": "OpenAI.Standard.gpt4.1-mini",
+                 "rateLimits": [{"key": "request", "count": 1, "renewalPeriod": 60},
+                                {"key": "token", "count": 1000, "renewalPeriod": 60}]}]}}]}
+        regional["value"].append(copy.deepcopy(regional["value"][0]) | {"kind": "AIServices"})
         deployed = {"id": deployment, "sku": {"name": "Standard", "capacity": 120}, "properties": {
             "model": {"name": "gpt-4.1-mini", "version": "2025-04-14"}, "versionUpgradeOption": "NoAutoUpgrade"}}
         calls, tickets = [], []
