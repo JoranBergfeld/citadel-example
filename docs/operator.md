@@ -200,6 +200,8 @@ resources, diagnostic state and intent. There is no failure cleanup or crash rep
 
 ### Record the human observation; explicitly resume
 
+Use the [short manual guide](api-center-plan.md); no wizard is required.
+
 On the first foundation stop, open
 **`$CITADEL_STATE_DIR/api-center-plan-request.json` in a private editor**.
 Its `portalUrl` is the actual resource's Azure portal URL:
