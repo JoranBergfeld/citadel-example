@@ -295,6 +295,12 @@ unnamed `copyIndex()` for the scope inside a named variable loop, which Azure
 rejects before deploying any team resources. The assignments and their scopes
 are unchanged.
 
+Team storage explicitly enables its authenticated public endpoint: the operator
+and current workload network have no private endpoint path. Anonymous Blob
+access and shared-key authentication remain disabled; HTTPS, TLS 1.2 and
+managed-identity/RBAC authorization remain required. This applies only to the
+three deployment-owned accounts, not subscription policy or external services.
+
 ## Local versus live validation
 
 Use the exact verified Bicep executable (`--version` must be **0.48.1**):

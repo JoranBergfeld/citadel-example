@@ -121,6 +121,17 @@ class TemplateTests(unittest.TestCase):
             self.assertTrue(vault["properties"]["enableRbacAuthorization"])
             self.assertEqual(vault["properties"]["softDeleteRetentionInDays"], 7)
 
+    def test_team_storage_public_endpoint_requires_rbac_https_and_no_anonymous_or_shared_key_access(self):
+        storage = next(r for r in self.module("team-")["resources"]
+                       if r["type"] == "Microsoft.Storage/storageAccounts")
+        properties = storage["properties"]
+        self.assertEqual(properties.get("publicNetworkAccess"), "Enabled")
+        self.assertFalse(properties["allowBlobPublicAccess"])
+        self.assertFalse(properties["allowSharedKeyAccess"])
+        self.assertTrue(properties["defaultToOAuthAuthentication"])
+        self.assertTrue(properties["supportsHttpsTrafficOnly"])
+        self.assertEqual(properties["minimumTlsVersion"], "TLS1_2")
+
     def test_team_extension_role_inventory_preserves_its_named_variable_loop_index(self):
         copies = self.module("team-")["variables"]["copy"]
         readers = next(row for row in copies if row["name"] == "readerInventory")

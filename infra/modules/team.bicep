@@ -46,6 +46,7 @@ resource storage 'Microsoft.Storage/storageAccounts@2023-05-01' = {
   kind: 'StorageV2'
   sku: { name: 'Standard_LRS' }
   properties: {
+    publicNetworkAccess: 'Enabled'
     allowBlobPublicAccess: false
     allowSharedKeyAccess: false
     defaultToOAuthAuthentication: true
