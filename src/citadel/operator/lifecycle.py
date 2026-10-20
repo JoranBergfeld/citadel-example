@@ -135,7 +135,7 @@ class Lifecycle:
             managed = self.value.get("managedGroups", {}).get(group["name"])
             if group["name"] in self.groups.values() or managed:
                 if ((managed and group.get("managedBy", "").lower() != managed.lower())
-                        or (not managed and group.get("tags", {}).get("citadel-deployment") != self.id)):
+                        or (not managed and (group.get("tags") or {}).get("citadel-deployment") != self.id)):
                     raise Blocked("resource_group_ownership_conflict")
                 expected = self.subscription + "/resourceGroups/" + group["name"]
                 if group["id"].lower() != expected.lower():
@@ -176,7 +176,7 @@ class Lifecycle:
                 raise Blocked("existing_api_center_identity_conflict")
             center = self.native.rest("get", centers[0], "2024-03-01")
             if (center.get("id", "").lower() != center_id
-                    or center.get("tags", {}).get("citadel-deployment") != self.id
+                    or (center.get("tags") or {}).get("citadel-deployment") != self.id
                     or center.get("location") != self.config["location"]
                     or center.get("properties", {}).get("provisioningState") != "Succeeded"):
                 raise Blocked("existing_api_center_configuration_conflict")
@@ -487,7 +487,7 @@ class Lifecycle:
                 # first inventory. Subsequent new/foreign resources fail closed.
                 resources = self.native.az("resource", "list", "--resource-group", managed_name,
                                            "--subscription", self.config["subscriptionId"])
-                if any(r.get("tags", {}).get("citadel-deployment", self.id) != self.id for r in resources):
+                if any((r.get("tags") or {}).get("citadel-deployment", self.id) != self.id for r in resources):
                     raise Blocked("unrelated_managed_resource_protection")
                 known.update(r["id"].lower() for r in resources)
                 self.value["inventory"] += [r["id"] for r in resources]
@@ -498,11 +498,11 @@ class Lifecycle:
                                        "--subscription", self.config["subscriptionId"])
             components = {r["id"].lower() for r in resources
                           if r.get("type", "").lower() == "microsoft.insights/components"
-                          and r.get("tags", {}).get("citadel-deployment") == self.id
+                          and (r.get("tags") or {}).get("citadel-deployment") == self.id
                           and r["id"].lower().startswith(group["id"].lower() + "/")}
             for resource in resources:
                 rid = resource["id"]
-                owned = (resource.get("tags", {}).get("citadel-deployment") == self.id or rid.lower() in known
+                owned = ((resource.get("tags") or {}).get("citadel-deployment") == self.id or rid.lower() in known
                          or any(rid.lower().startswith(parent + "/") for parent in known if "/providers/" in parent))
                 if resource.get("type", "").lower() == "microsoft.alertsmanagement/smartdetectoralertrules":
                     alert = self.native.rest("get", rid, "2021-04-01")

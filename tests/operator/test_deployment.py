@@ -325,6 +325,18 @@ class DeploymentTests(test_cli.CliCase):
         code, report = self.cli("inventory", "--state-dir", str(self.state), adapter=self.fixture)
         self.assertEqual((code, report.get("code")), (2, "provider_created_alert_ownership_conflict"), report)
 
+    def test_inventory_handles_null_tags_without_adopting_unknown_resources(self):
+        self.assertEqual(self.deploy()[0], 2)
+        resources = self.fixture.resources["citadel-test19-platform"]
+        resources.append({"id": self.fixture.registry,
+                          "type": "Microsoft.ContainerRegistry/registries", "tags": None})
+        code, report = self.cli("inventory", "--state-dir", str(self.state), adapter=self.fixture)
+        self.assertEqual((code, report.get("status")), (0, "inventory"), report)
+        resources.append({"id": self.fixture.registry + "-foreign",
+                          "type": "Microsoft.ContainerRegistry/registries", "tags": None})
+        code, report = self.cli("inventory", "--state-dir", str(self.state), adapter=self.fixture)
+        self.assertEqual((code, report.get("code")), (2, "unrelated_resource_protection"), report)
+
     def record_observation(self, **changes):
         request = json.loads((self.state / "api-center-plan-request.json").read_text())
         evidence = self.directory / "portal-capture.txt"

@@ -34,7 +34,7 @@ def current_request(lifecycle):
         raise Blocked("api_center_owned_resource_required")
     resource = lifecycle.native.rest("get", centers[0], "2024-03-01")
     if (resource.get("id", "").lower() != centers[0].lower()
-            or resource.get("tags", {}).get("citadel-deployment") != lifecycle.id
+            or (resource.get("tags") or {}).get("citadel-deployment") != lifecycle.id
             or resource.get("location") != lifecycle.config["location"]):
         raise Blocked("api_center_resource_identity_conflict")
     if resource.get("properties", {}).get("provisioningState") != "Succeeded":

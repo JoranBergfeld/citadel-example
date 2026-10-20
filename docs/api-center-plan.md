@@ -23,3 +23,8 @@ No wizard is required. This records a human observation; it never deploys runtim
 
 After successful recording, explicitly resume the same deployment. Recording
 proof alone does not load data, build images, start workloads or claim acceptance.
+
+If the owner explicitly waives a deleted capture, record that exception in the
+issue tracker and retain the actual human attestation privately instead. Label it
+as an attestation, not a screenshot; bind its actual response time and exact
+resource/request fields through the same observation command.
