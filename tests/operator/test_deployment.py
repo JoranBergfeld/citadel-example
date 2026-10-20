@@ -337,6 +337,35 @@ class DeploymentTests(test_cli.CliCase):
         code, report = self.cli("inventory", "--state-dir", str(self.state), adapter=self.fixture)
         self.assertEqual((code, report.get("code")), (2, "unrelated_resource_protection"), report)
 
+    def test_external_event_grid_does_not_block_agents_or_allow_group_deletion(self):
+        self.observe_fixture_plan()
+        topics = []
+        for team in ("reference", "evidence", "planning"):
+            topic = self.fixture.root + team + "/providers/Microsoft.EventGrid/systemTopics/external"
+            topics.append(topic)
+            self.fixture.resources["citadel-test19-" + team].append({
+                "id": topic, "type": "Microsoft.EventGrid/systemTopics", "tags": None})
+        code, report = self.deploy()
+        self.assertEqual((code, report.get("status")), (0, "deployed_unverified"), report)
+        self.assertEqual(len(self.fixture.outputs["appInventory"]), 5)
+        code, report = self.cli("inventory", "--state-dir", str(self.state), adapter=self.fixture)
+        self.assertEqual((code, report.get("excludedResourceCount")), (0, 3), report)
+        state = json.loads((self.state / "state.json").read_text())
+        self.assertTrue(set(topics).isdisjoint(state["inventory"]))
+        self.assertTrue(set(topics).isdisjoint(state["active"]))
+        self.assertEqual(self.cli("collect", "--state-dir", str(self.state), adapter=self.fixture)[0], 0)
+        export = json.loads((self.state / "evidence.json").read_text())
+        self.assertEqual(export.get("excludedResources"), {
+            "count": 3, "types": ["Microsoft.EventGrid/systemTopics"],
+            "validated": False, "owned": False, "groupDeletionBlocked": True})
+        self.assertFalse(any(topic in json.dumps(export) for topic in topics))
+        code, report = self.cli("teardown", "--state-dir", str(self.state),
+            "--confirm-deployment", "test19", adapter=self.fixture)
+        self.assertEqual((code, report.get("code")), (2, "external_resources_prevent_group_deletion"), report)
+        self.assertFalse(any(call[:2] == ("group", "delete") for call in self.fixture.calls))
+        self.assertFalse(any("eventgrid" in json.dumps(call).lower()
+                             for call in self.fixture.calls if call[0] != "resource"))
+
     def record_observation(self, **changes):
         request = json.loads((self.state / "api-center-plan-request.json").read_text())
         evidence = self.directory / "portal-capture.txt"

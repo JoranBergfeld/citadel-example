@@ -8,6 +8,12 @@ requires its four independently verified, actually executed storage denials.
 
 ## Implemented public boundaries
 
+Runtime acceptance covers the deployed sample, not Event Grid or subscription
+security services. Externally classified Event Grid resources are reported but
+neither validated nor adopted. Their presence does not block agent runtime
+checks; it still blocks resource-group deletion. This exclusion does not relax
+agent authorization, data-boundary, model, protocol or telemetry evidence.
+
 - `citadel.acceptance.operator_hooks.run(lifecycle=..., check_id=..., run_id=...)`
   handles the documented operator hooks and `collect-evidence`. Existing private
   API Center human-plan evidence and deployed-runtime gates still apply.

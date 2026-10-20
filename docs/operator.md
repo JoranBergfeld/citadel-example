@@ -166,6 +166,14 @@ Regional model and quota checks use raw ARM `2024-10-01` responses: the exact
 Azure CLI's model-list SDK projection drops token-rate keys and is not used as
 quota evidence. Acceptance uses the same raw catalog interpretation.
 
+Event Grid is outside runtime validation scope. Generic group enumeration records
+`Microsoft.EventGrid/*` resources as external, without provider-specific reads,
+ownership adoption or modification. Inventory reports their count; lifecycle
+evidence exports only counts/types, not their IDs. Agent access, model, protocol,
+data and telemetry checks remain unchanged. Group teardown is blocked while any
+external resource remains, including before the first delete and on each fresh
+pre-delete inventory.
+
 The actual deployment graph is:
 
 1. Recheck local/target gates; validate resolved gateway inputs in memory.

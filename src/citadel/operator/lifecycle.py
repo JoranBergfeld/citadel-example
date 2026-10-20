@@ -35,6 +35,10 @@ def now():
     return datetime.now(timezone.utc)
 
 
+def external_event_grid(resource):
+    return resource.get("type", "").lower().startswith("microsoft.eventgrid/")
+
+
 def resource_ids(value):
     if isinstance(value, str):
         return {value} if value.startswith("/subscriptions/") else set()
@@ -467,9 +471,10 @@ class Lifecycle:
                for key in ("writeEnabled", "deleteEnabled")):
             raise Blocked("registry_immutability_not_verified")
 
-    def inventory(self):
+    def inventory(self, *, for_teardown=False):
         groups = self.owned_groups()
         known = {r.lower() for r in self.value["inventory"]}
+        external = []
         for environment in [r for r in self.value["inventory"]
                             if "/providers/Microsoft.App/managedEnvironments/" in r
                             and r.count("/") == 8]:
@@ -487,6 +492,7 @@ class Lifecycle:
                 # first inventory. Subsequent new/foreign resources fail closed.
                 resources = self.native.az("resource", "list", "--resource-group", managed_name,
                                            "--subscription", self.config["subscriptionId"])
+                resources = [resource for resource in resources if not external_event_grid(resource)]
                 if any((r.get("tags") or {}).get("citadel-deployment", self.id) != self.id for r in resources):
                     raise Blocked("unrelated_managed_resource_protection")
                 known.update(r["id"].lower() for r in resources)
@@ -502,6 +508,11 @@ class Lifecycle:
                           and r["id"].lower().startswith(group["id"].lower() + "/")}
             for resource in resources:
                 rid = resource["id"]
+                if external_event_grid(resource):
+                    if not rid.lower().startswith(group["id"].lower() + "/"):
+                        raise Blocked("unrelated_resource_protection")
+                    external.append({"id": rid, "type": resource["type"]})
+                    continue
                 owned = ((resource.get("tags") or {}).get("citadel-deployment") == self.id or rid.lower() in known
                          or any(rid.lower().startswith(parent + "/") for parent in known if "/providers/" in parent))
                 if resource.get("type", "").lower() == "microsoft.alertsmanagement/smartdetectoralertrules":
@@ -528,9 +539,13 @@ class Lifecycle:
                     active.append(assignment["id"])
             active.append(group["id"])
         self.value["active"] = sorted(active)
+        self.value["externalResources"] = sorted(external, key=lambda row: row["id"].lower())
         self.value["inventory"] = sorted(set(self.value["inventory"]) | set(active))
         self.state.save()
+        if for_teardown and external:
+            raise Blocked("external_resources_prevent_group_deletion")
         return {"status": "inventory", "activeCount": len(active),
+                "excludedResourceCount": len(external),
                 "ageWarning24h": (now() - datetime.fromisoformat(self.value["created"])).total_seconds() >= 86400,
                 "automaticDeletion": False, "monetaryCeiling": None}
 
@@ -626,6 +641,11 @@ class Lifecycle:
                   "runs": self.value["runs"],
                   "configuredImages": sorted({app["image"] for app in self.value.get("applications", {}).values()}),
                   "bootstrapVerifiedCount": sum(v == "verified" for v in self.value["bootstrap"].values()),
+                  "excludedResources": {
+                      "count": len(self.value["externalResources"]),
+                      "types": sorted({row["type"] for row in self.value["externalResources"]}),
+                      "validated": False, "owned": False,
+                      "groupDeletionBlocked": bool(self.value["externalResources"])},
                   "apiCenterPlan": plan,
                   "acceptance": "blocked", "required": ["task20_harness", "live_correlation",
                       "rotation_proof", "operator_prose_signoff", "two_consecutive_passes",
@@ -666,12 +686,13 @@ class Lifecycle:
         # Export before deleting any source. The harness must separately export
         # actual correlation evidence; a lifecycle inventory is not that proof.
         self.collect()
+        self.inventory(for_teardown=True)
         failed, deleted = [], []
         targets = [(team, self.groups[team]) for team in ("planning", "evidence", "reference", "platform")]
         targets += [(name, name) for name in self.value.get("managedGroups", {})]
         for team, name in targets:
             try:
-                self.inventory()
+                self.inventory(for_teardown=True)
                 groups = self.owned_groups()
                 group = next((g for g in groups if g["name"] == name), None)
                 if group is None:
@@ -683,7 +704,7 @@ class Lifecycle:
                 deleted.append(team)
             except Blocked:
                 failed.append(team)
-        self.inventory()
+        self.inventory(for_teardown=True)
         if not failed and not self.value["active"] and self.value.get("foundation_started"):
             selector = "[?name=='citadel-" + self.id + "']"
             records = self.native.az("deployment", "sub", "list", "--subscription",
