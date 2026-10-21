@@ -30,7 +30,7 @@ class ConsoleTests(unittest.TestCase):
                 {"name": "AZURE_CLIENT_ID", "value": app["identityClientId"]},
                 {"name": "AZURE_PRINCIPAL_ID", "value": app["identityPrincipalId"]},
                 {"name": "CITADEL_TARGET", "value": "reference-data"}]}]}
-        deployed = {"identity": {"type": "UserAssigned", "userAssignedIdentities": {identity: {
+        deployed = {"identity": {"type": "UserAssigned", "userAssignedIdentities": {identity.lower(): {
             "clientId": app["identityClientId"], "principalId": app["identityPrincipalId"]}}},
             "properties": {"latestRevisionName": "d-reference-data--ready",
                 "latestReadyRevisionName": "d-reference-data--ready", "template": template,

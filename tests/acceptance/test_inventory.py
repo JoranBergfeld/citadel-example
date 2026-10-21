@@ -32,7 +32,7 @@ def fixture():
                 "team": teams[role], "protocol": "MCP" if role == "reference-data" else "A2A",
                 "protocol-version": "2025-11-25" if role == "reference-data" else "1.0.0",
                 "gateway-address": gateway + "/" + role + ("/mcp" if role == "reference-data" else "/a2a")}}})
-        deployed[role] = {"identity": {"userAssignedIdentities": {app["identity"]: {}}},
+        deployed[role] = {"identity": {"userAssignedIdentities": {app["identity"].lower(): {}}},
             "properties": {"provisioningState": "Succeeded", "template": {"containers": [{
                 "image": app["image"], "command": ["python", "-m", "citadel.runtime"], "args": [],
                 "env": [{"name": key, "value": value} for key, value in {
@@ -78,6 +78,8 @@ class InventoryTests(unittest.TestCase):
             lambda value: value["finding"]["properties"].update(kind="a2a"),
             lambda value: value["deployment"]["properties"].update(environmentId="/wrong"),
             lambda value: value["deployment"]["properties"].update(definitionId="/unrelated-definition"),
+            lambda value: next(iter(value["applications"].values()))["identity"]["userAssignedIdentities"].update(
+                {"/subscriptions/foreign/identities/unallocated": {}}),
         ):
             changed = copy.deepcopy(documents)
             mutate(changed)

@@ -257,6 +257,9 @@ workload inventory plus the genuine released-findings REST capability
   A2A remains A2A `1.0.0` using JSON-RPC 2.0; MCP remains MCP `2025-11-25`
   using Streamable HTTP. Identities are ordinary user-assigned managed
   identities, explicitly **not Entra Agent IDs**.
+  ARM identity resource IDs are compared case-insensitively, including in
+  acceptance hashes and console guards; assigned counts and principal/client
+  bindings remain exact.
 - This is **workload/environment inventory, not native A2A/MCP API
   registration or import validation**. No JSON-RPC transport is labeled REST.
 - Separately, one genuine `kind: rest` API records released-findings reads.

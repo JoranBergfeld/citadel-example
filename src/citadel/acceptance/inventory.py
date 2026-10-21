@@ -27,7 +27,7 @@ def _app(name, identities, container):
     if len(environment) != len(container["env"]):
         raise ValueError("Duplicate actual environment fields")
     return {"name": name, "runtime_identity": _principal(environment["AZURE_PRINCIPAL_ID"]),
-            "sha256": sha256({"identity": sorted(identities), "image": container["image"],
+            "sha256": sha256({"identity": sorted(rid.lower() for rid in identities), "image": container["image"],
                 "command": container["command"], "args": container["args"],
                 "target": environment["CITADEL_TARGET"], "principal": environment["AZURE_PRINCIPAL_ID"],
                 "client": environment["AZURE_CLIENT_ID"], "quota": environment["CITADEL_MODEL_TOKENS_PER_MINUTE"]})}

@@ -565,7 +565,7 @@ class Lifecycle:
             raise Blocked("api_center_environment_inventory_mismatch")
         apps = {a["app"].split("/")[-1].removeprefix(self.id + "-"): a
                 for a in self.value["outputs"]["appInventory"]}
-        if len({app["identity"] for app in apps.values()}) != 5:
+        if len({app["identity"].lower() for app in apps.values()}) != 5:
             raise Blocked("distinct_workload_identities_required")
         teams = {"reference": "Reference Data", "evidence": "Evidence Review", "planning": "Exercise Planning"}
         observed_apps = {}
@@ -588,7 +588,8 @@ class Lifecycle:
             containers = deployed["properties"]["template"]["containers"]
             environment = {e["name"]: e.get("value") for e in containers[0]["env"]}
             if (deployed["properties"]["provisioningState"] != "Succeeded"
-                    or set(deployed["identity"]["userAssignedIdentities"]) != {app["identity"]}
+                    or len(deployed["identity"]["userAssignedIdentities"]) != 1
+                    or {rid.lower() for rid in deployed["identity"]["userAssignedIdentities"]} != {app["identity"].lower()}
                     or len(containers) != 1 or containers[0]["image"] != app["image"]
                     or containers[0].get("command") != ["python", "-m", "citadel.runtime"]
                     or containers[0].get("args") != []

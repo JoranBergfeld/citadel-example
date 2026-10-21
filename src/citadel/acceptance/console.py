@@ -147,9 +147,12 @@ def reference_template(app, deployed):
     value = template(deployed["properties"]["template"])
     containers = value["containers"]
     assigned = deployed["identity"]["userAssignedIdentities"]
-    if (deployed["identity"]["type"] != "UserAssigned" or set(assigned) != {app["identity"]}
-            or str(UUID(assigned[app["identity"]]["clientId"])) != app["identityClientId"]
-            or str(UUID(assigned[app["identity"]]["principalId"])) != app["identityPrincipalId"]
+    if len(assigned) != 1:
+        raise Blocked("reference_console_image_or_identity_conflict")
+    resource, identity = next(iter(assigned.items()))
+    if (deployed["identity"]["type"] != "UserAssigned" or resource.lower() != app["identity"].lower()
+            or str(UUID(identity["clientId"])) != app["identityClientId"]
+            or str(UUID(identity["principalId"])) != app["identityPrincipalId"]
             or len(containers) != 1 or containers[0]["name"] != "reference-data"
             or containers[0]["image"] != app["image"]
             or not re.fullmatch(r".+@sha256:[a-f0-9]{64}", app["image"])

@@ -184,7 +184,7 @@ class AzureFixture:
                 "team": {"reference": "Reference Data", "evidence": "Evidence Review", "planning": "Exercise Planning"}[teams[name]],
                 "identity-kind": "Azure user-assigned managed identity; not Entra Agent ID"},
                 "kind": "testing", "server": {"type": "Azure compute service"}}})
-            self.app_documents[aid] = {"identity": {"userAssignedIdentities": {identity: {}}},
+            self.app_documents[aid] = {"identity": {"userAssignedIdentities": {identity.lower(): {}}},
                 "properties": {"provisioningState": "Succeeded", "template": {"containers": [{
                     "image": app["image"], "command": app["command"], "args": app["args"],
                     "env": [{"name": "CITADEL_TARGET", "value": name},
