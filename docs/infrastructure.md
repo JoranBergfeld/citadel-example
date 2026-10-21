@@ -262,15 +262,19 @@ workload inventory plus the genuine released-findings REST capability
 - Separately, one genuine `kind: rest` API records released-findings reads.
   Its gateway deployment references API Center-scoped environment ID
   `/workspaces/default/environments/release-reviewer`, the actual host.
+  The pinned provider requires a definition binding: a real testing API version
+  `v1-0-0` and `declared-rest` definition metadata are created and referenced by
+  the documented `definitionId` field. The definition explicitly declares that
+  no specification was imported; it is not import or operational validation.
   The advertised base URL is APIM's `/release-reviewer`; the documented
   capability is GET `/findings/{findingId}/versions/{version}`. It confers
-  neither Reviewer invocation nor release/private-draft access. No imported
-  definition or verified operational `state` is fabricated.
+  neither Reviewer invocation nor release/private-draft access. No specification
+  import or verified operational `state` is fabricated.
 
 Inventory is configured only with real runtime applications and gateway routes.
 Foundation-only output states `not_configured`; an empty workspace never
-constitutes an inventory pass. All environment, schema, REST API and deployment
-IDs are retained in `inventory.capabilities`.
+constitutes an inventory pass. All environment, schema, REST API, version,
+definition and deployment IDs are retained in `inventory.capabilities`.
 
 The Free plan's published limits permit 20 environments and 10 metadata
 properties per entity; this representation uses five and seven respectively.

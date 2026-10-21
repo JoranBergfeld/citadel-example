@@ -223,6 +223,7 @@ class AzureFixture:
             return {"properties": {"kind": "rest"}}
         if resource.endswith("/apis/released-findings/deployments/gateway"):
             return {"properties": {"environmentId": "/workspaces/default/environments/release-reviewer",
+                                    "definitionId": "/workspaces/default/apis/released-findings/versions/v1-0-0/definitions/declared-rest",
                                     "server": {"runtimeUri": [self.gateway + "/release-reviewer"]}}}
         if resource in self.app_documents:
             return self.app_documents[resource]

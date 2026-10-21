@@ -66,16 +66,33 @@ resource findings 'Microsoft.ApiCenter/services/workspaces/apis@2024-03-01' = {
     description: 'GET /findings/{findingId}/versions/{version} on Release Reviewer through APIM. Separately authorized deterministic read for Candidate Planner and Briefing Author; not agent invocation or release authority. No private draft access.'
   }
 }
+resource findingsVersion 'Microsoft.ApiCenter/services/workspaces/apis/versions@2024-03-01' = {
+  parent: findings
+  name: 'v1-0-0'
+  properties: {
+    title: '1.0.0'
+    lifecycleStage: 'testing'
+  }
+}
+resource findingsDefinition 'Microsoft.ApiCenter/services/workspaces/apis/versions/definitions@2024-03-01' = {
+  parent: findingsVersion
+  name: 'declared-rest'
+  properties: {
+    title: 'Exact released-finding read declaration'
+    description: 'Declared GET /findings/{findingId}/versions/{version} metadata only; no imported specification or operational validation is claimed.'
+  }
+}
 resource findingsDeployment 'Microsoft.ApiCenter/services/workspaces/apis/deployments@2024-03-01' = {
   parent: findings
   name: 'gateway'
   properties: {
     title: 'Reviewer hosted findings read'
     description: 'Declared REST capability at the gateway, hosted by the Release Reviewer Container App. Provider acceptance and working allowed/denied controls require live verification; inventory is not operational proof.'
+    definitionId: '/workspaces/default/apis/released-findings/versions/v1-0-0/definitions/declared-rest'
     environmentId: '/workspaces/default/environments/release-reviewer'
     server: { runtimeUri: ['${gatewayUrl}/release-reviewer'] }
   }
-  dependsOn: [environments]
+  dependsOn: [environments, findingsDefinition]
 }
 var schemaIds = [for (property, i) in metadataNames: schemas[i].id]
 var environmentIds = [for (workload, i) in workloads: environments[i].id]
@@ -84,6 +101,6 @@ output inventory object = {
   workspace: workspace.id
   metadataSchemas: schemaIds
   workloadEnvironments: environmentIds
-  restCapabilities: [findings.id, findingsDeployment.id]
+  restCapabilities: [findings.id, findingsDeployment.id, findingsVersion.id, findingsDefinition.id]
   representation: 'Workload environments; not native A2A/MCP registration or import validation.'
 }

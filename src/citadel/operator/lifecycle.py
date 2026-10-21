@@ -600,6 +600,8 @@ class Lifecycle:
             raise Blocked("truthful_findings_rest_inventory_missing")
         deployment = self.native.rest("get", capabilities["restCapabilities"][1], "2024-03-01")
         if (deployment["properties"]["environmentId"] != "/workspaces/default/environments/release-reviewer"
+                or deployment["properties"].get("definitionId") !=
+                "/workspaces/default/apis/released-findings/versions/v1-0-0/definitions/declared-rest"
                 or deployment["properties"]["server"]["runtimeUri"] !=
                 [self.value["outputs"]["gatewayUrl"] + "/release-reviewer"]):
             raise Blocked("findings_host_environment_mismatch")

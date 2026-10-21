@@ -60,6 +60,7 @@ def inventory_inputs(lifecycle):
         "environments": sorted(environments, key=lambda row: row["name"]),
         "applications": sorted(applications, key=lambda row: row["name"]),
         "rest_sha256": sha256({"kind": "rest", "environmentId": "/workspaces/default/environments/release-reviewer",
+                              "definitionId": "/workspaces/default/apis/released-findings/versions/v1-0-0/definitions/declared-rest",
                               "runtimeUri": [gateway + "/release-reviewer"]}),
         "plan": {"sha256": value["planProof"], "scope_sha256": sha256({key: request[key] for key in BINDING_FIELDS}),
                  "started": timestamp(request["requestedAt"]).timestamp()}}
@@ -85,6 +86,7 @@ def observe_inventory(lifecycle, documents):
             "applications": sorted(applications, key=lambda row: row["name"]),
             "rest_sha256": sha256({"kind": documents["finding"]["properties"]["kind"],
                 "environmentId": documents["deployment"]["properties"]["environmentId"],
+                "definitionId": documents["deployment"]["properties"]["definitionId"],
                 "runtimeUri": documents["deployment"]["properties"]["server"]["runtimeUri"]}),
             "plan": {"sha256": sha256(plan), "source": plan["source"], "name": observation["observedPlan"],
                 "scope_sha256": sha256({key: observation[key] for key in BINDING_FIELDS}),

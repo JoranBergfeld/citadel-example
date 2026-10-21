@@ -50,6 +50,7 @@ def fixture():
             "systemData": {"createdAt": request["resourceCreatedAt"]}}, "environments": environments,
         "applications": deployed, "finding": {"properties": {"kind": "rest"}},
         "deployment": {"properties": {"environmentId": "/workspaces/default/environments/release-reviewer",
+                                      "definitionId": "/workspaces/default/apis/released-findings/versions/v1-0-0/definitions/declared-rest",
                                       "server": {"runtimeUri": [gateway + "/release-reviewer"]}}},
         "plan": proof}
     return lifecycle, documents
@@ -76,6 +77,7 @@ class InventoryTests(unittest.TestCase):
                 **{"identity-kind": "Entra Agent ID"}),
             lambda value: value["finding"]["properties"].update(kind="a2a"),
             lambda value: value["deployment"]["properties"].update(environmentId="/wrong"),
+            lambda value: value["deployment"]["properties"].update(definitionId="/unrelated-definition"),
         ):
             changed = copy.deepcopy(documents)
             mutate(changed)

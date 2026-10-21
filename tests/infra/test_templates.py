@@ -250,8 +250,28 @@ class TemplateTests(unittest.TestCase):
         self.assertEqual(deployment["properties"]["environmentId"], "/workspaces/default/environments/release-reviewer")
         self.assertEqual(deployment["properties"]["server"]["runtimeUri"], ["[format('{0}/release-reviewer', parameters('gatewayUrl'))]"])
         self.assertNotIn("state", deployment["properties"], "Declaration must not claim verified operational status")
-        self.assertNotIn("definitionId", deployment["properties"], "No invented imported definition")
         self.assertTrue(deployment["dependsOn"], "Association waits for real workload environments")
+
+    def test_findings_deployment_references_real_declared_definition_without_import_claim(self):
+        inventory = self.module("inventory-")
+        versions = [r for r in inventory["resources"]
+                    if r["type"] == "Microsoft.ApiCenter/services/workspaces/apis/versions"]
+        definitions = [r for r in inventory["resources"]
+                       if r["type"] == "Microsoft.ApiCenter/services/workspaces/apis/versions/definitions"]
+        self.assertEqual(len(versions), 1)
+        self.assertEqual(len(definitions), 1)
+        self.assertEqual(versions[0]["apiVersion"], "2024-03-01")
+        self.assertEqual(versions[0]["properties"], {"title": "1.0.0", "lifecycleStage": "testing"})
+        self.assertEqual(definitions[0]["apiVersion"], "2024-03-01")
+        self.assertEqual(set(definitions[0]["properties"]), {"title", "description"})
+        self.assertIn("no imported specification", definitions[0]["properties"]["description"])
+        deployment = next(r for r in inventory["resources"]
+                          if r["type"] == "Microsoft.ApiCenter/services/workspaces/apis/deployments")
+        self.assertEqual(deployment["properties"].get("definitionId"),
+                         "/workspaces/default/apis/released-findings/versions/v1-0-0/definitions/declared-rest")
+        self.assertNotIn("versionId", deployment["properties"], "Use the documented pinned API field")
+        self.assertTrue(any("versions/definitions" in value for value in deployment["dependsOn"]))
+        self.assertIn("versions/definitions", json.dumps(inventory["outputs"]["inventory"]))
 
 
 if __name__ == "__main__":
