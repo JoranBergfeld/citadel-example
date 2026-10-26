@@ -94,8 +94,8 @@ class RotationAcceptance:
             and lifecycle.value.get("rotation_controls", {}).get(run_id, {}).get("new", {}).get("state") == "verified")
         if pending["run_id"] != run_id or pending["phase"] != expected_phase and not verified_current:
             raise Blocked("matching_owned_rotation_stage_required")
-        if any(key != run_id and row["state"] not in ("succeeded", "failed_no_commit")
-               for key, row in lifecycle.value["runs"].items()):
+        from citadel.operator.quiescence import runs_quiescent
+        if not runs_quiescent(lifecycle, exclude=run_id):
             raise Blocked("rotation_controls_require_quiescent_runs")
         kind, target = pending["kind"], pending["target"]
         backend = TARGETS.get(target) if kind == "subscription" else target if kind == "context" else "evidence-assessor"
@@ -258,12 +258,13 @@ class RotationAcceptance:
         windows[key] = {"started": time.time(), "finished": None}
         self.lifecycle.state.save()
         try:
-            workspaces = [r for r in self.lifecycle.value["inventory"]
-                if "/Microsoft.OperationalInsights/workspaces/" in r and "/tables/" not in r]
-            if len(workspaces) != 1:
-                raise Blocked("exact_rotation_workspace_required")
+            from .retention import workspace_resource
+            try:
+                workspace_id = workspace_resource(self.lifecycle)
+            except Blocked:
+                raise Blocked("exact_rotation_workspace_required") from None
             admit()
-            workspace = self.lifecycle.native.rest("get", workspaces[0], "2022-10-01")
+            workspace = self.lifecycle.native.rest("get", workspace_id, "2022-10-01")
             record["evidence"] = Collector(AzureQuery(self.lifecycle.native, workspace["properties"]["customerId"]),
                 started=record["started"], finished=record["finished"], budget_seconds=remaining,
                 prior=record["evidence"]).poll()

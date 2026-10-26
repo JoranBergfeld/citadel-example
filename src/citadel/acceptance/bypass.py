@@ -38,8 +38,8 @@ class BypassControls:
         controls = self.lifecycle.value.setdefault("acceptance_controls", {})
         report = controls.get(run_id)
         if report is None:
-            if any(run["state"] not in ("succeeded", "failed_no_commit")
-                   for run in self.lifecycle.value["runs"].values()):
+            from citadel.operator.quiescence import runs_quiescent
+            if not runs_quiescent(self.lifecycle):
                 raise Blocked("existing_run_requires_reconciliation")
             report = {"schema_version": 1, "mode": "cloud", "scope": "denied-bypass-controls",
                 "run_id": run_id, **fingerprints, "required_checks": sorted(BYPASS_CHECKS),
@@ -101,11 +101,8 @@ class BypassControls:
         previous = getattr(native, "deadline", None)
         native.deadline = min(previous or float("inf"), time.monotonic() + end - now)
         try:
-            workspaces = [resource for resource in self.lifecycle.value["inventory"]
-                if "/Microsoft.OperationalInsights/workspaces/" in resource and "/tables/" not in resource]
-            if len(workspaces) != 1:
-                raise Blocked("exact_acceptance_workspace_required")
-            details = native.rest("get", workspaces[0], "2022-10-01")
+            from .retention import workspace_resource
+            details = native.rest("get", workspace_resource(self.lifecycle), "2022-10-01")
             collector = Collector(AzureQuery(native, details["properties"]["customerId"]),
                 started=report["started"], finished=report["finished"],
                 budget_seconds=end - self.clock(), prior=report["evidence"])

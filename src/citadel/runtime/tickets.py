@@ -17,7 +17,8 @@ from citadel.operations import OperationError
 from .state import read_deadline
 
 
-CAPACITY = {"candidate-planner": 512, "evidence-assessor": 20,
+# The assessor's reservation includes eleven reviewer reads and owner polling.
+CAPACITY = {"candidate-planner": 512, "evidence-assessor": 22,
             "release-reviewer": 11, "briefing-author": 16}
 
 

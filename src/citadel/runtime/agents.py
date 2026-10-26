@@ -226,7 +226,7 @@ class Runtime:
             await self.renew_if_needed(owner)
             await self.accounting.candidate(payload["operation_id"], ident)
             result = await self.peers.child(self, owner, payload, "evidence-assessor", {"airport_ident": ident},
-                {"agents": 2, "models": 2, "tokens": 36000, "reads": 20})
+                {"agents": 2, "models": 2, "tokens": 36000, "reads": CAPACITY["evidence-assessor"]})
             if result["kind"] == "rejected":
                 assessed.append({"airport_ident": ident, "classification": "release_rejected"})
                 continue

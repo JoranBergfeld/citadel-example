@@ -44,7 +44,8 @@ class ModelAcceptance:
         if "model_phase" in report:
             raise Blocked("model_probe_intent_requires_reconciliation")
         value = self.lifecycle.value
-        if any(row["state"] not in ("succeeded", "failed_no_commit") for row in value["runs"].values()):
+        from citadel.operator.quiescence import runs_quiescent
+        if not runs_quiescent(self.lifecycle):
             raise Blocked("model_controls_require_quiescent_runs")
         run_id = uuid4().hex
         phase = {"run_id": run_id, "state": "preparing", "deadline": time.time() + 900,

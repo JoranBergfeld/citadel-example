@@ -180,8 +180,8 @@ class Harness:
                     HttpTimeoutAcceptance(self.lifecycle).execute(report)
                     report["finished"] = time.time()
                     self.save(report)
-            if all(run["state"] in ("succeeded", "failed_no_commit")
-                   for run in self.lifecycle.value["runs"].values()):
+            from citadel.operator.quiescence import runs_quiescent
+            if runs_quiescent(self.lifecycle):
                 from .model_harness import ModelAcceptance
                 ModelAcceptance(self.lifecycle).execute(report)
                 report["finished"] = time.time()
@@ -251,10 +251,8 @@ class Harness:
         report = self.attempts[run_id]
         if fingerprints(self.lifecycle)["fingerprint"] != report["fingerprint"]:
             raise Blocked("acceptance_deployment_inputs_changed")
-        workspace = [rid for rid in self.lifecycle.value["inventory"]
-                     if "/Microsoft.OperationalInsights/workspaces/" in rid and "/tables/" not in rid]
-        if len(workspace) != 1:
-            raise Blocked("exact_acceptance_workspace_required")
+        from .retention import workspace_resource
+        workspace = workspace_resource(self.lifecycle)
         end = report.setdefault("collection_deadline",
                                 time.time() + collection_remaining(report, time.time()))
         remaining = end - time.time()
@@ -266,8 +264,8 @@ class Harness:
         previous_deadline = getattr(native, "deadline", None)
         native.deadline = min(previous_deadline or float("inf"), time.monotonic() + remaining)
         try:
-            details = self.lifecycle.native.rest("get", workspace[0], "2022-10-01")
-            tables = self.lifecycle.native.collection(workspace[0] + "/tables", "2022-10-01")
+            details = self.lifecycle.native.rest("get", workspace, "2022-10-01")
+            tables = self.lifecycle.native.collection(workspace + "/tables", "2022-10-01")
             from .retention import observe_retention, evaluate_retention
             retention = {"check_id": "telemetry.retention-and-unsampled", "expected": "evidence",
                          "actual": observe_retention(self.lifecycle, details, tables)}

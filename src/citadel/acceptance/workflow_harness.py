@@ -57,7 +57,8 @@ class WorkflowAcceptance:
         if "workflow_timeout_phase" in report:
             raise Blocked("workflow_timeout_intent_requires_reconciliation_never_replay")
         lifecycle, started, run = self.lifecycle, time.time(), uuid4().hex
-        if any(row["state"] not in ("succeeded", "failed_no_commit") for row in lifecycle.value["runs"].values()):
+        from citadel.operator.quiescence import runs_quiescent
+        if not runs_quiescent(lifecycle):
             raise Blocked("workflow_control_requires_quiescence")
         accounts = storage_accounts(lifecycle)
         phase = {"run_id": run, "state": "dispatching", "started": started, "finished": started,
@@ -162,9 +163,9 @@ class WorkflowAcceptance:
             check = {"check_id": CHECK, "expected": "boundary", "actual": phase}
             from .operator_hooks import Harness
             result = evaluate_workflow(check, report)
-            workspaces = [r for r in lifecycle.value["inventory"]
-                if "/Microsoft.OperationalInsights/workspaces/" in r and "/tables/" not in r]
-            if len(workspaces) == 1:
+            from .retention import workspace_resource
+            workspace = workspace_resource(lifecycle)
+            if collection_remaining(report, time.time()) > 0:
                 bound = time.time() + collection_remaining(report, time.time())
                 native_bound()
                 window = {"started": time.time(), "finished": None}
@@ -172,7 +173,7 @@ class WorkflowAcceptance:
                 lifecycle.state.save()
                 try:
                     while result["status"] != "pass" and time.time() < bound:
-                        self._collect(report, phase, workspaces[0], admit, bound)
+                        self._collect(report, phase, workspace, admit, bound)
                         result = evaluate_workflow(check, report)
                         if result["status"] != "pass":
                             time.sleep(min(15, max(0, bound - time.time())))

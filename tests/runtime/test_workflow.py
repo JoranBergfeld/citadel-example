@@ -49,7 +49,8 @@ class FixtureGateway(httpx.AsyncBaseTransport):
 
 class WorkflowTests(unittest.IsolatedAsyncioTestCase):
     async def run_case(self, fixture, *, count=4, expected_state="succeeded", data_source=None,
-                       corrupt_brief=False, persisted=None, run_id="run1"):
+                       corrupt_brief=False, persisted=None, run_id="run1", reviewer_delay=0,
+                       verify_followups=True):
         gateway = FixtureGateway()
         gateway.corrupt_brief = corrupt_brief
         base = data_source or reference(count)
@@ -69,6 +70,8 @@ class WorkflowTests(unittest.IsolatedAsyncioTestCase):
 
         async def model_response(request):
             models.append((request.headers["Ocp-Apim-Subscription-Key"], json.loads(request.content)))
+            if request.headers["Ocp-Apim-Subscription-Key"] == "release-reviewer":
+                await asyncio.sleep(reviewer_delay)
             return httpx2.Response(200, json={
                 "id": "test-only-model", "object": "chat.completion", "created": 0,
                 "model": "approved-deployment",
@@ -134,7 +137,7 @@ class WorkflowTests(unittest.IsolatedAsyncioTestCase):
                         persisted[name] = (await ledger.read())[0]
                 self.assertEqual(output["provenance"], data.provenance)
                 self.assertTrue(set(CAVEATS).issubset(output["caveats"]))
-                if output.get("brief"):
+                if output.get("brief") and verify_followups:
                     ref = output["brief"]["citations"][0]
                     url = f"https://gateway.test/release-reviewer/findings/{ref['artifact_id']}/versions/{ref['version']}"
                     allowed = await client.get(url, headers={
@@ -159,6 +162,16 @@ class WorkflowTests(unittest.IsolatedAsyncioTestCase):
                          {"candidate-planner", "evidence-assessor", "release-reviewer", "briefing-author"})
         self.assertTrue(any(target == "reference-data" for _, target, _, _ in exchanges))
         self.assertTrue(any(path.startswith("/findings/") for _, _, path, _ in exchanges))
+
+    async def test_completed_assessments_remain_observable_after_multiple_real_status_polls(self):
+        output, _, exchanges = await self.run_case("base-source", reviewer_delay=1.3,
+                                                   verify_followups=False)
+        self.assertEqual(output["status"], "complete")
+        polls = [path for caller, target, path, _ in exchanges
+                 if caller == "candidate-planner" and target == "evidence-assessor"
+                 and path.startswith("/operations/")]
+        self.assertGreaterEqual(len(polls), 6)
+        self.assertLessEqual(self.last_read_count, 512)
 
     async def test_missing_width_replaces_candidate_without_hiding_gap_or_fixture(self):
         output, _, _ = await self.run_case("missing-width-replacement")

@@ -68,9 +68,8 @@ def rotate_command(lifecycle, args):
         and bool(control) and all(control.get(stage, {}).get("state") in (None, "observed", "verified")
         for stage in ("new", "old"))
         and pending.get("selector_intent", {}).get("state") in (None, "restored"))
-    if any(r["state"] not in ("succeeded", "failed_no_commit")
-           and not (collectible and key == pending.get("run_id"))
-           for key, r in lifecycle.value["runs"].items()):
+    from .quiescence import runs_quiescent
+    if not runs_quiescent(lifecycle, exclude=pending.get("run_id") if collectible else None):
         raise Blocked("credential_change_requires_quiescent_runs")
     lifecycle.inventory()
     credentials = lifecycle.credentials()

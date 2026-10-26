@@ -15,6 +15,7 @@ from agent_framework_a2a import A2AAgent
 from citadel.evidence.manifests import sha256
 from citadel.runtime.configuration import endpoint
 from .state import Blocked, write_private, public_output
+from .quiescence import runs_quiescent
 
 
 FIXTURES = {"comparison": "base-source", "replacement": "missing-width-replacement",
@@ -166,7 +167,7 @@ def scenario_command(lifecycle, args):
         if existing and (existing["fixture"] != fixture or existing["scenario"] != args.scenario):
             raise Blocked("immutable_run_input_conflict")
         if not existing:
-            if any(r["state"] not in ("succeeded", "failed_no_commit") for r in runs.values()):
+            if not runs_quiescent(lifecycle):
                 raise Blocked("existing_run_requires_reconciliation")
             if args.scenario == "denied-bypass":
                 acceptance_hook(lifecycle, "denied-bypass-controls", args.run_id)

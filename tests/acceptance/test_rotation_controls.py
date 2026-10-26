@@ -105,7 +105,7 @@ class RotationControlTests(unittest.TestCase):
 
         lifecycle = SimpleNamespace(native=Native(), state=SimpleNamespace(directory=directory, save=lambda: None),
             value={"runs": {}, "acceptance_attempts": {"suite": parent}, "rotation_controls": {},
-                "inventory": ["/owned/Microsoft.OperationalInsights/workspaces/owned"]})
+                "inventory": ["/owned/providers/Microsoft.OperationalInsights/workspaces/owned"]})
         try:
             with patch("time.time", lambda: clock[0]):
                 for run in ("subscription", "certificate", "context"):

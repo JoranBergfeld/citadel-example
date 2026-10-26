@@ -9,11 +9,19 @@ from .oracle import hash_value
 from .telemetry_proof import _application
 
 
+def workspace_resource(lifecycle):
+    marker = "/providers/Microsoft.OperationalInsights/workspaces/"
+    rows = [rid for rid in lifecycle.value["inventory"]
+            if marker in rid and "/" not in rid.split(marker, 1)[1]]
+    if len(rows) != 1:
+        raise Blocked("exact_acceptance_workspace_required")
+    return rows[0]
+
+
 def _resources(lifecycle):
     inventory = lifecycle.value["inventory"]
-    selected = {}
+    selected = {"workspace": workspace_resource(lifecycle)}
     for name, marker in (
-        ("workspace", "/providers/Microsoft.OperationalInsights/workspaces/"),
         ("insights", "/providers/Microsoft.Insights/components/"),
     ):
         rows = [rid for rid in inventory if marker in rid and "/" not in rid.split(marker, 1)[1]]

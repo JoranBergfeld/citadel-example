@@ -346,6 +346,19 @@ only that fenced identity within its original active deadline and remaining
 accounting. Recovery and retry flags cannot be combined. The demo CLI itself
 still only reconciles; rerunning it never enables retry.
 
+Separately approved operator reconciliation may establish **quiescence after a
+partial commit**, not success or `failed_no_commit`. Preserve the original run,
+deadline, budgets, artifacts and failed acceptance attempt. Spend recovery reads
+from the original finite pool; verify expired/fenced execution, independently
+resolved child effects, two unchanged authority snapshots and release of only the
+exact owned admission lease. The private `<run-id>-quiescence.json` receipt binds
+those observations to the deployment/configuration and unchanged run; its digest
+is retained as `quiescenceProof`. Fresh runs and controls require that bound
+receipt. It never authorizes retry of the partial run or refunds its tickets.
+Audited source migrations that enlarge a child reservation must permanently
+disable the newly addressable marker positions in retained historical pools;
+the old grant must not gain new readable capacity.
+
 An explicit retry reacquires the global slot under its next fenced generation,
 charges another agent attempt and retains all previous model/token/read charges,
 per-execution counters and spent read tickets. It never recreates a budget,

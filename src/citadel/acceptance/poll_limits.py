@@ -53,8 +53,8 @@ class PollAcceptance:
             raise Blocked("poll_probe_intent_requires_reconciliation")
         run_id = report["scenarios"]["comparison"]["operation_id"]
         run = self.lifecycle.value["runs"][run_id]
-        if run["state"] != "succeeded" or any(row["state"] not in ("succeeded", "failed_no_commit")
-                                            for row in self.lifecycle.value["runs"].values()):
+        from citadel.operator.quiescence import runs_quiescent
+        if run["state"] != "succeeded" or not runs_quiescent(self.lifecycle):
             raise Blocked("completed_quiescent_comparison_required")
         accounts = storage_accounts(self.lifecycle)
         phase = {"state": "observing", "run_id": run_id, "started": time.time(), "deadline": run["deadline"],

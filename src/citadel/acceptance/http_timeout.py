@@ -33,9 +33,9 @@ class HttpTimeoutAcceptance:
             raise Blocked("http_timeout_intent_requires_reconciliation")
         run_id = report["scenarios"]["comparison"]["operation_id"]
         run = self.lifecycle.value["runs"][run_id]
+        from citadel.operator.quiescence import runs_quiescent
         if (run["state"] != "succeeded" or run["fixture"] != "base-source"
-                or any(row["state"] not in ("succeeded", "failed_no_commit")
-                       for row in self.lifecycle.value["runs"].values())
+                or not runs_quiescent(self.lifecycle)
                 or run["deadline"] - time.time() < 185):
             raise Blocked("completed_quiescent_comparison_with_original_time_required")
         accounts = storage_accounts(self.lifecycle)
