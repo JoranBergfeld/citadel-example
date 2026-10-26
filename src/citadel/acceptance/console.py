@@ -168,6 +168,22 @@ def reference_template(app, deployed):
     return value
 
 
+def reference_revision_template(value):
+    # The revision API omits these provider defaults returned by the app API.
+    result = template(value)
+    for container in result["containers"]:
+        if container.get("args") == []:
+            container.pop("args")
+        resources = container.get("resources", {})
+        if resources.get("ephemeralStorage") == "2Gi":
+            resources.pop("ephemeralStorage")
+    scale = result.get("scale", {})
+    for key, default in (("cooldownPeriod", 300), ("pollingInterval", 30)):
+        if scale.get(key) in (None, default):
+            scale.pop(key, None)
+    return result
+
+
 class ConsoleProbe:
     # Six built-in CLI ARM calls; each requests.Session permits at most 30 redirects.
     # This is one conservative local reservation, not 186 prepaid Azure ticket writes.
@@ -199,7 +215,8 @@ class ConsoleProbe:
             resource = app["app"] + "/revisions/" + revision
             self.admit()
             active = native.rest("get", resource, "2025-07-01")
-            if active["properties"].get("active") is not True or template(active["properties"]["template"]) != original:
+            if (active["properties"].get("active") is not True
+                    or reference_revision_template(active["properties"]["template"]) != reference_revision_template(original)):
                 raise Blocked("reference_console_revision_conflict")
             self.admit()
             replicas = native.rest("get", resource + "/replicas", "2025-07-01")

@@ -1,4 +1,5 @@
 import base64
+import copy
 import hashlib
 import json
 import os
@@ -19,6 +20,33 @@ from citadel.operator.state import Blocked
 
 
 class ConsoleTests(unittest.TestCase):
+    def test_revision_default_equivalence_keeps_nondefaults_strict_and_inputs_unchanged(self):
+        from citadel.acceptance.console import reference_revision_template
+        original = {"containers": [{"image": "pinned", "args": [],
+                    "resources": {"cpu": .5, "ephemeralStorage": "2Gi"}}],
+                    "scale": {"minReplicas": 1, "cooldownPeriod": 300, "pollingInterval": 30}}
+        before = copy.deepcopy(original)
+        omitted = {"containers": [{"image": "pinned", "resources": {"cpu": .5}}],
+                   "scale": {"minReplicas": 1}}
+        self.assertEqual(reference_revision_template(original), omitted)
+        self.assertEqual(original, before)
+        null_defaults = copy.deepcopy(omitted)
+        null_defaults["scale"].update(cooldownPeriod=None, pollingInterval=None)
+        self.assertEqual(reference_revision_template(null_defaults), omitted)
+        for path, value in (
+                (("scale", "cooldownPeriod"), 600), (("scale", "pollingInterval"), 60),
+                (("containers", 0, "args"), ["--different"]),
+                (("containers", 0, "resources", "ephemeralStorage"), "4Gi"),
+                (("containers", 0, "resources", "cpu"), 1),
+                (("containers", 0, "image"), "different")):
+            changed = copy.deepcopy(original)
+            target = changed
+            for key in path[:-1]:
+                target = target[key]
+            target[path[-1]] = value
+            with self.subTest(path=path):
+                self.assertNotEqual(reference_revision_template(changed), omitted)
+
     def test_reference_console_binds_actual_revision_identity_and_durable_intent_without_grants(self):
         identity = "/subscriptions/s/resourceGroups/g/providers/Microsoft.ManagedIdentity/userAssignedIdentities/d-reference-data"
         app = {"app": "/subscriptions/11111111-1111-1111-1111-111111111111/resourceGroups/g/providers/Microsoft.App/containerApps/d-reference-data",
@@ -26,10 +54,17 @@ class ConsoleTests(unittest.TestCase):
             "identityPrincipalId": "33333333-3333-3333-3333-333333333333",
             "image": "registry.example/image@sha256:" + "a" * 64}
         template = {"containers": [{"name": "reference-data", "image": app["image"],
-            "command": ["python", "-m", "citadel.runtime"], "env": [
+            "command": ["python", "-m", "citadel.runtime"], "args": [],
+            "resources": {"cpu": .5, "memory": "1Gi", "ephemeralStorage": "2Gi"}, "env": [
                 {"name": "AZURE_CLIENT_ID", "value": app["identityClientId"]},
                 {"name": "AZURE_PRINCIPAL_ID", "value": app["identityPrincipalId"]},
-                {"name": "CITADEL_TARGET", "value": "reference-data"}]}]}
+                {"name": "CITADEL_TARGET", "value": "reference-data"}]}],
+            "scale": {"minReplicas": 1, "maxReplicas": 1, "cooldownPeriod": 300, "pollingInterval": 30}}
+        revision_template = copy.deepcopy(template)
+        del revision_template["containers"][0]["args"]
+        del revision_template["containers"][0]["resources"]["ephemeralStorage"]
+        revision_template["scale"]["cooldownPeriod"] = None
+        revision_template["scale"]["pollingInterval"] = None
         deployed = {"identity": {"type": "UserAssigned", "userAssignedIdentities": {identity.lower(): {
             "clientId": app["identityClientId"], "principalId": app["identityPrincipalId"]}}},
             "properties": {"latestRevisionName": "d-reference-data--ready",
@@ -45,7 +80,7 @@ class ConsoleTests(unittest.TestCase):
             if resource.endswith("/replicas"):
                 return {"value": [{"name": "replica1", "properties": {"containers": [
                     {"name": "reference-data", "ready": True}]}}]}
-            return {"properties": {"active": True, "template": template}}
+            return {"properties": {"active": True, "template": revision_template}}
 
         lifecycle = SimpleNamespace(id="d", value={},
             native=SimpleNamespace(rest=rest),
@@ -62,8 +97,11 @@ class ConsoleTests(unittest.TestCase):
                     "manifest_sha256": sha256(self.manifest), "observations": [], "read_attempts": 3}
 
         console = Console()
-        result = ConsoleProbe(lifecycle, console=console, admit=lambda count=1: admissions.append(count)).execute(
-            app, "reference-data", "reference1", mode="origin-boundary", deadline=time.time() + 120)
+        try:
+            result = ConsoleProbe(lifecycle, console=console, admit=lambda count=1: admissions.append(count)).execute(
+                app, "reference-data", "reference1", mode="origin-boundary", deadline=time.time() + 120)
+        except Blocked as error:
+            self.fail("Actual revision-API default omissions must not block the identical app: " + error.code)
         self.assertEqual(result["run_id"], "reference1")
         self.assertEqual(lifecycle.value["probe_intents"]["reference1"]["state"], "observed")
         self.assertTrue(all(method == "get" for method, _, _ in calls))
