@@ -50,7 +50,7 @@ class TemplateTests(unittest.TestCase):
         self.assertEqual(resource["identity"]["type"], "UserAssigned")
         self.assertEqual(resource["properties"]["template"]["scale"], {"minReplicas": 1, "maxReplicas": 1})
         self.assertEqual(resource["properties"]["template"]["containers"][0]["resources"], {"cpu": "[json('0.5')]", "memory": "1Gi"})
-        self.assertEqual(resource["properties"]["configuration"]["ingress"]["clientCertificateMode"], "require")
+        self.assertEqual(resource["properties"]["configuration"]["ingress"]["clientCertificateMode"], "accept")
         self.assertFalse(resource["properties"]["configuration"]["ingress"]["allowInsecure"])
         team = self.module("team-")
         grants = team["variables"]["grantsByTeam"]

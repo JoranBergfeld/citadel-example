@@ -33,7 +33,9 @@ def fixture():
                 "protocol-version": "2025-11-25" if role == "reference-data" else "1.0.0",
                 "gateway-address": gateway + "/" + role + ("/mcp" if role == "reference-data" else "/a2a")}}})
         deployed[role] = {"identity": {"userAssignedIdentities": {app["identity"].lower(): {}}},
-            "properties": {"provisioningState": "Succeeded", "template": {"containers": [{
+            "properties": {"provisioningState": "Succeeded",
+                "configuration": {"ingress": {"clientCertificateMode": "Accept", "allowInsecure": False}},
+                "template": {"containers": [{
                 "image": app["image"], "command": ["python", "-m", "citadel.runtime"], "args": [],
                 "env": [{"name": key, "value": value} for key, value in {
                     "CITADEL_TARGET": role, "AZURE_PRINCIPAL_ID": app["identityPrincipalId"],
@@ -80,6 +82,10 @@ class InventoryTests(unittest.TestCase):
             lambda value: value["deployment"]["properties"].update(definitionId="/unrelated-definition"),
             lambda value: next(iter(value["applications"].values()))["identity"]["userAssignedIdentities"].update(
                 {"/subscriptions/foreign/identities/unallocated": {}}),
+            lambda value: next(iter(value["applications"].values()))["properties"]["configuration"]["ingress"].update(
+                clientCertificateMode="ignore"),
+            lambda value: next(iter(value["applications"].values()))["properties"]["configuration"]["ingress"].update(
+                allowInsecure=True),
         ):
             changed = copy.deepcopy(documents)
             mutate(changed)

@@ -59,8 +59,9 @@ class TrustConfiguration:
 class GatewayTrust:
     """Wrap the whole ASGI app, outside routers/mounts.
 
-    ACA must require client certificates. Signed, body-bound APIM context also
-    prevents caller/XFCC header forgery from becoming authorization. Each
+    ACA accepts and forwards client certificates; this wrapper requires the
+    allowlisted certificate and signed, body-bound APIM context. Neither
+    missing certificates nor caller/XFCC header forgery grant authorization. Each
     backend knows only its own context-validation key, never the gateway key.
     """
 

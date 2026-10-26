@@ -177,7 +177,10 @@ secretRef `CITADEL_CONTEXT_KEYS`. Production Azure clients must use only the
 assigned `AZURE_CLIENT_ID` with explicit `ManagedIdentityCredential`, never
 `DefaultAzureCredential`/operator fallback.
 
-ACA requires a TLS client certificate. Middleware additionally authorizes the
+ACA uses `clientCertificateMode: accept` to forward presented client certificates.
+The operator approved this after live APIM-to-ACA TLS failed in `require` mode
+but discovery succeeded in `accept` mode with unchanged application trust.
+HTTPS remains mandatory. Middleware requires and authorizes the
 actual forwarded SHA256 against the configured current-validity allowlist and
 rejects ambiguous/duplicate XFCC. Certificate **presence is insufficient**.
 It also requires APIM's HMAC-SHA256 context signature. This prevents arbitrary

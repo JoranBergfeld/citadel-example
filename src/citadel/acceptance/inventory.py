@@ -22,12 +22,14 @@ def _principal(value):
     return hashlib.sha256(str(UUID(value)).encode()).hexdigest()
 
 
-def _app(name, identities, container):
+def _app(name, identities, container, ingress):
     environment = {item["name"]: item.get("value") for item in container["env"]}
     if len(environment) != len(container["env"]):
         raise ValueError("Duplicate actual environment fields")
     return {"name": name, "runtime_identity": _principal(environment["AZURE_PRINCIPAL_ID"]),
             "sha256": sha256({"identity": sorted(rid.lower() for rid in identities), "image": container["image"],
+                "ingress": {"clientCertificateMode": ingress["clientCertificateMode"].lower(),
+                            "allowInsecure": ingress["allowInsecure"]},
                 "command": container["command"], "args": container["args"],
                 "target": environment["CITADEL_TARGET"], "principal": environment["AZURE_PRINCIPAL_ID"],
                 "client": environment["AZURE_CLIENT_ID"], "quota": environment["CITADEL_MODEL_TOKENS_PER_MINUTE"]})}
@@ -54,7 +56,8 @@ def inventory_inputs(lifecycle):
                 {"name": key, "value": item} for key, item in {
                     "CITADEL_TARGET": name, "AZURE_PRINCIPAL_ID": app["identityPrincipalId"],
                     "AZURE_CLIENT_ID": app["identityClientId"],
-                    "CITADEL_MODEL_TOKENS_PER_MINUTE": str(lifecycle.config["modelTokensPerMinute"])}.items()]}))
+                    "CITADEL_MODEL_TOKENS_PER_MINUTE": str(lifecycle.config["modelTokensPerMinute"])}.items()]},
+            {"clientCertificateMode": "accept", "allowInsecure": False}))
     return {"target": sha256(value["outputs"]["inventory"]["capabilities"]["service"].lower()),
         "created": timestamp(request["resourceCreatedAt"]).timestamp(),
         "environments": sorted(environments, key=lambda row: row["name"]),
@@ -74,7 +77,8 @@ def observe_inventory(lifecycle, documents):
             containers = document["properties"]["template"]["containers"]
             if document["properties"]["provisioningState"] != "Succeeded" or len(containers) != 1:
                 raise ValueError("Actual application is not provisioned")
-            applications.append(_app(name, document["identity"]["userAssignedIdentities"], containers[0]))
+            applications.append(_app(name, document["identity"]["userAssignedIdentities"], containers[0],
+                                     document["properties"]["configuration"]["ingress"]))
         if center["properties"]["provisioningState"] != "Succeeded":
             raise ValueError("Actual inventory service is not provisioned")
         plan = documents["plan"]

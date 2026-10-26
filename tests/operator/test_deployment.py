@@ -185,7 +185,9 @@ class AzureFixture:
                 "identity-kind": "Azure user-assigned managed identity; not Entra Agent ID"},
                 "kind": "testing", "server": {"type": "Azure compute service"}}})
             self.app_documents[aid] = {"identity": {"userAssignedIdentities": {identity.lower(): {}}},
-                "properties": {"provisioningState": "Succeeded", "template": {"containers": [{
+                "properties": {"provisioningState": "Succeeded",
+                    "configuration": {"ingress": {"clientCertificateMode": "Accept", "allowInsecure": False}},
+                    "template": {"containers": [{
                     "image": app["image"], "command": app["command"], "args": app["args"],
                     "env": [{"name": "CITADEL_TARGET", "value": name},
                             {"name": "AZURE_PRINCIPAL_ID", "value": principal},

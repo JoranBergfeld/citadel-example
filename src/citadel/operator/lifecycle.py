@@ -587,7 +587,10 @@ class Lifecycle:
             observed_apps[record["name"]] = deployed
             containers = deployed["properties"]["template"]["containers"]
             environment = {e["name"]: e.get("value") for e in containers[0]["env"]}
+            ingress = deployed["properties"]["configuration"]["ingress"]
             if (deployed["properties"]["provisioningState"] != "Succeeded"
+                    or ingress["clientCertificateMode"].lower() != "accept"
+                    or ingress["allowInsecure"] is not False
                     or len(deployed["identity"]["userAssignedIdentities"]) != 1
                     or {rid.lower() for rid in deployed["identity"]["userAssignedIdentities"]} != {app["identity"].lower()}
                     or len(containers) != 1 or containers[0]["image"] != app["image"]

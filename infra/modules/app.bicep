@@ -64,7 +64,7 @@ resource app 'Microsoft.App/containerApps@2025-01-01' = {
         targetPort: 8000
         transport: 'http'
         allowInsecure: false
-        clientCertificateMode: 'require'
+        clientCertificateMode: 'accept'
       }
       registries: [{ server: '${registryName}.azurecr.io', identity: identity.id }]
       secrets: [
