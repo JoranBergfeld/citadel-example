@@ -78,7 +78,9 @@ class CollectionTests(unittest.TestCase):
         query = query_for_window(100, 101)
         self.assertNotIn("RequestIdHeader", query)
         self.assertIn("request_id=tostring(CorrelationId), client_request_id=tostring(ClientRequestId)", query)
-        self.assertIn('target=hash_sha256(extract(@"^[^?]+",0,tostring(Uri)))', query)
+        self.assertIn(
+            r'target=hash_sha256(replace_regex(extract(@"^[^?]+",0,tostring(Uri)),'
+            r'@"^(https://[^/:?#]+):443(/|$)",@"\1\2"))', query)
 
     def test_ingress_queries_only_observed_service_ids_targets_and_individual_windows(self):
         query = query_for_window(90, 110, ingress=[{

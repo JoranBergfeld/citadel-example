@@ -123,7 +123,7 @@ union
  | project source='storage', request_id=tostring(CorrelationId), client_request_id=tostring(ClientRequestId),
  status_code=toint(StatusCode), runtime_identity=hash_sha256(tolower(tostring(RequesterObjectId))),
  observed=todouble(datetime_diff('millisecond',TimeGenerated,datetime(1970-01-01)))/1000,
- method=tostring(OperationName), target=hash_sha256(extract(@"^[^?]+",0,tostring(Uri)))),
+ method=tostring(OperationName), target=hash_sha256(replace_regex(extract(@"^[^?]+",0,tostring(Uri)),@"^(https://[^/:?#]+):443(/|$)",@"\\1\\2"))),
 (ContainerAppHTTPLogs | where StartTime between (begin .. end)
  | extend request_id=tostring(RequestId),
  target=hash_sha256(strcat('https://',tolower(tostring(Authority)),extract(@"^[^?]+",0,tostring(Path))))
