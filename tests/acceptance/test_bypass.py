@@ -3,6 +3,7 @@ import unittest
 from tests.acceptance.storage_fixture import storage_inventory
 from contextlib import nullcontext
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from citadel.acceptance.bypass import BypassControls, bypass_status
 from citadel.acceptance.reports import automated_status
@@ -44,6 +45,17 @@ def proof():
 
 
 class BypassTests(unittest.TestCase):
+    def test_bypass_requests_exactly_four_agents_and_keeps_missing_proof_blocked(self):
+        from citadel.acceptance.probes import AGENTS
+        from citadel.acceptance.storage_harness import StorageAcceptance
+        lifecycle = SimpleNamespace(value={"runs": {}}, state=SimpleNamespace(save=lambda: None))
+        with patch.object(StorageAcceptance, "execute", side_effect=Blocked("external_worker_unavailable")) as execute:
+            result = BypassControls(lifecycle, export=lambda report: report).run(
+                "suite1", fingerprints={"fingerprint": "a" * 64})
+        self.assertEqual(execute.call_args.kwargs.get("workloads"), frozenset(AGENTS))
+        self.assertEqual(result["acceptance"], "blocked")
+        self.assertEqual(len(result["required_checks"]), 4)
+
     def test_unfinished_and_completed_collection_windows_share_one_600_second_allowance(self):
         from citadel.acceptance.collection import collection_remaining
         report = {"collection_windows": {"short": {"started": 100, "finished": 115},
@@ -87,14 +99,15 @@ class BypassTests(unittest.TestCase):
         self.assertNotEqual(automated_status(report), "pass")
 
     def test_failed_real_provider_dispatch_is_persisted_and_never_replayed_on_resume(self):
+        from citadel.acceptance.probes import AGENTS
         calls, exports, saves = [], [], []
 
         def blob(*arguments):
             calls.append(arguments)
             raise Blocked("external_storage_fixture_unavailable")
 
-        lifecycle = SimpleNamespace(value={"inventory": storage_inventory(),
-            "runs": {}, "outputs": {"appInventory": []}},
+        lifecycle = SimpleNamespace(id="deployment", value={"inventory": storage_inventory(),
+            "runs": {}, "outputs": {"appInventory": [{"app": "/deployment-" + actor} for actor in AGENTS]}},
             native=SimpleNamespace(blob=blob), state=SimpleNamespace(save=lambda: saves.append(True)))
 
         def export(report):

@@ -376,6 +376,10 @@ Bounded exhaustion is valid evidence, not a completed three-candidate comparison
 The fourth invokes the task 20 fixed-purpose denied-bypass hook **before** a fresh,
 separately correlated permitted Planner run. Without real target-identity deny/
 allowed-control/no-effect evidence it is blocked, never simulated under operator rights.
+Its storage controls run the four agent workloads; the standalone Reference Data
+MCP console probe is not part of this gate. The full storage acceptance matrix
+still defaults to all five workloads. Normal permitted collaboration still uses
+Reference Data MCP through APIM; no denial or service-proof requirement is relaxed.
 
 ## Rotation and revocation
 

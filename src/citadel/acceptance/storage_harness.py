@@ -8,7 +8,7 @@ from azure.core.exceptions import AzureError
 
 from citadel.operations import OperationError, identity
 from citadel.operator.state import Blocked
-from .coverage import CONTAINERS
+from .coverage import CONTAINERS, STORAGE
 from .oracle import hash_value
 from .revision import RevisionProbe
 from .storage_probes import StorageControls, evaluate_storage, storage_target
@@ -48,11 +48,15 @@ class StorageAcceptance:
     def __init__(self, lifecycle):
         self.lifecycle = lifecycle
 
-    def execute(self, report):
+    def execute(self, report, *, workloads=None):
+        workloads = frozenset(STORAGE) if workloads is None else workloads
+        if not isinstance(workloads, frozenset) or not workloads or not workloads <= STORAGE.keys():
+            raise Blocked("known_immutable_storage_workloads_required")
         if "storage_phase" in report:
             raise Blocked("storage_probe_intent_requires_reconciliation")
         accounts = storage_accounts(self.lifecycle)
         phase = {"state": "dispatching", "deadline": time.time() + 900, "read_attempts": 0,
+                 "workloads": sorted(workloads),
                  "seeds": {}, "snapshots": {}, "observations": [], "identities": {}}
         report["storage_phase"] = phase
         self.lifecycle.state.save()
@@ -69,11 +73,20 @@ class StorageAcceptance:
         previous = getattr(native, "deadline", None)
         native.deadline = min(previous or float("inf"), time.monotonic() + 900)
         try:
+            apps, seen = [], set()
+            for app in self.lifecycle.value["outputs"]["appInventory"]:
+                actor = app["app"].split("/")[-1].removeprefix(self.lifecycle.id + "-")
+                if actor not in STORAGE or actor in seen:
+                    raise Blocked("storage_workload_inventory_conflict")
+                seen.add(actor)
+                if actor in workloads:
+                    apps.append((actor, app))
+            if not workloads <= seen:
+                raise Blocked("selected_storage_workload_missing")
             phase["seeds"] = controls.prepare()
             self.lifecycle.state.save()
             driver = RevisionProbe(self.lifecycle, admit=admit)
-            for app in self.lifecycle.value["outputs"]["appInventory"]:
-                actor = app["app"].split("/")[-1].removeprefix(self.lifecycle.id + "-")
+            for actor, app in apps:
                 phase["identities"][actor] = hashlib.sha256(str(UUID(app["identityPrincipalId"])).encode()).hexdigest()
                 before = controls.snapshot()
                 if any(before[name]["sha256"] != phase["seeds"][name]["sha256"] for name in CONTAINERS):

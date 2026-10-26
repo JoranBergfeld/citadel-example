@@ -6,6 +6,7 @@ from citadel.operations import identity
 from citadel.operator.state import Blocked
 from .collection import AzureQuery, Collector, collection_remaining
 from .proof_gate import evaluate_check
+from .probes import AGENTS
 from .storage_harness import StorageAcceptance
 
 
@@ -52,7 +53,7 @@ class BypassControls:
             self.lifecycle.state.save()
             self.export(report)
             try:
-                StorageAcceptance(self.lifecycle).execute(report)
+                StorageAcceptance(self.lifecycle).execute(report, workloads=frozenset(AGENTS))
                 report["state"] = "observed"
             except (Blocked, ValueError, TimeoutError):
                 report["state"] = "blocked"
