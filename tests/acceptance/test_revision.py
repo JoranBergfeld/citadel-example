@@ -1,6 +1,7 @@
 import base64
 import copy
 import json
+import time
 import unittest
 from types import SimpleNamespace
 
@@ -9,7 +10,9 @@ from citadel.acceptance.revision import RevisionProbe
 
 class NativeFixture:
     def __init__(self):
-        self.app = {"properties": {"template": {"containers": [{
+        self.app = {"properties": {"provisioningState": "Succeeded",
+            "latestRevisionName": "normal", "latestReadyRevisionName": "normal",
+            "template": {"containers": [{
             "name": "candidate-planner", "image": "registry.example/image@sha256:" + "a" * 64,
             "command": ["python", "-m", "citadel.runtime"], "args": [],
             "env": [{"name": "CITADEL_BLOB_URL", "value": "https://planning.blob.core.windows.net"},
@@ -23,6 +26,8 @@ class NativeFixture:
         assert method == "patch" and version == "2025-01-01"
         self.patches.append(copy.deepcopy(body))
         self.app["properties"]["template"] = copy.deepcopy(body["properties"]["template"])
+        self.app["properties"]["latestRevisionName"] = "revision-" + str(len(self.patches))
+        self.app["properties"]["latestReadyRevisionName"] = self.app["properties"]["latestRevisionName"]
         return copy.deepcopy(self.app)
 
     def blob_read(self, account, container, name):
@@ -31,7 +36,87 @@ class NativeFixture:
         raise AssertionError("Unexpected blob read")
 
 
+class AsyncRestoreFixture(NativeFixture):
+    def __init__(self, *, never_ready=False):
+        super().__init__()
+        self.never_ready, self.restoration_gets = never_ready, 0
+
+    def rest(self, method, resource, version, body=None):
+        if method == "patch" and len(self.patches) == 1:
+            self.worker = copy.deepcopy(self.app)
+        result = super().rest(method, resource, version, body)
+        if method == "get" and len(self.patches) == 2:
+            self.restoration_gets += 1
+            if self.restoration_gets == 1:
+                return copy.deepcopy(self.worker)
+            if self.never_ready or self.restoration_gets == 2:
+                result["properties"]["provisioningState"] = "Updating"
+                result["properties"]["latestReadyRevisionName"] = self.worker["properties"]["latestRevisionName"]
+        return result
+
+
 class RevisionTests(unittest.TestCase):
+    def test_restoration_waits_through_stale_worker_and_pending_normal_revision(self):
+        started = time.time()
+        native, now, admissions, saved = AsyncRestoreFixture(), [started], [], []
+        value = {}
+        lifecycle = SimpleNamespace(native=native, value=value, state=SimpleNamespace(
+            save=lambda: saved.append(copy.deepcopy(value))))
+        app = {"app": "/d-candidate-planner", "identityClientId": "11111111-1111-1111-1111-111111111111",
+               "image": native.app["properties"]["template"]["containers"][0]["image"]}
+        try:
+            result = RevisionProbe(lifecycle, clock=lambda: now[0],
+                sleep=lambda seconds: now.__setitem__(0, now[0] + seconds),
+                admit=lambda: admissions.append(now[0])).execute(
+                    app, "candidate-planner", "r1", deadline=started + 90)
+        except ValueError as error:
+            self.fail("Asynchronous normal revision restoration must be observed, not rejected: " + str(error))
+        self.assertEqual(result["run_id"], "r1")
+        self.assertEqual(native.restoration_gets, 3)
+        self.assertEqual(now[0] - started, 30)
+        self.assertEqual(len(admissions), 6)
+        self.assertEqual(len(native.patches), 2)
+        self.assertTrue(any(item.get("probe_intents", {}).get("r1", {}).get("state") == "restoring" for item in saved))
+        self.assertEqual(value["probe_intents"]["r1"]["state"], "observed")
+
+    def test_normal_template_without_ready_revision_expires_without_repatch_or_deadline_extension(self):
+        started = time.time()
+        native, now, admissions = AsyncRestoreFixture(never_ready=True), [started], []
+        lifecycle = SimpleNamespace(native=native, value={}, state=SimpleNamespace(save=lambda: None))
+        app = {"app": "/d-candidate-planner", "identityClientId": "11111111-1111-1111-1111-111111111111",
+               "image": native.app["properties"]["template"]["containers"][0]["image"]}
+        with self.assertRaises(TimeoutError):
+            RevisionProbe(lifecycle, clock=lambda: now[0],
+                sleep=lambda seconds: now.__setitem__(0, now[0] + seconds),
+                admit=lambda: admissions.append(now[0])).execute(
+                    app, "candidate-planner", "r1", deadline=started + 31)
+        self.assertEqual(now[0] - started, 31)
+        self.assertEqual(native.restoration_gets, 3)
+        self.assertEqual(len(native.patches), 2)
+        self.assertTrue(all(instant < started + 31 for instant in admissions))
+        self.assertEqual(lifecycle.value["probe_intents"]["r1"]["deadline"], started + 31)
+        self.assertEqual(lifecycle.value["probe_intents"]["r1"]["state"], "indeterminate")
+
+    def test_restoration_rejects_unrelated_template_without_another_patch(self):
+        class ConcurrentFixture(AsyncRestoreFixture):
+            def rest(self, *arguments, **options):
+                result = super().rest(*arguments, **options)
+                if self.restoration_gets == 2:
+                    result["properties"]["template"]["containers"][0]["image"] = "unrelated"
+                return result
+
+        started = time.time()
+        native, now = ConcurrentFixture(), [started]
+        lifecycle = SimpleNamespace(native=native, value={}, state=SimpleNamespace(save=lambda: None))
+        app = {"app": "/d-candidate-planner", "identityClientId": "11111111-1111-1111-1111-111111111111",
+               "image": native.app["properties"]["template"]["containers"][0]["image"]}
+        with self.assertRaisesRegex(ValueError, "Concurrent revision modification"):
+            RevisionProbe(lifecycle, clock=lambda: now[0],
+                sleep=lambda seconds: now.__setitem__(0, now[0] + seconds)).execute(
+                    app, "candidate-planner", "r1", deadline=started + 90)
+        self.assertEqual(len(native.patches), 2)
+        self.assertEqual(lifecycle.value["probe_intents"]["r1"]["state"], "restoring")
+
     def test_direct_model_manifest_survives_exact_revision_dispatch_without_any_credential(self):
         native = NativeFixture()
         lifecycle = SimpleNamespace(native=native, value={}, state=SimpleNamespace(save=lambda: None))

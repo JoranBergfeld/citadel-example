@@ -92,17 +92,26 @@ class RevisionProbe:
                 current = template(native.rest("get", app["app"], "2025-01-01")["properties"]["template"])
                 if current != replacement:
                     raise ValueError("Concurrent revision modification; do not overwrite")
-                native.rest("patch", app["app"], "2025-01-01", {"properties": {"template": original}})
-                if self.admit is not None:
-                    self.admit()
-                restored = template(native.rest("get", app["app"], "2025-01-01")["properties"]["template"])
-                if restored != original:
-                    raise ValueError("Normal revision restoration unverified")
-                intents[run_id]["state"] = "observed"
-                intents[run_id]["sha256"] = sha256(result)
+                intents[run_id].update(state="restoring", sha256=sha256(result))
                 self.lifecycle.state.save()
-                return result
+                native.rest("patch", app["app"], "2025-01-01", {"properties": {"template": original}})
+                while self.clock() < request["deadline"]:
+                    if self.admit is not None:
+                        self.admit()
+                    properties = native.rest("get", app["app"], "2025-01-01")["properties"]
+                    restored = template(properties["template"])
+                    if restored not in (original, replacement):
+                        raise ValueError("Concurrent revision modification; do not overwrite")
+                    if (restored == original and properties.get("provisioningState") == "Succeeded"
+                            and properties.get("latestRevisionName")
+                            and properties["latestRevisionName"] == properties.get("latestReadyRevisionName")
+                            and self.clock() < request["deadline"]):
+                        intents[run_id]["state"] = "observed"
+                        self.lifecycle.state.save()
+                        return result
+                    self.sleep(min(15, max(0, request["deadline"] - self.clock())))
+                break
             self.sleep(min(15, max(0, request["deadline"] - self.clock())))
         intents[run_id]["state"] = "indeterminate"
         self.lifecycle.state.save()
-        raise TimeoutError("Probe revision deadline expired; reconcile/repair explicitly")
+        raise TimeoutError("Probe revision or restoration deadline expired; reconcile/repair explicitly")
