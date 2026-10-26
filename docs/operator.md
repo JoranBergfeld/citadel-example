@@ -355,9 +355,14 @@ exact owned admission lease. The private `<run-id>-quiescence.json` receipt bind
 those observations to the deployment/configuration and unchanged run; its digest
 is retained as `quiescenceProof`. Fresh runs and controls require that bound
 receipt. It never authorizes retry of the partial run or refunds its tickets.
+An exhausted pool needs a separately approved, bounded operator-only observation
+allowance for reconciliation; this never adds tickets to the workload pool.
 Audited source migrations that enlarge a child reservation must permanently
 disable the newly addressable marker positions in retained historical pools;
 the old grant must not gain new readable capacity.
+The twenty-candidate exhaustion demo normally polls every four minutes, with a
+final observation before the original deadline. Other demos retain the normal
+15-second cadence; workload read ceilings and deadlines are unchanged.
 
 An explicit retry reacquires the global slot under its next fenced generation,
 charges another agent attempt and retains all previous model/token/read charges,

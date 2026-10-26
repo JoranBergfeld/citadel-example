@@ -22,6 +22,10 @@ FIXTURES = {"comparison": "base-source", "replacement": "missing-width-replaceme
             "exhaustion": "no-alternative", "denied-bypass": "base-source"}
 
 
+def demo_poll_delay(scenario, remaining):
+    return min(240, max(15, remaining - 15)) if scenario == "exhaustion" else 15
+
+
 def acceptance_hook(lifecycle, check_id, run_id):
     lifecycle.require_plan_observation()
     if lifecycle.value["phase"] != "deployed_unverified":
@@ -203,7 +207,9 @@ def scenario_command(lifecycle, args):
                     lifecycle.state.save()
             while time.time() < existing["deadline"]:
                 if args.command == "demo":
-                    await asyncio.sleep(15)
+                    await asyncio.sleep(demo_poll_delay(args.scenario, existing["deadline"] - time.time()))
+                    if time.time() >= existing["deadline"]:
+                        break
                 status = await client.poll(args.run_id, existing, existing["deadline"],
                     save=lifecycle.state.save, enforce_interval=args.command != "demo")
                 existing["state"] = status["state"]
