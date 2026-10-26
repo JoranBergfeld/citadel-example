@@ -240,8 +240,10 @@ class ConsoleProbe:
                     "https://" + deployed["properties"]["configuration"]["ingress"]["fqdn"],
                     ".azurecontainerapps.io")
                 intent["origin"] = request["origin"]
+            environment = {row["name"]: row.get("value") for row in original["containers"][0]["env"]}
             validate_request(SimpleNamespace(target=workload, client_id=app["identityClientId"],
-                operations_container=None, subscription_secret=None), request, enabled=True)
+                operations_container=None, subscription_secret=None,
+                blob=endpoint(environment["CITADEL_BLOB_URL"], ".blob.core.windows.net")), request, enabled=True)
             encoded = base64.b64encode(canonical_bytes(request)).decode()
             pieces = app["app"].split("/")
             if (len(pieces) != 9 or pieces[1] != "subscriptions" or pieces[3] != "resourceGroups"

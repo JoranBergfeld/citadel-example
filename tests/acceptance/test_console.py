@@ -58,6 +58,7 @@ class ConsoleTests(unittest.TestCase):
             "resources": {"cpu": .5, "memory": "1Gi", "ephemeralStorage": "2Gi"}, "env": [
                 {"name": "AZURE_CLIENT_ID", "value": app["identityClientId"]},
                 {"name": "AZURE_PRINCIPAL_ID", "value": app["identityPrincipalId"]},
+                {"name": "CITADEL_BLOB_URL", "value": "https://referencefixture.blob.core.windows.net"},
                 {"name": "CITADEL_TARGET", "value": "reference-data"}]}],
             "scale": {"minReplicas": 1, "maxReplicas": 1, "cooldownPeriod": 300, "pollingInterval": 30}}
         revision_template = copy.deepcopy(template)
@@ -87,12 +88,16 @@ class ConsoleTests(unittest.TestCase):
             state=SimpleNamespace(save=lambda: saved.append(True)))
 
         class Console:
+            corrupt = False
+            calls = 0
+
             def run(self, arguments, *, deadline):
+                self.calls += 1
                 self.arguments = arguments
                 intent = list(lifecycle.value["probe_intents"].values())[-1]
                 self.manifest = intent["manifest"]
                 assert intent["state"] == "dispatching" and saved
-                return {"schema_version": 1, "run_id": "reference1", "state": "complete",
+                return {"schema_version": 1, "run_id": "wrong-run" if self.corrupt else self.manifest["run_id"], "state": "complete",
                     "runtime_identity": hashlib.sha256(app["identityPrincipalId"].encode()).hexdigest(),
                     "manifest_sha256": sha256(self.manifest), "observations": [], "read_attempts": 3}
 
@@ -115,6 +120,26 @@ class ConsoleTests(unittest.TestCase):
             ConsoleProbe(lifecycle, console=console, admit=lambda count=1: None).execute(
                 app, "reference-data", "reference1", mode="origin-boundary")
         self.assertEqual(sum(admissions), 190)
+        from tests.acceptance.storage_fixture import storage_accounts
+        accounts = storage_accounts()
+        storage = {"suite_id": "suite1", "accounts": accounts,
+                   "targets": {key: {"sha256": "a" * 64, "etag": '"known"'} for key in accounts}}
+        try:
+            result = ConsoleProbe(lifecycle, console=console, admit=lambda count=1: admissions.append(count)).execute(
+                app, "reference-data", "reference3", mode="storage-boundaries",
+                storage=storage, deadline=time.time() + 120)
+        except (Blocked, AttributeError) as error:
+            self.fail("Storage validation must bind the actual deployed Blob endpoint: " + type(error).__name__)
+        self.assertEqual(result["run_id"], "reference3")
+        self.assertEqual(console.manifest["storage"], storage)
+        changed = copy.deepcopy(storage)
+        changed["accounts"]["reference"] = "https://referenceother.blob.core.windows.net"
+        with self.assertRaises(Blocked):
+            ConsoleProbe(lifecycle, console=console, admit=lambda count=1: admissions.append(count)).execute(
+                app, "reference-data", "reference4", mode="storage-boundaries",
+                storage=changed, deadline=time.time() + 120)
+        self.assertEqual(console.calls, 2, "A foreign allocation must fail before console dispatch")
+        console.corrupt = True
         with self.assertRaises(Blocked):
             ConsoleProbe(lifecycle, console=console, admit=lambda count=1: None).execute(
                 app, "reference-data", "reference2", mode="origin-boundary")
