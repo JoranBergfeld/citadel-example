@@ -3,6 +3,8 @@ import json
 import unittest
 from types import SimpleNamespace
 
+from azure.core.exceptions import ResourceNotFoundError
+
 from citadel.acceptance.coverage import CONTAINERS
 from citadel.acceptance.storage_probes import StorageControls, storage_target
 from citadel.operations import OperationError
@@ -13,6 +15,8 @@ class BlobProvider:
         self.objects = {}
         self.requests = []
         for container in CONTAINERS:
+            if container in ("candidate-lists", "briefs"):
+                continue
             name = "bundle-manifest.json" if container == "reference" else "ledger-v1.json"
             self.objects[container, name] = json.dumps({
                 "schema_version": 1, "drafts": {"known": {"private_notes": "not-for-reports"}},
@@ -58,6 +62,25 @@ class BlobProvider:
 
 
 class StorageControlTests(unittest.TestCase):
+    def test_disposable_planning_targets_use_the_real_authority_ledgers(self):
+        provider = BlobProvider()
+        for container in ("candidate-lists", "briefs"):
+            self.assertNotIn((container, "ledger-v1.json"), provider.objects)
+        original = dict(provider.objects)
+        controls = StorageControls(provider, account="https://allocated.blob.core.windows.net",
+                                   suite_id="suite1", admit=lambda: None)
+        try:
+            controls.prepare()
+        except ResourceNotFoundError as error:
+            self.fail(f"Real planning authorities must seed controls without fictional source blobs: {type(error).__name__}")
+        for destination, source in (("candidate-lists", "planner-operations"), ("briefs", "author-operations")):
+            self.assertEqual(provider.objects[destination, storage_target("suite1")],
+                             original[source, "ledger-v1.json"])
+            self.assertNotIn((destination, "ledger-v1.json"), provider.objects)
+            self.assertNotIn(("GET", destination, "ledger-v1.json"), provider.requests)
+        for key, content in original.items():
+            self.assertEqual(provider.objects[key], content)
+
     def test_observer_routes_each_container_to_its_inventoried_team_account(self):
         from citadel.acceptance.storage_accounts import storage_accounts
         groups = {
@@ -129,8 +152,9 @@ class StorageControlTests(unittest.TestCase):
                 documents[actor] | {"schema_version": 1}).encode()
         original, admissions = dict(provider.objects), []
         from citadel.evidence.manifests import sha256
+        from citadel.runtime.tickets import CAPACITY
         provider.objects["assessor-operations", "read-tickets/" + sha256(
-            "candidate-planner/invoke/assess2") + "/019.json"] = b"spent"
+            "candidate-planner/invoke/assess2") + f"/{CAPACITY['evidence-assessor'] - 1:03}.json"] = b"spent"
         original = dict(provider.objects)
         controls = StorageControls(provider, account="https://allocated.blob.core.windows.net",
                                    suite_id="suite1", admit=lambda: admissions.append(1))
@@ -171,9 +195,11 @@ class StorageControlTests(unittest.TestCase):
         self.assertEqual(len(admissions), 27)
         for container in CONTAINERS:
             source = "bundle-manifest.json" if container == "reference" else "ledger-v1.json"
-            self.assertEqual(provider.objects[container, storage_target("suite1")], original[container, source])
+            source_container = {"candidate-lists": "planner-operations", "briefs": "author-operations"}.get(
+                container, container)
+            self.assertEqual(provider.objects[container, storage_target("suite1")], original[source_container, source])
             self.assertEqual(snapshots[container]["sha256"],
-                             hashlib.sha256(original[container, source]).hexdigest())
+                             hashlib.sha256(original[source_container, source]).hexdigest())
             self.assertEqual(seeds[container]["caller"], "operator")
             self.assertTrue(seeds[container]["request_id"].startswith("actual-provider-"))
         self.assertNotIn("not-for-reports", str(seeds) + str(snapshots))

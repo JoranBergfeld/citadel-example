@@ -178,7 +178,9 @@ class StorageControls:
         seeds = {}
         for container in CONTAINERS:
             original = "bundle-manifest.json" if container == "reference" else "ledger-v1.json"
-            _, content = self._read(container, original)
+            source_container = {"candidate-lists": "planner-operations", "briefs": "author-operations"}.get(
+                container, container)
+            _, content = self._read(source_container, original)
             if container in ("drafts", "findings"):
                 try:
                     source = json.loads(content)
