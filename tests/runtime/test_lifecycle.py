@@ -2,11 +2,14 @@ import asyncio
 import json
 import time
 import unittest
+from unittest.mock import patch
 
 import httpx
 import httpx2
 from agent_framework_a2a import A2AAgent
 
+from citadel.operations import Operations
+from citadel.operations.limits import Accounting
 from citadel.operations.testing import MemoryLedger
 from citadel.runtime.agents import Runtime, agent_application
 from citadel.runtime.model import GovernedModel
@@ -14,6 +17,36 @@ from test_reference import signed, trust
 
 
 class LifecycleTests(unittest.IsolatedAsyncioTestCase):
+    async def test_protocol_dispatch_keeps_signed_gateway_correlation_separate_from_jsonrpc_id(self):
+        ledger = MemoryLedger()
+        payload = {"operation_id": "run1", "run_id": "run1", "fixture": "base-source"}
+        budget = await Accounting(ledger, workload="candidate-planner").start_run("run1")
+        await Operations(ledger, workload="candidate-planner").accept(
+            "operator", "invoke", "run1", payload, run_id="run1", deadline=budget["deadline"])
+        await ledger.ticket_store.open_pool("operator/invoke/run1", exclusive=True)
+        runtime = Runtime("candidate-planner", ledger, model=None, peers=None,
+                          gateway_url="https://gateway.test")
+        app = agent_application(runtime, trust("candidate-planner"))
+        body = json.dumps({"jsonrpc": "2.0", "id": "jsonrpc-message-id", "method": "SendMessage", "params": {
+            "message": {"messageId": "message1", "role": "ROLE_USER", "parts": [{"text": json.dumps(payload)}]},
+            "configuration": {"returnImmediately": True},
+        }}).encode()
+        headers = signed(body, "candidate-planner", "/a2a", "operator",
+                         request_id="signed-gateway-id") | {"a2a-version": "1.0"}
+        try:
+            with patch("citadel.runtime.agents.emit") as emitted:
+                async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+                                            base_url="https://backend.test") as client:
+                    response = await client.post("/a2a", content=body, headers=headers)
+            self.assertEqual(response.json()["id"], "jsonrpc-message-id")
+            self.assertIn("task", response.json()["result"])
+            acceptance = next(call for call in emitted.call_args_list if call.args == ("SendMessage",))
+            self.assertEqual(acceptance.kwargs["request_id"], "signed-gateway-id")
+            self.assertEqual(acceptance.kwargs["facts"]["accepted_operation_id"], "run1")
+            self.assertEqual(runtime.tasks, set())
+        finally:
+            await runtime.shutdown()
+
     async def test_late_model_response_does_not_release_admission_or_complete_work(self):
         entered, release = asyncio.Event(), asyncio.Event()
         now = [time.time()]

@@ -387,7 +387,7 @@ class TrustedContext(ServerCallContextBuilder):
     def build(self, request):
         return ServerCallContext(state={"caller": request.scope["citadel.caller"],
                                         "action": request.scope["citadel.action"],
-                                        "request_id": request.scope["citadel.request_id"],
+                                        "gateway_request_id": request.scope["citadel.request_id"],
                                         "scope": request.scope,
                                         "headers": {"a2a-version": request.headers.get("a2a-version", "")}})
 
@@ -416,7 +416,7 @@ class DurableHandler(RequestHandler):
                     if status["state"] == "succeeded":
                         context.state["scope"]["citadel.cached"] = True
                     emit("SendMessage.cached" if status["state"] == "succeeded" else "SendMessage",
-                         request_id=context.state["request_id"], status_code=200,
+                         request_id=context.state["gateway_request_id"], status_code=200,
                          facts={"business_state": status["state"], "deadline": status["deadline"],
                                 "input_hash": status["input_hash"], "accepted_operation_id": status["operation_id"]})
                     if status["state"] == "succeeded" and self.runtime.acceptance_hold is not None:
@@ -429,7 +429,7 @@ class DurableHandler(RequestHandler):
         except (ValueError, KeyError, TypeError, OperationError, TimeoutError) as exc:
             if timer.expired() and isinstance(payload, dict) and {"run_id", "operation_id"} <= payload.keys():
                 with correlate(payload["run_id"], payload["operation_id"], context.state["caller"]):
-                    emit("acceptance.timeout", request_id=context.state["request_id"], status_code=0,
+                    emit("acceptance.timeout", request_id=context.state["gateway_request_id"], status_code=0,
                          facts={"started": started, "finished": time.time(), "deadline": started + 10,
                                 "monotonic_started": monotonic_started, "monotonic_deadline": timer.when(),
                                 "monotonic_finished": asyncio.get_running_loop().time()})
