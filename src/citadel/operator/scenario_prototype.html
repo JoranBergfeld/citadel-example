@@ -1,0 +1,275 @@
+<!doctype html>
+<!-- Throwaway interaction prototype. Synthetic playback, not a live execution trace. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Citadel demo</title>
+<style>
+*{box-sizing:border-box}
+:root{font:15px/1.5 system-ui,sans-serif;color:#20242a;background:#f6f7f9;--line:#dce0e6;--blue:#145ac4;--muted:#626b78}
+body{margin:0}button,select{font:inherit}button{cursor:pointer;border:1px solid #c8ced7;background:white;color:inherit;padding:9px 15px;border-radius:5px}button:hover{background:#edf2f9}button:disabled{opacity:.5;cursor:not-allowed}button.primary{background:var(--blue);border-color:var(--blue);color:white}button.text{border-color:transparent;background:transparent;color:var(--blue);padding:4px}button:focus-visible,summary:focus-visible,a:focus-visible,[role=button]:focus-visible{outline:3px solid #bf7808;outline-offset:3px}
+h1{font-size:29px;letter-spacing:-.7px;line-height:1.25;margin:6px 0 12px}h2{font-size:19px;margin:0 0 12px}h3{font-size:15px;margin:0 0 8px}p{margin:0 0 12px}a{color:var(--blue)}small,.muted{color:var(--muted)}small{font-size:12px}.row{display:flex;align-items:center;gap:12px;flex-wrap:wrap}.between{justify-content:space-between}.panel{background:white;border:1px solid var(--line);border-radius:6px;padding:24px}.note{font-size:12px;color:#664e22;background:#fbf0d7;padding:8px 26px}.topbar{padding:16px 26px;background:white;border-bottom:1px solid var(--line)}.wordmark{font-weight:750;margin-right:10px}.shell{max-width:1480px;margin:auto;padding:28px}.landing{max-width:1120px;margin:35px auto}.intro{max-width:670px;color:#49525f;margin-bottom:28px}
+.choices{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}.choice{text-align:left;display:flex;flex-direction:column;align-items:flex-start;gap:12px;min-height:255px;padding:23px;background:white;border:2px solid #dce0e6;border-radius:6px}.choice[aria-pressed=true]{border-color:var(--blue);background:#f5f9ff}.choice .number{font-size:12px;color:var(--muted)}.choice strong{font-size:19px;line-height:1.3}.choice span{font-size:14px}.choice .expected{margin-top:auto;color:#475565;padding-top:12px;border-top:1px solid var(--line);width:100%;font-size:13px}.launch{margin:24px 0;padding:20px 0;border-bottom:1px solid var(--line)}.launch button{min-width:145px}.landing-foot{max-width:710px}.warning{background:#fff3dc;border-left:3px solid #bd7b21;padding:12px 16px;margin:15px 0}.error{background:#fff0eb;border-left-color:#b04a35}
+.run-heading{margin-bottom:20px}.run-heading h1{font-size:26px;margin:4px 0}.run-heading .muted{font-size:13px}.layout{display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:22px;align-items:start}.flow-panel{padding:0;overflow:hidden}.now{padding:17px 22px;border-bottom:1px solid var(--line);min-height:104px;background:#f8fbff}.now .tag{font-size:12px;color:var(--blue);display:block;margin-bottom:4px}.now h2{margin-bottom:5px;font-size:19px}.now p{font-size:13px;color:#56616d;margin:0}.entry{display:flex;align-items:center;justify-content:center;gap:9px;padding:15px 12px 8px;font-size:12px}.entry button{padding:6px 10px;font-size:12px}.entry button.on{background:#e2eeff;border-color:#76a8ee}.gateway-note{font-size:11px;text-align:center;color:#626b78;margin:0;padding:0 10px}.map{display:block;width:100%;height:auto}.lane{fill:#f8f9fb;stroke:#e2e6eb}.lane-title{font-size:17px;font-weight:650;fill:#3a424e}.lane-subtitle{font-size:12px;fill:#6c7480}.node{cursor:pointer}.node rect{fill:white;stroke:#bac3cf;stroke-width:1.3}.node text{fill:#202b39;pointer-events:none}.node .node-title{font-size:16px;font-weight:650}.node .node-sub{font-size:12px;fill:#626b78}.node.active rect{fill:#e2eeff;stroke:#145ac4;stroke-width:2.5}.node.inspected rect{stroke-dasharray:4 3}.node.unused{opacity:.42}.wire{fill:none;stroke:#aab3c0;stroke-width:1.8;marker-end:url(#arrow)}.wire.active{stroke:#145ac4;stroke-width:3;marker-end:url(#blue-arrow)}.wire-label{font-size:11px;fill:#667080}.support{margin:0 18px 17px;border-top:1px solid var(--line);padding-top:12px;font-size:12px;color:#626b78;display:flex;align-items:center;gap:8px;flex-wrap:wrap}.support button{font-size:12px;padding:5px 8px}.map-legend{display:flex;gap:18px;padding:0 20px 16px;font-size:11px;color:#626b78}.legend-line{display:inline-block;width:18px;border-top:3px solid var(--blue);vertical-align:middle;margin-right:5px}.legend-line.gray{border-color:#aab3c0}
+.detail{padding:22px;min-height:300px}.detail .owner{font-size:12px;color:#626b78;margin-bottom:8px}.detail h2{font-size:21px}.detail p{font-size:13px}.detail-item{padding:12px 0;border-top:1px solid var(--line);font-size:13px}.detail-item strong{display:block;margin-bottom:3px}.private{color:#7d408e;font-size:12px}.pill{display:inline-block;background:#edf2f6;font-size:11px;padding:2px 6px;border-radius:3px;margin:4px 0}.pill.good{background:#e4f2e7;color:#30673d}.pill.gap{background:#fff0d3;color:#8b611a}.result{margin-top:20px}.result p{max-width:850px}.brief{font-size:16px;line-height:1.8}.outcome-label{font-size:12px;color:#55715c;margin-bottom:6px}.history{position:absolute;right:26px;top:96px;width:min(380px,calc(100vw - 32px));z-index:5;box-shadow:0 8px 30px #172b4122}.history button{display:block;width:100%;margin-top:9px;text-align:left}.history small{display:block}.technical{margin-top:20px;font-size:12px;color:#626b78}.technical summary{cursor:pointer;padding:9px 0}pre{white-space:pre-wrap;overflow-wrap:anywhere;font:11px/1.5 ui-monospace,monospace}.test-controls{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0}.test-controls button{font-size:12px;padding:6px 9px}.caveat{font-size:12px;color:#626b78;margin-top:22px;padding-top:14px;border-top:1px solid var(--line)}.empty{color:#626b78;font-size:13px}.summary-count{font-size:13px;color:#626b78;margin-top:12px}
+@keyframes activity-pulse{0%,100%{stroke-opacity:.35}50%{stroke-opacity:1}}
+.map.playing .node.active rect,.map.playing .wire.active{animation:activity-pulse 1.3s ease-in-out infinite}
+@media(max-width:1000px){.layout{grid-template-columns:minmax(0,1fr)}.detail{min-height:0}.choices{gap:10px}.choice{padding:16px}.shell{padding:20px}}
+@media(max-width:680px){.shell{padding:16px}.landing{margin:18px auto}.choices{grid-template-columns:1fr}.choice{min-height:0}.choice .expected{margin-top:5px}.note,.topbar{padding-left:16px;padding-right:16px}.entry{gap:5px}.entry button{font-size:10px;padding:5px}.map .node-title{font-size:17px}.map .node-sub{font-size:13px}.history{right:16px}.panel{padding:18px}.flow-panel{padding:0}h1{font-size:25px}}
+@media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important}.map.playing .node.active rect,.map.playing .wire.active{animation:none}}
+</style>
+</head>
+<body>
+<div class="note">Prototype with sample data. No agents or Azure services are running. Reloading clears this session.</div>
+<header class="topbar row between"><div><span class="wordmark">Citadel</span><span class="muted">Demo</span></div><button id="history-toggle" data-action="history">Earlier runs (0)</button></header>
+<div id="history"></div>
+<main id="app"></main>
+<script>
+const scenarios = {
+  comparison:{
+    title:"Compare three airports",
+    description:"Find airports in the Netherlands, Belgium and Germany. Check their reference data, approve findings for sharing, then write a comparison of three airports with complete evidence.",
+    expected:"A brief with links to the three approved findings.",
+    route:"Candidate Planner asks for assessments until it has three complete candidates. Briefing Author then writes the comparison."
+  },
+  replacement:{
+    title:"Replace an incomplete candidate",
+    description:"Remove one candidate's runway width in a test overlay. Watch the agents find the gap, skip that candidate and assess another. The original source data stays unchanged.",
+    expected:"The skipped candidate, its replacement and a three-airport brief.",
+    route:"The first finding can be approved for sharing and still report missing data. Candidate Planner skips it and asks for another assessment."
+  },
+  exhaustion:{
+    title:"Run out of complete candidates",
+    description:"Remove runway widths from all otherwise-complete candidates in a test overlay. The agents check the bounded pool and stop when they cannot find three complete candidates.",
+    expected:"An explanation of the missing evidence. No brief.",
+    route:"Candidate Planner keeps looking, then stops at the end of the pool. Briefing Author is not called."
+  }
+};
+const airports = [
+  {id:"TEST-A",name:"Alder",country:"NL",width:"45",surface:"ASP"},
+  {id:"TEST-B",name:"Birch",country:"BE",width:"30",surface:"CON"},
+  {id:"TEST-C",name:"Cedar",country:"DE",width:"40",surface:"ASP"},
+  {id:"TEST-D",name:"Dune",country:"DE",width:"35",surface:"CON"}
+];
+let chosen="comparison",current=null,screen="choose",inspected="planner",focusedFinding=null,timer=null,historyOpen=false;
+const runs=[];
+const esc=value=>String(value).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const button=(text,action,value="",extra="")=>`<button data-action="${action}" data-value="${esc(value)}" ${extra}>${text}</button>`;
+function stopPlayback(){if(timer!==null)clearInterval(timer);timer=null;}
+function makeSteps(scenario){
+  const steps=[
+    {from:"backend",to:"planner",wire:"entry",title:"Send the scenario to Candidate Planner",text:"The UI backend submits the run through API Management.",effect:"start"},
+    {from:"planner",to:"reference",wire:"search",title:"Find candidates",text:"Candidate Planner searches Reference Data through MCP. This sample pool has four airports; the real search is capped at twenty."}
+  ];
+  const pool=scenario==="comparison"?airports.slice(0,3):airports;
+  for(const [index,airport] of pool.entries()){
+    const gap=scenario==="exhaustion"||(scenario==="replacement"&&index===0);
+    const base={airport:airport.id,gap};
+    steps.push(
+      {...base,from:"planner",to:"assessor",wire:"assess",title:`Ask Evidence Assessor to check ${airport.name}`,text:"Candidate Planner sends an assessment request through A2A.",effect:"assess"},
+      {...base,from:"assessor",to:"reference",wire:"assessor-read",title:`Read ${airport.name}'s airport and runway data`,text:gap?"The labelled overlay leaves the runway width missing. The source value is unchanged.":"Evidence Assessor reads the fields required by the comparison profile.",effect:"source"},
+      {...base,from:"assessor",to:"drafts",wire:"draft-write",title:"Save the private assessment",text:"Evidence Assessor writes a versioned draft to Evidence Review's Blob storage. Planning agents cannot read it.",effect:"draft"},
+      {...base,from:"assessor",to:"reviewer",wire:"review",title:"Ask Release Reviewer to check the draft",text:"The reviewer receives a reference to this exact draft version through A2A."},
+      {...base,from:"reviewer",to:"drafts",wire:"draft-read",title:"Read the exact private draft",text:"Release Reviewer reads the draft from Evidence Review's storage using its own managed identity."},
+      {...base,from:"reviewer",to:"reference",wire:"reviewer-read",title:"Recheck the source data",text:"Release Reviewer independently reads Reference Data before deciding what can be shared."},
+      {...base,from:"reviewer",to:"findings",wire:"publish",title:"Publish an approved finding",text:gap?"The finding reports insufficient evidence. Approval allows sharing; it does not fill the missing width.":"Release Reviewer publishes the finding for this draft version.",effect:"publish"},
+      {...base,from:"planner",to:"findings",wire:"planner-read",title:gap?`Skip ${airport.name}: runway width is missing`:`Select ${airport.name}`,text:gap?"Candidate Planner reads the approved finding and moves to the next candidate.":"Candidate Planner reads the approved finding and counts this candidate toward the required three.",effect:"select"}
+    );
+  }
+  if(scenario==="exhaustion"){
+    steps.push({from:"planner",to:"planner",wire:"",title:"No more complete candidates",text:"Every candidate in this sample pool lacks runway width. The run ends without a brief.",effect:"finish"});
+  }else{
+    steps.push(
+      {from:"planner",to:"author",wire:"write",title:"Ask Briefing Author to write the comparison",text:"Three candidates have complete evidence and approved findings. Candidate Planner sends their exact finding references through A2A."},
+      {from:"author",to:"findings",wire:"author-read",title:"Read the three cited findings",text:"Briefing Author reads those exact approved versions, not the private drafts."},
+      {from:"author",to:"results",wire:"save-brief",title:"Save the brief",text:"Briefing Author saves its work. Candidate Planner returns the comparison with exact finding citations.",effect:"brief"},
+      {from:"planner",to:"results",wire:"",title:"Comparison ready",text:"The brief and the evidence it cites are available below.",effect:"finish"}
+    );
+  }
+  return steps;
+}
+function start(){
+  if(runs.some(r=>r.status!=="complete"))return;
+  stopPlayback();
+  current={id:`sample-${String(runs.length+1).padStart(3,"0")}`,scenario:chosen,status:"active",step:-1,steps:makeSteps(chosen),records:[],brief:false,observation:"available",observed:null};
+  runs.push(current);screen="run";inspected="planner";advance();play();
+}
+function advance(){
+  if(!current||current.status!=="active"||current.observation!=="available")return;
+  const step=current.steps[++current.step];
+  if(step.effect==="assess"){
+    const airport=airports.find(a=>a.id===step.airport);
+    current.records.push({...airport,gap:step.gap,sourceRead:false,draft:false,published:false,selected:false,decided:false});
+  }
+  const record=current.records.find(r=>r.id===step.airport);
+  if(step.effect==="source")record.sourceRead=true;
+  if(step.effect==="draft")record.draft=true;
+  if(step.effect==="publish")record.published=true;
+  if(step.effect==="select"){record.decided=true;record.selected=!record.gap;}
+  if(step.effect==="brief")current.brief=true;
+  if(step.effect==="finish"){current.status="complete";stopPlayback();}
+  current.observed=new Date().toISOString();
+  inspected=step.to;focusedFinding=null;
+  render();
+}
+function play(){
+  if(!current||current.status!=="active"||current.observation!=="available")return;
+  stopPlayback();timer=setInterval(advance,2200);render();
+}
+const stepNow=()=>current.steps[current.step];
+function choices(){
+  const unresolved=runs.find(r=>r.status!=="complete");
+  return `<section class="landing"><h1>Choose a scenario</h1><p class="intro">Watch four agents check airport reference data and write a fictional comparison. Pick a case to see who does the work and how it moves between teams.</p>
+  <div class="choices">${Object.entries(scenarios).map(([key,s],index)=>button(`<span class="number">Scenario ${index+1}</span><strong>${s.title}</strong><span>${s.description}</span><span class="expected">${s.expected}</span>`,"choose",key,`class="choice" aria-pressed="${chosen===key}"`)).join("")}</div>
+  <div class="launch row">${button("Run scenario","start","",`class="primary" ${unresolved?"disabled":""}`)}<span class="muted">${scenarios[chosen].title}</span></div>
+  ${unresolved?`<div class="warning">Finish or inspect the current run before starting another. ${button("Return to current run","open",unresolved.id,"class=text")}</div>`:""}
+  <p class="landing-foot muted">Candidate Planner coordinates the work. Evidence Assessor checks the data; Release Reviewer decides what can be shared. Briefing Author uses only approved findings.</p>
+  <p class="caveat">These checks concern reference-data completeness, not airport safety or flight planning.</p></section>`;
+}
+function svgNode(id,x,y,width,title,sub,storage=false,unused=false){
+  const step=stepNow(),active=current.status!=="failed"&&current.observation==="available"&&(step.from===id||step.to===id);
+  return `<g class="node ${active?"active":""} ${inspected===id?"inspected":""} ${unused?"unused":""}" role="button" tabindex="0" aria-label="Inspect ${title}" data-action="inspect" data-value="${id}"><rect x="${x}" y="${y}" width="${width}" height="${storage?65:85}" rx="${storage?14:5}"/><text x="${x+17}" y="${y+30}" class="node-title">${title}</text><text x="${x+17}" y="${y+52}" class="node-sub">${sub}</text></g>`;
+}
+function wire(id,path){
+  return `<path class="wire ${current.status!=="failed"&&current.observation==="available"&&stepNow().wire===id?"active":""}" d="${path}"/>`;
+}
+function flow(){
+  const unused=current.scenario==="exhaustion";
+  return `<div class="entry" aria-label="Run entry path">${button("Browser","inspect","browser")}<span>&rarr;</span>${button("UI backend","inspect","backend",stepNow().wire==="entry"&&current.observation==="available"?'class="on"':"")}<span>&rarr;</span>${button("API Management","inspect","gateway",["entry","search","assess","assessor-read","review","reviewer-read","planner-read","write","author-read"].includes(stepNow().wire)&&current.observation==="available"?'class="on"':"")}<span>&rarr;</span><span>Planner</span></div>
+  <p class="gateway-note">A2A, MCP and REST calls below all pass through API Management. Storage uses each app's own managed identity.</p>
+  <svg class="map ${timer!==null&&current.status==="active"&&current.observation==="available"?"playing":""}" viewBox="0 0 1100 610" role="group" aria-labelledby="map-title map-desc">
+    <title id="map-title">Scenario route through teams, agents and storage</title>
+    <desc id="map-desc">Planner requests assessments. Assessor reads Reference Data, saves a private draft and asks Reviewer to check it. Reviewer rechecks the data and publishes a finding. Planner reads findings and, with three complete candidates, calls Author. All service calls go through API Management. Blue indicates only the current sample-playback step.</desc>
+    <defs><marker id="arrow" markerWidth="7" markerHeight="7" refX="6" refY="3" orient="auto"><path d="M0 0L6 3L0 6" fill="none" stroke="#aab3c0"/></marker><marker id="blue-arrow" markerWidth="7" markerHeight="7" refX="6" refY="3" orient="auto"><path d="M0 0L6 3L0 6" fill="none" stroke="#145ac4"/></marker></defs>
+    <rect class="lane" x="15" y="25" width="320" height="565" rx="6"/><rect class="lane" x="385" y="25" width="320" height="565" rx="6"/><rect class="lane" x="755" y="25" width="330" height="565" rx="6"/>
+    <text class="lane-title" x="35" y="56">Exercise Planning</text><text class="lane-subtitle" x="35" y="77">Choose candidates and write the brief</text>
+    <text class="lane-title" x="405" y="56">Evidence Review</text><text class="lane-subtitle" x="405" y="77">Assess privately, then approve sharing</text>
+    <text class="lane-title" x="775" y="56">Reference Data</text><text class="lane-subtitle" x="775" y="77">Read-only airport and runway data</text>
+    ${wire("assess","M310 147H410")}<text class="wire-label" x="344" y="137">A2A</text>
+    ${wire("search","M280 105V88H740V220H780")}
+    ${wire("assessor-read","M680 167L780 235")}<text class="wire-label" x="716" y="194">MCP</text>
+    ${wire("reviewer-read","M680 357L780 272")}<text class="wire-label" x="716" y="326">MCP</text>
+    ${wire("draft-write","M490 190V230")}
+    ${wire("draft-read","M545 315V295")}
+    ${wire("review","M680 147H720V357H680")}<text class="wire-label" x="724" y="308">A2A</text>
+    ${wire("publish","M545 400V435")}
+    ${wire("planner-read","M410 465H355V212H175V190")}<text class="wire-label" x="359" y="415" transform="rotate(-90 359 415)">REST: read approved finding</text>
+    ${wire("author-read","M310 477H410")}<text class="wire-label" x="340" y="467">REST</text>
+    ${wire("write","M115 190V435")}<text class="wire-label" x="129" y="363">A2A: three complete</text>
+    ${wire("save-brief","M175 520V540")}
+    <path class="wire" d="M920 295V405"/><text class="wire-label" x="931" y="359">load source</text>
+    ${svgNode("planner",40,105,270,"Candidate Planner","Find and select candidates")}
+    <text class="lane-subtitle" x="40" y="247">Missing evidence?</text><text class="lane-subtitle" x="40" y="266">Planner tries the next candidate.</text>
+    ${svgNode("assessor",410,105,270,"Evidence Assessor","Check the reference fields")}
+    ${svgNode("drafts",425,230,240,"Private drafts","Evidence Review Blob storage",true)}
+    ${svgNode("reviewer",410,315,270,"Release Reviewer","Recheck and approve sharing")}
+    ${svgNode("findings",410,435,270,"Approved findings","Exact released versions / Blob",true)}
+    ${svgNode("author",40,435,270,"Briefing Author",unused?"Not called in this scenario":"Write from approved findings",false,unused)}
+    ${svgNode("results",40,540,270,"Planning records","Scoped Blob containers",true,unused)}
+    ${svgNode("reference",780,210,280,"Reference Data service","MCP / airport and runway lookup")}
+    ${svgNode("source",780,405,280,"Source dataset","Reference Data Blob storage",true)}
+    <text class="lane-subtitle" x="780" y="510">Replacement and exhaustion use</text><text class="lane-subtitle" x="780" y="529">labelled overlays, not source edits.</text>
+  </svg>
+  <div class="map-legend"><span><i class="legend-line"></i>Current example step</span><span><i class="legend-line gray"></i>Scenario route</span></div>
+  <div class="support"><span>Agents: separate Azure Container Apps.</span><span>Model calls:</span>${button("API Management","inspect","gateway")}<span>&rarr;</span>${button("Azure OpenAI / gpt-4.1-mini","inspect","model")}</div>`;
+}
+const owners={planner:"Exercise Planning",author:"Exercise Planning",results:"Exercise Planning",assessor:"Evidence Review",drafts:"Evidence Review",reviewer:"Evidence Review",findings:"Evidence Review",reference:"Reference Data",source:"Reference Data"};
+const labels={planner:"Candidate Planner",author:"Briefing Author",results:"Planning records",assessor:"Evidence Assessor",drafts:"Private drafts",reviewer:"Release Reviewer",findings:"Approved findings",reference:"Reference Data service",source:"Source dataset",browser:"Browser",backend:"UI backend",gateway:"API Management",model:"Azure OpenAI"};
+function findingRef(record){return `${current.id}/${record.id}/finding-v1`;}
+function recordList(kind){
+  const rows=current.records.filter(r=>kind==="drafts"?r.draft:kind==="findings"?r.published&&(!focusedFinding||focusedFinding===r.id):kind==="source"?r.sourceRead:r.decided);
+  if(!rows.length)return `<p class="empty">Nothing to inspect here yet.</p>`;
+  return rows.map(r=>`<div class="detail-item"><strong>${r.name} <small>${r.id}</small></strong>${kind==="drafts"?`<span class="private">Private draft v1 / Operator only</span><p>${r.gap?"Runway width is missing under the test overlay.":"The required sample reference fields are present."}</p>`:
+    kind==="source"?`<p>Country: "${r.country}"<br>Surface: "${r.surface}"<br>Source width: "${r.width}" &rarr; ${Number(r.width)} m<br>Assessed width: ${r.gap?"missing (test overlay)":`${Number(r.width)} m`}</p>`:
+    `${kind==="findings"?`<small>${findingRef(r)}</small><br>`:""}<span class="pill ${r.gap?"gap":"good"}">${r.gap?"Missing runway width":"Complete evidence"}</span><p>${r.decided?(r.selected?"Selected for the brief.":"Skipped; try another candidate."):"Planner has not read this finding yet."}</p>${r.published&&kind!=="findings"?button("Open finding v1","finding",r.id,'class="text"'):""}`}
+    <details><summary>Version and source</summary><small>Sample source v1 / ${r.id}. Profile: sample-profile-v1 (width, surface, country). Overlay: ${r.gap?`${current.scenario}-width-v1`:"none"}. ${kind==="drafts"?`Draft: ${current.id}/${r.id}/draft-v1.`:r.published?`Finding: ${findingRef(r)}.`:""}</small></details></div>`).join("");
+}
+function detail(){
+  const intro={
+    planner:"Searches the bounded pool, requests assessments and selects candidates from approved findings.",
+    assessor:"Reads Reference Data and saves an assessment draft. It cannot publish a finding.",
+    reviewer:"Rechecks the source and draft. Approval lets a finding be shared, including a finding with missing evidence.",
+    author:current.scenario==="exhaustion"?"Not called: this scenario never reaches three complete candidates.":"Reads three exact approved findings and writes the comparison.",
+    drafts:"Only the Operator can inspect these drafts here. Planning agents do not receive their text.",
+    findings:"These versions can be read by Candidate Planner and Briefing Author. They contain no private draft notes.",
+    reference:"Provides airport search, airport lookup and runway lookup over MCP. This view only opens data for assessed candidates.",
+    source:"Original reference data is read-only. Below are the source values used for assessed candidates and any test overlay.",
+    results:"Each planning agent saves work in its own scoped operations container. There is no shared storage identity.",
+    browser:"Starts a scenario and displays the run. Service credentials stay in the backend.",
+    backend:"The planned UI app submits and observes runs through API Management. It does not read team storage directly.",
+    gateway:"Checks the caller and allowed route for A2A, MCP, REST and model calls. Agent data access to Blob storage is separate.",
+    model:"Agents call gpt-4.1-mini through API Management. Code controls candidate selection and release checks; the model writes prose."
+  };
+  let body="";
+  if(["planner","author","results"].includes(inspected))body=recordList("selection");
+  if(["assessor","drafts"].includes(inspected))body=`<p class="private">Operator view / private assessment drafts</p>${recordList("drafts")}`;
+  if(["reviewer","findings"].includes(inspected))body=recordList("findings");
+  if(["source","reference"].includes(inspected))body=recordList("source");
+  if(current.observation==="empty")body=`<p class="empty">This sample observation returned no records.</p>`;
+  return `<aside class="panel detail"><p class="owner">${owners[inspected]||"Shared infrastructure"}${["assessor","drafts","reviewer"].includes(inspected)?" / Operator inspection":""}</p><h2>${labels[inspected]}</h2><p>${intro[inspected]}</p>${body}</aside>`;
+}
+function observationWarning(){
+  const messages={stale:"Refresh failed. Showing the last data received; the run may have moved on.",denied:"Access denied. Previous observations remain below; there is no fallback read.",unavailable:"Cannot reach the observation service. This does not mean the run failed.",unknown:"The current execution state is unknown. Previous records do not establish what is running now.",empty:"This observation returned no records. No brief is shown; this does not prove that no work happened."};
+  return current.observation==="available"?"":`<div class="warning" role="status">${messages[current.observation]}<br><small>Last successful observation: ${esc(current.observed)}. Blue activity highlights are off.</small></div>`;
+}
+function result(){
+  if(current.observation==="empty")return "";
+  if(current.status==="failed")return `<section class="panel result"><h2>The run stopped before it finished</h2><p>The sample technical failure leaves ${current.records.filter(r=>r.draft).length} drafts and ${current.records.filter(r=>r.published).length} approved findings available for inspection.</p><p>No brief was produced. Another run cannot start until this one is resolved.</p><small>The recovery controls are still being specified; this prototype does not add a reset or retry.</small></section>`;
+  if(current.status!=="complete")return "";
+  if(current.scenario==="exhaustion")return `<section class="panel result"><p class="outcome-label">Expected scenario outcome</p><h2>Not enough complete candidates</h2><p>All four sample candidates are missing runway width under the test overlay. Three complete candidates were needed. Briefing Author was not called, and no brief was written.</p></section>`;
+  const selected=current.records.filter(r=>r.selected);
+  return `<section class="panel result"><p class="outcome-label">Run complete</p><h2>The comparison</h2><p class="brief">${selected.map(r=>`${r.name} ${button(`[${r.id} v1]`,"finding",r.id,'class="text"')}`).join(", ")} have the reference fields required by this sample profile. They can be compared in this fictional exercise.</p>${current.scenario==="replacement"?`<p>Alder was skipped because its runway width was missing in the test overlay. Dune took its place.</p>`:""}<small>Sample brief text, not model output. Each link opens the exact approved finding cited here.</small></section>`;
+}
+function technical(){
+  const shared=current.records.map(({draft,...r})=>r);
+  const snapshot={run:current.id,scenario:current.scenario,status:current.status,playbackStep:current.step,from:stepNow().from,to:stepNow().to,observation:current.observation,observed:current.observed,brief:current.observation!=="empty"&&current.brief,records:current.observation==="empty"?[]:shared};
+  return `<details class="technical"><summary>Prototype controls and sample state</summary><p>The blue route is a scripted example, not a trace inferred from backend records. Pausing or stepping only controls this playback. The real UI must show observed state without inventing missing stages.</p><div class="test-controls">${button("Fail this example","fail","",current.status!=="active"?"disabled":"")}${button("Refresh fails","observation","stale")}${button("Deny read","observation","denied")}${button("Service unavailable","observation","unavailable")}${button("Unknown state","observation","unknown")}${button("Empty observation","observation","empty")}${button("Restore sample observation","observation","available")}</div><p>Data remains in memory. Reloading clears it. Prototype controls are not proposed production recovery actions.</p><pre>${esc(JSON.stringify(snapshot,null,2))}</pre></details>`;
+}
+function runScreen(){
+  const step=stepNow(),active=current.status==="active",fresh=current.observation==="available";
+  const selected=current.records.filter(r=>r.selected).length;
+  return `<section class="run-heading row between"><div><p class="muted">${current.id} / ${current.scenario!=="comparison"?"Test overlay / source unchanged":"Original sample fields"}</p><h1>${scenarios[current.scenario].title}</h1></div><div class="row">${active?button(timer===null?"Play demo":"Pause demo","play","",!fresh?"disabled":""):""}${active?button("Next demo step","next","",!fresh?"disabled":""):""}${button("Choose scenario","back")}</div></section>
+  ${observationWarning()}${current.status==="failed"?`<div class="warning error">Example technical failure. Saved work remains below; the run is not complete.</div>`:""}
+  <div class="layout"><section class="panel flow-panel"><div class="now" aria-live="polite"><span class="tag">${current.status==="failed"?"Stopped":!fresh?"Last observed example step":active?(timer===null?"Demo paused":"Demo playback"):"Demo finished"}</span><h2>${current.status==="failed"?"The run stopped here":step.title}</h2><p>${step.text}</p></div>${flow()}</section>${detail()}</div>
+  <p class="summary-count">${selected} of 3 candidates selected. ${current.records.filter(r=>r.published).length} approved findings. <span class="muted">These are sample records, not a live progress estimate.</span></p>
+  ${result()}${technical()}<p class="caveat">Reference-data completeness is not accuracy, airport safety or permission to operate. Approval allows sharing, including findings that report missing evidence.</p>`;
+}
+function renderHistory(){
+  document.getElementById("history-toggle").textContent=`Earlier runs (${runs.length})`;
+  document.getElementById("history").innerHTML=historyOpen?`<aside class="panel history"><h2>Earlier runs</h2><small>Opening a run does not start it again.</small>${runs.length?runs.map(r=>button(`${scenarios[r.scenario].title}<small>${r.id} / ${r.status}</small>`,"open",r.id)).join(""):`<p class="empty">No runs in this prototype session.</p>`}</aside>`:"";
+}
+function render(){
+  renderHistory();document.getElementById("app").innerHTML=`<div class="shell">${screen==="choose"?choices():runScreen()}</div>`;
+}
+function handleAction(action,value){
+  if(action==="choose")chosen=value;
+  if(action==="history")historyOpen=!historyOpen;
+  if(action==="start"){start();return;}
+  if(action==="play"){if(timer===null)play();else{stopPlayback();render();}return;}
+  if(action==="next"){stopPlayback();advance();return;}
+  if(action==="inspect"){inspected=value;focusedFinding=null;}
+  if(action==="finding"){inspected="findings";focusedFinding=value;}
+  if(action==="back"){stopPlayback();screen="choose";}
+  if(action==="open"){stopPlayback();current=runs.find(r=>r.id===value);screen="run";historyOpen=false;inspected="planner";focusedFinding=null;}
+  if(action==="fail"&&current.status==="active"){stopPlayback();current.status="failed";}
+  if(action==="observation"){stopPlayback();current.observation=value;if(value==="available")current.observed=new Date().toISOString();}
+  render();
+  if(action==="finding"){
+    const item=document.querySelector(".detail");
+    item.scrollIntoView({block:"nearest"});
+  }
+}
+document.addEventListener("click",event=>{
+  const target=event.target.closest("[data-action]");
+  if(target){event.preventDefault();handleAction(target.dataset.action,target.dataset.value);}
+});
+document.addEventListener("keydown",event=>{
+  const target=event.target.closest("g[data-action]");
+  if(target&&(event.key==="Enter"||event.key===" ")){event.preventDefault();handleAction(target.dataset.action,target.dataset.value);}
+});
+window.addEventListener("pagehide",stopPlayback);
+render();
+</script>
+</body>
+</html>
