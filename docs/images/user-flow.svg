@@ -1,0 +1,70 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1140" height="690" viewBox="0 0 1140 690" role="img" aria-labelledby="title description">
+  <title id="title">From an operator request to a cited fictional brief</title>
+  <desc id="description">Read left to right across the top, then right to left across the middle. Operator starts a run; Planner searches a stable pool; Assessor reads MCP evidence and saves a private draft; Reviewer independently rechecks it and releases an exact finding. Planner counts complete findings. Three complete findings go to Author for a cited brief; missing evidence leads to another candidate; exhausted pool produces an explicit outcome without a brief. Rejected releases do not count.</desc>
+  <style>
+    text { font-family: DejaVu Sans, sans-serif; fill: #172338; }
+    .heading { font-size: 24px; font-weight: 700; }
+    .label { font-size: 22px; font-weight: 700; }
+    .detail { font-size: 19px; fill: #405168; }
+    .edge { font-size: 17px; fill: #405168; }
+    .line { fill: none; stroke: #52657e; stroke-width: 2.5; }
+  </style>
+  <rect width="1140" height="690" rx="16" fill="#f3f6fb"/>
+  <text x="35" y="42" class="heading">Request, assess, release, then write</text>
+  <rect x="35" y="80" width="280" height="110" rx="12" fill="#fff" stroke="#697c96" stroke-width="2"/>
+  <text x="55" y="117" class="label">1. Operator</text>
+  <text x="55" y="150" class="detail">Start scenario in CLI</text>
+  <text x="55" y="176" class="detail">Receive a task; poll status</text>
+  <rect x="430" y="80" width="280" height="110" rx="12" fill="#e9f7f0" stroke="#267955" stroke-width="2"/>
+  <text x="450" y="117" class="label">2. Candidate Planner</text>
+  <text x="450" y="150" class="detail">Search reference MCP</text>
+  <text x="450" y="176" class="detail">Choose next pool member</text>
+  <rect x="825" y="80" width="280" height="110" rx="12" fill="#f1edfc" stroke="#7452a8" stroke-width="2"/>
+  <text x="845" y="117" class="label">3. Evidence Assessor</text>
+  <text x="845" y="150" class="detail">Read MCP evidence</text>
+  <text x="845" y="176" class="detail">Save a private draft</text>
+  <path d="M315 135H420" class="line"/>
+  <path d="M408 129L420 135L408 141Z" fill="#52657e"/>
+  <path d="M710 135H815" class="line"/>
+  <path d="M803 129L815 135L803 141Z" fill="#52657e"/>
+  <rect x="825" y="290" width="280" height="110" rx="12" fill="#f1edfc" stroke="#7452a8" stroke-width="2"/>
+  <text x="845" y="327" class="label">4. Release Reviewer</text>
+  <text x="845" y="360" class="detail">Recheck source + draft</text>
+  <text x="845" y="386" class="detail">Release exact version</text>
+  <path d="M965 190V280" class="line"/>
+  <path d="M959 268L965 280L971 268Z" fill="#52657e"/>
+  <text x="980" y="244" class="edge">Request review</text>
+  <rect x="430" y="290" width="280" height="110" rx="12" fill="#e9f7f0" stroke="#267955" stroke-width="2"/>
+  <text x="450" y="327" class="label">5. Planner checks</text>
+  <text x="450" y="360" class="detail">Read released finding</text>
+  <text x="450" y="386" class="detail">Three complete yet?</text>
+  <path d="M825 345H720" class="line"/>
+  <path d="M732 339L720 345L732 351Z" fill="#52657e"/>
+  <text x="729" y="326" class="edge">Finding</text>
+  <rect x="35" y="290" width="280" height="110" rx="12" fill="#e9f7f0" stroke="#267955" stroke-width="2"/>
+  <text x="55" y="327" class="label">6. Briefing Author</text>
+  <text x="55" y="360" class="detail">Fetch 3 exact findings</text>
+  <text x="55" y="386" class="detail">Write fictional narrative</text>
+  <path d="M430 345H325" class="line"/>
+  <path d="M337 339L325 345L337 351Z" fill="#52657e"/>
+  <text x="324" y="326" class="edge">3 complete</text>
+  <rect x="35" y="535" width="280" height="105" rx="12" fill="#e9f7f0" stroke="#267955" stroke-width="2"/>
+  <text x="55" y="572" class="label">Cited JSON product</text>
+  <text x="55" y="604" class="detail">Brief + evidence + caveats</text>
+  <path d="M175 400V525" class="line"/>
+  <path d="M169 513L175 525L181 513Z" fill="#52657e"/>
+  <text x="190" y="475" class="edge">Return through Planner</text>
+  <rect x="430" y="535" width="280" height="105" rx="12" fill="#fff5df" stroke="#a56c18" stroke-width="2"/>
+  <text x="450" y="572" class="label">Try next candidate</text>
+  <text x="450" y="604" class="detail">Repeat 3-5; at most 20</text>
+  <path d="M545 400V525" class="line"/>
+  <path d="M539 513L545 525L551 513Z" fill="#52657e"/>
+  <text x="365" y="459" class="edge">Insufficient / rejected</text>
+  <rect x="825" y="535" width="280" height="105" rx="12" fill="#fff0f2" stroke="#b84259" stroke-width="2"/>
+  <text x="845" y="572" class="label">Pool exhausted</text>
+  <text x="845" y="604" class="detail">Explicit result; no brief</text>
+  <path d="M685 400V480H965V525" class="line"/>
+  <path d="M959 513L965 525L971 513Z" fill="#52657e"/>
+  <text x="765" y="464" class="edge">No candidates left</text>
+  <text x="35" y="674" class="detail">Models explain. Code owns the path, completeness rules, authorization and release decisions.</text>
+</svg>

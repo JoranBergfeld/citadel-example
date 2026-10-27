@@ -1,0 +1,7 @@
+[
+  {"name":"reference-data","team":"reference","callers":["candidate-planner","evidence-assessor","release-reviewer"],"operations":null},
+  {"name":"evidence-assessor","team":"evidence","callers":["candidate-planner"],"operations":"assessor-operations"},
+  {"name":"release-reviewer","team":"evidence","callers":["evidence-assessor"],"operations":"reviewer-operations"},
+  {"name":"candidate-planner","team":"planning","callers":["operator"],"operations":"planner-operations"},
+  {"name":"briefing-author","team":"planning","callers":["candidate-planner"],"operations":"author-operations"}
+]

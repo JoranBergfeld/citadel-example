@@ -1,0 +1,4 @@
+uv-build==0.12.21 ; platform_machine == 'x86_64' and sys_platform == 'linux' \
+    --hash=sha256:58a358be5088314c74a3f95511d24cc286b65ad724474f21140e297f6f3cf71e \
+    --hash=sha256:616d1ecccca300b240e65a88644f8c2996b858ff039f759d717249d28f94a2a6 \
+    --hash=sha256:dea04a2816297554aed0b0fc08f15cd229003c13daeb1aac3569aa77533817bd

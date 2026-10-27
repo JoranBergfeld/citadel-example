@@ -1,0 +1,33 @@
+<policies>
+  <inbound>
+    <base />
+    <choose>
+      <when condition="@(!new [] { &quot;candidate-planner&quot;, &quot;evidence-assessor&quot;, &quot;release-reviewer&quot;, &quot;briefing-author&quot; }.Contains((string)context.Variables[&quot;caller&quot;]) || context.Request.Url.Query.Count &gt; 0)">
+        <return-response>
+          <set-status code="403" reason="Model caller denied" />
+          <set-header name="X-Citadel-Denial" exists-action="override"><value>model_caller_denied</value></set-header>
+          <set-header name="X-Citadel-Gateway-Request-Id" exists-action="override"><value>@(context.RequestId.ToString("N"))</value></set-header>
+        </return-response>
+      </when>
+    </choose>
+    <set-variable name="validModelRequest" value="@{
+      var body = context.Request.Body.As&lt;JObject&gt;(preserveContent: true);
+      var tokens = (int?)body[&quot;max_completion_tokens&quot;];
+      return (string)body[&quot;model&quot;] == &quot;__MODEL__&quot; &amp;&amp; body[&quot;max_completion_tokens&quot;].Type == JTokenType.Integer &amp;&amp; tokens.HasValue &amp;&amp; tokens.Value &gt; 0 &amp;&amp; tokens.Value &lt;= 2000 &amp;&amp; body[&quot;max_tokens&quot;] == null &amp;&amp; (body[&quot;n&quot;] == null || (int)body[&quot;n&quot;] == 1) &amp;&amp; (bool?)body[&quot;stream&quot;] != true;
+    }" />
+    <choose><when condition="@(!(bool)context.Variables[&quot;validModelRequest&quot;])"><return-response><set-status code="400" reason="Model request outside contract" /></return-response></when></choose>
+    <rate-limit-by-key calls="12" renewal-period="60" counter-key="citadel-model" />
+    <azure-openai-token-limit counter-key="citadel-model-tokens" tokens-per-minute="120000" estimate-prompt-tokens="true" />
+    <set-header name="api-key" exists-action="delete" />
+    <set-backend-service backend-id="model" />
+    <rewrite-uri template="/openai/v1/chat/completions" copy-unmatched-params="false" />
+    <authentication-managed-identity resource="https://cognitiveservices.azure.com" />
+  </inbound>
+  <backend>
+    <limit-concurrency key="citadel-model" max-count="1">
+      <forward-request timeout="60" buffer-response="true" />
+    </limit-concurrency>
+  </backend>
+  <outbound><base /></outbound>
+  <on-error><base /></on-error>
+</policies>

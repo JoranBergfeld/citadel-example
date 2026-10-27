@@ -1,0 +1,133 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1140" height="1235" viewBox="0 0 1140 1235" role="img" aria-labelledby="title description">
+  <title id="title">Azure resources by resource group</title>
+  <desc id="description">One subscription in West Europe contains four resource groups. Platform owns API Management with a system identity, the shared Container Apps environment, Container Registry, Azure OpenAI, platform Key Vault, API Center, Application Insights and Log Analytics. Reference Data owns one app and user-assigned identity, one storage account with the reference container, and one Key Vault. Evidence Review owns Assessor and Reviewer apps and identities, storage with four containers, and one Key Vault. Exercise Planning owns Planner and Author apps and identities, storage with four containers, and one Key Vault. All five apps use the platform-owned environment.</desc>
+  <style>
+    text { font-family: DejaVu Sans, sans-serif; fill: #172338; }
+    .title { font-size: 26px; font-weight: 700; }
+    .group { font-size: 22px; font-weight: 700; }
+    .service { font-size: 20px; font-weight: 600; }
+    .detail { font-size: 17px; fill: #405168; }
+    .small { font-size: 15px; fill: #405168; }
+    .code { font-family: DejaVu Sans Mono, monospace; font-size: 16px; fill: #405168; }
+    .card { fill: #fff; stroke: #b7c4d5; stroke-width: 1.5; }
+  </style>
+  <rect width="1140" height="1235" rx="16" fill="#f3f6fb"/>
+  <text x="30" y="40" class="title">Azure subscription / West Europe</text>
+  <text x="30" y="67" class="detail">Resource-group ownership. Names use the deployment ID and, where needed, a unique suffix.</text>
+
+  <rect x="25" y="90" width="1090" height="390" rx="12" fill="#edf1f8" stroke="#697c96" stroke-width="2"/>
+  <text x="45" y="125" class="group">Platform</text>
+  <text x="165" y="125" class="code">citadel-&lt;id&gt;-platform</text>
+
+  <rect x="45" y="150" width="240" height="115" rx="8" class="card"/>
+  <text x="60" y="180" class="service">API Management</text>
+  <text x="60" y="210" class="detail">BasicV2 / 1 unit</text>
+  <text x="60" y="238" class="detail">System-assigned identity</text>
+
+  <rect x="315" y="150" width="240" height="115" rx="8" class="card"/>
+  <text x="330" y="179" class="service">Container Apps</text>
+  <text x="330" y="204" class="service">environment</text>
+  <text x="330" y="234" class="detail">Shared / Consumption</text>
+  <text x="330" y="254" class="small">Hosts all five team apps</text>
+
+  <rect x="585" y="150" width="240" height="115" rx="8" class="card"/>
+  <text x="600" y="180" class="service">Container Registry</text>
+  <text x="600" y="210" class="detail">Basic / admin disabled</text>
+  <text x="600" y="238" class="detail">Digest-pinned images</text>
+
+  <rect x="855" y="150" width="240" height="115" rx="8" class="card"/>
+  <text x="870" y="180" class="service">Azure OpenAI</text>
+  <text x="870" y="210" class="detail">S0 account</text>
+  <text x="870" y="238" class="detail">gpt-4.1-mini / Standard</text>
+
+  <rect x="45" y="295" width="240" height="115" rx="8" class="card"/>
+  <text x="60" y="325" class="service">Platform Key Vault</text>
+  <text x="60" y="355" class="detail">Gateway certificate</text>
+  <text x="60" y="383" class="detail">Stored as a PFX secret</text>
+
+  <rect x="315" y="295" width="240" height="115" rx="8" class="card"/>
+  <text x="330" y="325" class="service">API Center</text>
+  <text x="330" y="355" class="detail">5 workload records</text>
+  <text x="330" y="383" class="detail">1 REST API / Free plan*</text>
+
+  <rect x="585" y="295" width="240" height="115" rx="8" class="card"/>
+  <text x="600" y="325" class="service">Application Insights</text>
+  <text x="600" y="355" class="detail">Entra-authenticated ingest</text>
+  <text x="600" y="383" class="detail">Uses shared workspace</text>
+
+  <rect x="855" y="295" width="240" height="115" rx="8" class="card"/>
+  <text x="870" y="325" class="service">Log Analytics</text>
+  <text x="870" y="355" class="detail">Shared workspace</text>
+  <text x="870" y="383" class="detail">12 tables / 30 days</text>
+
+  <text x="45" y="447" class="detail">* Free is checked manually in the portal before runtime activation.</text>
+
+  <rect x="25" y="510" width="345" height="665" rx="12" fill="#eaf4ff" stroke="#2466a5" stroke-width="2"/>
+  <text x="45" y="546" class="group">Reference Data</text>
+  <text x="45" y="572" class="code">citadel-&lt;id&gt;-reference</text>
+
+  <rect x="45" y="595" width="305" height="150" rx="8" class="card"/>
+  <text x="60" y="625" class="service">Container App</text>
+  <text x="60" y="657" class="code">reference-data</text>
+  <text x="60" y="693" class="detail">1 user-assigned identity</text>
+  <text x="60" y="720" class="detail">Read-only MCP service</text>
+
+  <rect x="45" y="770" width="305" height="220" rx="8" class="card"/>
+  <text x="60" y="800" class="service">Storage account</text>
+  <text x="60" y="828" class="detail">StorageV2 / Standard LRS</text>
+  <text x="60" y="870" class="code">reference</text>
+  <text x="60" y="955" class="detail">Verified dataset bundle</text>
+
+  <rect x="45" y="1015" width="305" height="130" rx="8" class="card"/>
+  <text x="60" y="1047" class="service">Key Vault</text>
+  <text x="60" y="1080" class="detail">1 backend-context secret</text>
+  <text x="60" y="1112" class="detail">No outgoing subscription key</text>
+
+  <rect x="395" y="510" width="345" height="665" rx="12" fill="#f1edfc" stroke="#7452a8" stroke-width="2"/>
+  <text x="415" y="546" class="group">Evidence Review</text>
+  <text x="415" y="572" class="code">citadel-&lt;id&gt;-evidence</text>
+
+  <rect x="415" y="595" width="305" height="150" rx="8" class="card"/>
+  <text x="430" y="625" class="service">2 Container Apps</text>
+  <text x="430" y="657" class="code">evidence-assessor</text>
+  <text x="430" y="685" class="code">release-reviewer</text>
+  <text x="430" y="720" class="detail">2 user-assigned identities</text>
+
+  <rect x="415" y="770" width="305" height="220" rx="8" class="card"/>
+  <text x="430" y="800" class="service">Storage account</text>
+  <text x="430" y="828" class="detail">StorageV2 / Standard LRS</text>
+  <text x="430" y="870" class="code">drafts</text>
+  <text x="430" y="898" class="code">findings</text>
+  <text x="430" y="926" class="code">assessor-operations</text>
+  <text x="430" y="954" class="code">reviewer-operations</text>
+
+  <rect x="415" y="1015" width="305" height="130" rx="8" class="card"/>
+  <text x="430" y="1047" class="service">Key Vault</text>
+  <text x="430" y="1080" class="detail">2 backend-context secrets</text>
+  <text x="430" y="1112" class="detail">2 agent-subscription secrets</text>
+
+  <rect x="765" y="510" width="350" height="665" rx="12" fill="#e9f7f0" stroke="#267955" stroke-width="2"/>
+  <text x="785" y="546" class="group">Exercise Planning</text>
+  <text x="785" y="572" class="code">citadel-&lt;id&gt;-planning</text>
+
+  <rect x="785" y="595" width="310" height="150" rx="8" class="card"/>
+  <text x="800" y="625" class="service">2 Container Apps</text>
+  <text x="800" y="657" class="code">candidate-planner</text>
+  <text x="800" y="685" class="code">briefing-author</text>
+  <text x="800" y="720" class="detail">2 user-assigned identities</text>
+
+  <rect x="785" y="770" width="310" height="220" rx="8" class="card"/>
+  <text x="800" y="800" class="service">Storage account</text>
+  <text x="800" y="828" class="detail">StorageV2 / Standard LRS</text>
+  <text x="800" y="870" class="code">candidate-lists</text>
+  <text x="800" y="898" class="code">briefs</text>
+  <text x="800" y="926" class="code">planner-operations</text>
+  <text x="800" y="954" class="code">author-operations</text>
+
+  <rect x="785" y="1015" width="310" height="130" rx="8" class="card"/>
+  <text x="800" y="1047" class="service">Key Vault</text>
+  <text x="800" y="1080" class="detail">2 backend-context secrets</text>
+  <text x="800" y="1112" class="detail">2 agent-subscription secrets</text>
+
+  <text x="30" y="1210" class="detail">All five apps use the platform environment. Resource groups are not network-isolation boundaries.</text>
+</svg>

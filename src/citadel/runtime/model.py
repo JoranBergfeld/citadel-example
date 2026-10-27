@@ -1,0 +1,144 @@
+"""Framework inference with no automatic retry and admission at the HTTP boundary."""
+
+import asyncio
+import hashlib
+import json
+import time
+from contextvars import ContextVar
+
+import httpx2
+from agent_framework import Agent
+from agent_framework_openai import OpenAIChatCompletionClient
+from openai import AsyncOpenAI
+
+from citadel.operations import OperationError
+from citadel.acceptance.telemetry import correlation_headers, emit, gateway_request_id
+
+
+INSTRUCTIONS = {
+    "candidate-planner": (
+        "You are Candidate Planner for Exercise Planning. Describe only the fictional "
+        "reference-data comparison. Code selects the stable bounded pool, replaces "
+        "insufficient candidates, and obtains released findings. Never infer safety."
+    ),
+    "evidence-assessor": (
+        "You are Evidence Assessor for Evidence Review. Explain the supplied deterministic "
+        "completeness result privately. Missing reference evidence is not a negative airport "
+        "judgment. You cannot publish findings; an exact draft requires Release Reviewer."
+    ),
+    "release-reviewer": (
+        "You are Release Reviewer for Evidence Review. Explain the independent reference "
+        "recheck of an exact immutable draft. Code alone validates and releases the finding. "
+        "Approval permits sharing, not safety certification. Preserve every evidence gap."
+    ),
+    "briefing-author": (
+        "You are Briefing Author for Exercise Planning. Write a short fictional comparison "
+        "using only supplied exact released findings. Do not claim safety, operational "
+        "suitability or usable landing distance. State source accuracy is unverified. "
+        "Do not add facts absent from the supplied evidence. The operator reviews prose."
+    ),
+}
+ALLOWED_TOOLS = {
+    "candidate-planner": ("search_airports", "assess", "get_finding", "author", "owner_status"),
+    "evidence-assessor": ("lookup_airport", "list_runways", "submit_draft", "review", "owner_status"),
+    "release-reviewer": ("lookup_airport", "list_runways", "read_exact_draft", "release"),
+    "briefing-author": ("get_finding",),
+}
+_permit = ContextVar("citadel_model_permit", default=None)
+
+
+class GovernedModel:
+    def __init__(self, workload, gateway_url, subscription_key, deployment, *, http_client=None,
+                 clock=time.time, sleep=asyncio.sleep):
+        self.workload, self.clock, self.sleep = workload, clock, sleep
+        self.url = gateway_url.rstrip("/") + "/openai/v1/chat/completions"
+        self.owns_http = http_client is None
+        self.http = http_client or httpx2.AsyncClient(follow_redirects=False, timeout=60)
+        self.http.event_hooks.setdefault("request", []).append(self._before_request)
+        self.http.event_hooks.setdefault("response", []).append(self._response)
+        self.client = AsyncOpenAI(
+            api_key="gateway-subscription-only", base_url=gateway_url.rstrip("/") + "/openai/v1/",
+            default_headers={"Ocp-Apim-Subscription-Key": subscription_key},
+            http_client=self.http, max_retries=0, timeout=60,
+        )
+        adapter = OpenAIChatCompletionClient(model=deployment, async_client=self.client)
+        self.agent = Agent(adapter, name=workload, instructions=INSTRUCTIONS[workload], tools=[],
+                           default_options={"max_tokens": 2000})
+
+    async def _before_request(self, request):
+        admission = _permit.get()
+        if (admission is None or admission["sent"] or self.clock() >= admission["deadline"]
+                or str(request.url) != self.url or request.method != "POST"):
+            raise OperationError("forbidden", "Unadmitted model dispatch or hidden retry")
+        payload = json.loads(request.content)
+        if payload.get("max_completion_tokens") != 2000 or payload.get("tools"):
+            raise OperationError("forbidden", "Model cannot select network tools or raise output bound")
+        admission["sent"] = True
+        request.extensions["citadel_model_started"] = self.clock()
+        request.headers.update(correlation_headers())
+
+    async def _response(self, response):
+        facts = {"started": response.request.extensions["citadel_model_started"]}
+        if response.status_code == 200:
+            content = await response.aread()
+            if len(content) > 1024 * 1024:
+                raise OperationError("result_limit", "Model response exceeds its metadata envelope")
+            try:
+                document = json.loads(content)
+                usage = document.get("usage") if isinstance(document, dict) else None
+                if (isinstance(usage, dict)
+                        and all(type(usage.get(key)) is int and 0 <= usage[key] <= bound
+                                for key, bound in (("prompt_tokens", 16000), ("completion_tokens", 2000),
+                                                   ("total_tokens", 18000)))
+                        and usage["prompt_tokens"] + usage["completion_tokens"] == usage["total_tokens"]):
+                    facts.update(input_tokens=usage["prompt_tokens"], output_tokens=usage["completion_tokens"],
+                                 tokens=usage["total_tokens"])
+            except ValueError:
+                pass
+        facts["finished"] = self.clock()
+        emit("chat.completions",
+             request_id=gateway_request_id(response.headers),
+             status_code=int(response.status_code), facts=facts,
+             target=hashlib.sha256(str(response.request.url).encode()).hexdigest())
+
+    async def explain(self, accounting, budget_id, execution_id, evidence):
+        prompt = json.dumps(evidence, sort_keys=True, ensure_ascii=False, allow_nan=False)
+        # UTF-8 byte count bounds BPE text tokens; fixed allowance covers framing.
+        bound = len((INSTRUCTIONS[self.workload] + prompt).encode("utf-8")) + 1024
+        if bound > 16000:
+            raise OperationError("exhausted", "Model input exceeds the conservative token envelope")
+        while True:
+            try:
+                permit = await accounting.model(budget_id, execution_id, input_tokens=bound, output_tokens=2000)
+                break
+            except OperationError as exc:
+                if exc.code != "rate_limited":
+                    raise
+                await self.sleep(5)
+        token = _permit.set({**permit, "sent": False})
+        try:
+            started = self.clock()
+            monotonic_started = asyncio.get_running_loop().time()
+            timer = asyncio.timeout_at(monotonic_started + max(0, permit["deadline"] - started))
+            try:
+                async with timer:
+                    result = await self.agent.run(prompt)
+            except TimeoutError:
+                if timer.expired():
+                    emit("model.timeout", facts={"started": started, "finished": self.clock(),
+                        "deadline": permit["deadline"], "model_attempt_id": permit["attempt_id"],
+                        "monotonic_started": monotonic_started, "monotonic_deadline": timer.when(),
+                        "monotonic_finished": asyncio.get_running_loop().time()})
+                raise
+            if self.clock() >= permit["deadline"]:
+                raise OperationError("deadline", "Late model response cannot release admission")
+            await accounting.finish_model(budget_id, permit["attempt_id"])
+            return result.text
+        finally:
+            _permit.reset(token)
+
+    async def close(self):
+        self.http.event_hooks["request"].remove(self._before_request)
+        self.http.event_hooks["response"].remove(self._response)
+        if self.owns_http:
+            await self.client.close()

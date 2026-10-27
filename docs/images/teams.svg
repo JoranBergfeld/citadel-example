@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1140" height="420" viewBox="0 0 1140 420" role="img" aria-labelledby="title description">
+  <title id="title">Three teams, five separately identified workloads</title>
+  <desc id="description">Reference Data owns a read-only MCP service and pinned airport data. Evidence Review owns Evidence Assessor and Release Reviewer, private drafts and released findings. Exercise Planning owns Candidate Planner and Briefing Author. Each workload has its own managed identity; one human operator administers the sample.</desc>
+  <style>
+    text { font-family: DejaVu Sans, sans-serif; fill: #172338; }
+    .heading { font-size: 24px; font-weight: 700; }
+    .label { font-size: 22px; font-weight: 600; }
+    .detail { font-size: 19px; fill: #405168; }
+    .caption { font-size: 20px; fill: #405168; }
+    .card { fill: #fff; stroke-width: 2; }
+  </style>
+  <rect width="1140" height="420" rx="16" fill="#f3f6fb"/>
+  <text x="35" y="43" class="heading">Ownership is visible. Authority is separate.</text>
+  <rect x="30" y="70" width="340" height="280" rx="14" fill="#eaf4ff" stroke="#2466a5" stroke-width="2"/>
+  <text x="50" y="108" class="heading">Reference Data</text>
+  <rect x="50" y="132" width="300" height="68" rx="9" class="card" stroke="#2466a5"/>
+  <text x="70" y="160" class="label">Reference MCP</text>
+  <text x="70" y="185" class="detail">Search, lookup, runways</text>
+  <text x="50" y="243" class="label">Pinned airport dataset</text>
+  <text x="50" y="275" class="detail">Service can read, not write</text>
+  <text x="50" y="320" class="detail">1 workload identity</text>
+  <rect x="400" y="70" width="340" height="280" rx="14" fill="#f1edfc" stroke="#7452a8" stroke-width="2"/>
+  <text x="420" y="108" class="heading">Evidence Review</text>
+  <rect x="420" y="132" width="300" height="57" rx="9" class="card" stroke="#7452a8"/>
+  <text x="440" y="169" class="label">Evidence Assessor</text>
+  <rect x="420" y="202" width="300" height="57" rx="9" class="card" stroke="#7452a8"/>
+  <text x="440" y="239" class="label">Release Reviewer</text>
+  <text x="420" y="290" class="detail">Private drafts / findings</text>
+  <text x="420" y="320" class="detail">2 distinct identities</text>
+  <rect x="770" y="70" width="340" height="280" rx="14" fill="#e9f7f0" stroke="#267955" stroke-width="2"/>
+  <text x="790" y="108" class="heading">Exercise Planning</text>
+  <rect x="790" y="132" width="300" height="57" rx="9" class="card" stroke="#267955"/>
+  <text x="810" y="169" class="label">Candidate Planner</text>
+  <rect x="790" y="202" width="300" height="57" rx="9" class="card" stroke="#267955"/>
+  <text x="810" y="239" class="label">Briefing Author</text>
+  <text x="790" y="290" class="detail">Comparisons / fictional briefs</text>
+  <text x="790" y="320" class="detail">2 distinct identities</text>
+  <text x="35" y="391" class="caption">One operator administers all teams. Resource groups express ownership, not access rights.</text>
+</svg>
