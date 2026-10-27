@@ -1,0 +1,202 @@
+<!doctype html>
+<!-- Throwaway: three team-demo layouts, ?variant=A|B|C. No real data, auth, or APIs. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Citadel | Team demo prototype</title>
+<style>
+:root{font:15px/1.5 system-ui,sans-serif;color:#1c3032;background:#f3f5f2;--ink:#163e40;--muted:#607372;--line:#d6dfda;--accent:#146b60}
+*{box-sizing:border-box}body{margin:0;padding-bottom:110px}button,select{font:inherit}button,select,summary,a{cursor:pointer}button,select{border:1px solid var(--line);border-radius:7px;background:white;color:var(--ink);padding:8px 12px}button:hover,a:hover{background:#e2eee8}button:disabled{opacity:.55;cursor:not-allowed}button.primary,button.active{background:var(--ink);color:white;border-color:var(--ink)}button:focus-visible,a:focus-visible,select:focus-visible,summary:focus-visible{outline:3px solid #e29b25;outline-offset:3px}
+a{color:#12665c}h1{font-size:30px;line-height:1.2;letter-spacing:-1px;margin:10px 0}h2{font-size:19px;margin:0 0 14px}h3{font-size:16px;margin:0 0 8px}p{margin:8px 0 14px}small,.muted{color:var(--muted)}code,pre{font:12px/1.6 ui-monospace,monospace}pre{white-space:pre-wrap;overflow-wrap:anywhere}header{background:#fff;border-bottom:1px solid var(--line);padding:18px 30px;display:flex;justify-content:space-between;align-items:center;gap:15px}.brand{font-weight:750;letter-spacing:2px}.eyebrow{font-size:11px;text-transform:uppercase;letter-spacing:1.7px;font-weight:750;color:var(--accent)}
+.fixture-banner{padding:10px 30px;background:#ffe8b7;color:#614512;font-size:13px;border-bottom:1px solid #e7ca8f}.shell{max-width:1450px;margin:auto;padding:28px 30px}.toolbar,.tabs,.row{display:flex;align-items:center;flex-wrap:wrap;gap:9px}.row.between{justify-content:space-between}.tabs{margin:18px 0}.tabs button{border-radius:30px}.panel{background:#fff;border:1px solid var(--line);border-radius:10px;padding:22px;margin-bottom:18px}.dark{background:var(--ink);color:white}.dark .eyebrow,.dark .muted{color:#bce3d6}.dark h1{font-size:36px}.grid{display:grid;grid-template-columns:1.2fr 1fr;gap:22px}.scenario-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:18px 0}.scenario{padding:14px;text-align:left}.scenario strong,.scenario small{display:block}.scenario.active small{color:#c6e4de}.badge{display:inline-block;font-size:11px;font-weight:700;letter-spacing:.3px;background:#e8f2ed;border-radius:4px;padding:3px 7px;color:#245e4b}.badge.warn{background:#fff1cf;color:#7a5415}.badge.private{background:#f0e9fa;color:#67408d}.badge.fail{background:#fbe6e1;color:#99412b}.notice{border-left:4px solid #c78624;background:#fff6e3;padding:13px 16px;margin:12px 0}.notice.error{border-color:#ad4f3a;background:#fff0eb}.caveat{border-top:1px solid var(--line);margin-top:20px;padding-top:12px;font-size:12px;color:var(--muted)}table{width:100%;border-collapse:collapse;font-size:13px}th{text-align:left;color:var(--muted);font-size:11px;letter-spacing:.6px;text-transform:uppercase}td,th{padding:12px 8px;border-bottom:1px solid var(--line);vertical-align:top}td button{padding:3px 7px}.candidate{border:1px solid var(--line);padding:15px;border-radius:7px;margin:10px 0}.candidate.selected{border-left:4px solid var(--accent)}.field-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}.field-grid div{background:#f3f6f3;padding:12px}.field-grid strong{display:block}.run-list{display:flex;flex-direction:column;gap:7px;margin:12px 0}.run-list button{text-align:left}.run-list small{display:block}.workbench{display:grid;grid-template-columns:220px minmax(0,1fr) 300px;gap:20px}.workbench aside{align-self:start}.vertical-tabs{display:flex;flex-direction:column;gap:8px;margin:20px 0}.vertical-tabs button{text-align:left}.ledger{display:grid;grid-template-columns:260px minmax(0,1fr);gap:22px}.ledger-main{border-top:4px solid var(--ink)}details{margin-top:12px}summary{font-size:13px;font-weight:650}#switcher{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#152c31;color:#fff;padding:9px 14px;border:1px solid #6c888b;border-radius:40px;box-shadow:0 8px 28px #142b3133;display:flex;align-items:center;gap:12px;z-index:5;white-space:nowrap}#switcher button{border:0;border-radius:50%;background:#345257;color:white;padding:7px 12px}#variant-label{min-width:215px;text-align:center;font-size:13px}.lab{border:1px dashed #b3925b;background:#fffcf6;padding:15px;border-radius:8px}.lab label{font-size:12px;display:block;margin:10px 0 5px}.lab button,.lab select{font-size:12px}#announcement{font-size:13px;color:var(--muted);min-height:20px}.intro{max-width:790px}.compact{font-size:13px}.outcome{font-size:22px;letter-spacing:-.4px;margin:8px 0}.brief{font-family:Georgia,serif;font-size:18px;line-height:1.7}.team-label{border-bottom:1px solid var(--line);padding-bottom:12px;margin-bottom:20px}.snapshot{font-size:12px;color:var(--muted)}
+.workbench .scenario-grid{grid-template-columns:1fr}
+@media(max-width:1100px){.workbench{grid-template-columns:190px minmax(0,1fr)}.workbench>.right{grid-column:1/-1}.grid{grid-template-columns:1fr}}@media(max-width:720px){header{padding:14px 18px}.shell{padding:20px 15px}.fixture-banner{padding:10px 18px}.workbench,.ledger{display:block}.scenario-grid{grid-template-columns:1fr}.field-grid{grid-template-columns:1fr}table{font-size:12px}td,th{padding:8px 4px}h1{font-size:25px}#variant-label{min-width:180px}.panel{padding:16px}}
+</style>
+</head>
+<body>
+<div class="fixture-banner"><strong>THROWAWAY PROTOTYPE / SYNTHETIC FIXTURES ONLY.</strong> No connected dataset, agents, login or enforced access boundaries. Memory only; reloading resets runs.</div>
+<header><div><span class="brand">CITADEL</span> <span class="muted">/ Operator workspace</span></div><span class="badge private">One Operator / three team views</span></header>
+<main id="app"></main>
+<nav id="switcher" aria-label="Prototype layout switcher"><button data-action="previous" aria-label="Previous layout">&larr;</button><span id="variant-label"></span><button data-action="next" aria-label="Next layout">&rarr;</button></nav>
+<script>
+const variants = {A:"Scenario-first", B:"Team workbench", C:"Evidence ledger"};
+const teams = ["Exercise Planning", "Evidence Review", "Reference Data"];
+const scenarios = {
+  comparison: ["Comparison", "Three complete candidates and a cited brief."],
+  replacement: ["Replacement", "Labelled missing-width overlay; skip and replace."],
+  exhaustion: ["Exhaustion", "Expected bounded-pool outcome; no brief."]
+};
+const fixtures = [
+  {id:"TEST-A", name:"Alder fixture airport", country:"NL", width:"45", surface:"ASP"},
+  {id:"TEST-B", name:"Birch fixture airport", country:"BE", width:"30", surface:"CON"},
+  {id:"TEST-C", name:"Cedar fixture airport", country:"DE", width:"40", surface:"ASP"},
+  {id:"TEST-D", name:"Dune fixture airport", country:"DE", width:"35", surface:"CON"}
+];
+let nextRun = 4;
+const runs = [
+  {id:"fixture-001",scenario:"comparison",snapshot:"complete",observed:"2026-10-27T14:00:00Z"},
+  {id:"fixture-002",scenario:"replacement",snapshot:"complete",observed:"2026-10-27T14:01:00Z"},
+  {id:"fixture-003",scenario:"exhaustion",snapshot:"complete",observed:"2026-10-27T14:02:00Z"}
+];
+let variant = new URLSearchParams(location.search).get("variant") || "A";
+if (!variants[variant]) variant = "A";
+let run = runs[0], team = teams[0], scenario = "comparison", candidateId = "TEST-A";
+let observation = "available", evidenceTab = "findings", starts = 0, message = "";
+const esc = value => String(value).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const button = (text, action, value = "", active = false, disabled = false) =>
+  `<button data-action="${action}" data-value="${esc(value)}" ${active?'class="active"':""} ${disabled?"disabled":""}>${text}</button>`;
+const badge = (text, kind = "") => `<span class="badge ${kind}">${text}</span>`;
+
+function records() {
+  const partial = run.snapshot !== "complete";
+  const source = partial ? fixtures.slice(0,2) : run.scenario === "comparison" ? fixtures.slice(0,3) : fixtures;
+  return source.map((f,i) => {
+    const overlay = run.scenario === "exhaustion" || (run.scenario === "replacement" && i === 0);
+    const released = !partial || i === 0;
+    return {...f,overlay,widthParsed:overlay?null:Number(f.width),released,
+      release:released?"Approved for sharing":run.snapshot==="failed"?"Release rejected":"Not observed",
+      decision:!released?"Not selected: no approved finding":overlay?"Skipped: runway width missing":"Selected: complete evidence",
+      finding:`${run.id}/${f.id}/finding-v1`,draft:`${run.id}/${f.id}/draft-v1`};
+  });
+}
+function teamTabs(vertical = false) {
+  return `<nav class="${vertical?"vertical-tabs":"tabs"}" aria-label="Team views">${teams.map(t=>button(t,"team",t,t===team)).join("")}</nav>`;
+}
+function runPicker() {
+  return `<label for="run-picker" class="eyebrow">Saved fixture runs</label><select id="run-picker" data-change="run" style="width:100%;margin:8px 0">${runs.map(r=>`<option value="${r.id}" ${r===run?"selected":""}>${r.id} / ${scenarios[r.scenario][0]} / ${r.snapshot}</option>`).join("")}</select><small>Reopen saved observations, never resubmit. Refreshing this prototype resets fixtures.</small>`;
+}
+function scenarioChooser() {
+  const blocked = runs.some(r=>r.snapshot!=="complete");
+  return `<h2>Start a scenario</h2><p class="muted compact">Agents assess, review and write automatically in the intended demo. Here, you load fixture snapshots yourself.</p>
+  <div class="scenario-grid">${Object.entries(scenarios).map(([key,[name,description]])=>button(`<strong>${name}</strong><small>${description}</small>`,"scenario",key,key===scenario).replace('<button','<button class="scenario'+(key===scenario?' active':'')+'"').replace(' class="active"','')).join("")}</div>
+  ${button("Start fixture run","start","",false,blocked)}
+  ${blocked?`<div class="notice compact"><strong>New starts blocked.</strong> ${esc(runs.find(r=>r.snapshot!=="complete").id)} has unresolved execution or recovery. Inspect its saved work; no admission reset is offered.</div>`:""}
+  <p class="muted compact">Generated IDs. One active or unresolved run. No automatic retry.</p>`;
+}
+function observationNotice() {
+  const notices = {
+    stale:"Refresh failed. Showing the last successful observation below; execution may have changed.",
+    denied:"Observation access denied. No fallback read. Last observed records below are historical, not a current authorization or execution result.",
+    unavailable:"Observation service unavailable. Last observed records retained below; no conclusion about execution.",
+    unknown:"Execution state unknown. Last observed artifacts retained; absence does not prove no work occurred.",
+    empty:"Confirmed empty artifact observation (fixture). No current artifacts returned; this does not prove that no work occurred."
+  };
+  return `${observation!=="available"?`<div class="notice ${observation==="denied"?"error":""}" role="status">${notices[observation]}</div>`:""}
+  <div class="row between snapshot"><span>Last successful observation: ${esc(run.observed)}<br>Observation time, not artifact-change time. ${observation==="available"?"Loaded fixture snapshot.":"Not a current observation."}</span>${button("Refresh fixture observation","refresh")}</div>`;
+}
+function runSummary() {
+  let title = "Saved work, execution incomplete", kind = "warn";
+  if(run.snapshot==="failed"){title="Technical failure / partial artifacts";kind="fail";}
+  if(run.snapshot==="complete"){title=run.scenario==="exhaustion"?"Bounded pool exhausted / expected outcome":"Comparison complete";kind="";}
+  return `<div class="eyebrow">${esc(run.id)} / ${scenarios[run.scenario][0]}</div><div class="outcome">${title}</div>
+  ${badge(run.snapshot==="complete"?"Terminal saved result":run.snapshot==="failed"?"Recovery required":"Active fixture snapshot",kind)}
+  ${run.scenario!=="comparison"?` ${badge("Labelled missing-width test overlay","warn")}<p class="compact">Original source data unchanged.</p>`:""}
+  ${observationNotice()}`;
+}
+function candidateTable() {
+  return `<h2>Assessed candidates</h2><p class="muted compact">Only saved assessments, not the unassessed search pool.</p>
+  <table><thead><tr><th>Candidate</th><th>Evidence</th><th>Release / selection</th></tr></thead><tbody>${records().map(r=>`<tr><td>${button(r.id,"candidate",r.id)}<br><small>${r.name}</small></td><td>${badge(r.overlay?"Insufficient":"Complete",r.overlay?"warn":"")}<br><small>${r.overlay?"Missing runway width":"Profile fields present"}</small></td><td>${r.release}<br><small>${r.decision}</small></td></tr>`).join("")}</tbody></table>
+  <p class="compact">${button("Inspect assessed reference data","team","Reference Data")} ${button("Operator-only Evidence Review","team","Evidence Review")}</p>`;
+}
+function brief() {
+  if(run.snapshot!=="complete") return `<h2>No saved brief</h2><p>Partial findings remain inspectable. Neither incomplete execution nor a technical failure is a successful comparison.</p>`;
+  if(run.scenario==="exhaustion") return `<h2>No brief / expected outcome</h2><p>The bounded fixture pool supplied zero complete candidates; three were required. All assessed candidates lack runway width under the labelled overlay.</p><code>bounded_pool_exhausted</code>`;
+  const selected = records().filter(r=>r.released&&!r.overlay);
+  return `<h2>Saved exercise brief</h2><p class="brief">For this fictional comparison, ${selected.map(r=>`${r.name} <a href="#finding-${r.id}" data-action="citation" data-value="${r.id}">[${r.id} v1]</a>`).join(", ")} supply the profile's required reference fields.</p><p class="compact muted">Fixture prose, not generated by an agent. Citations open exact saved approved-finding versions, never private drafts.</p>`;
+}
+function planning() {
+  return `<section class="panel">${candidateTable()}</section><section class="panel">${brief()}${caveat()}</section>`;
+}
+function reference() {
+  const record = records().find(r=>r.id===candidateId) || records()[0];
+  return `<section class="panel"><div class="team-label"><div class="eyebrow">Reference Data / read-only</div><h2>Inspect the assessed evidence</h2></div>
+  <div class="tabs">${records().map(r=>button(r.id,"candidate",r.id,r.id===record.id)).join("")}</div>
+  <h3>${record.name}</h3><p class="muted compact">Exact fixture source binding for ${run.id}. No search or unassessed-airport browsing.</p>
+  <div class="field-grid"><div><small>Runway width / original raw</small><strong>"${record.width}"</strong>Parsed: ${Number(record.width)} metres</div><div><small>Runway width / assessed</small><strong>${record.overlay?"null / missing":`${record.widthParsed} metres`}</strong>${record.overlay?"Labelled overlay removed width; source unchanged.":"No width overlay."}</div><div><small>Surface / raw and parsed</small><strong>"${record.surface}" / ${record.surface}</strong>Quality: recognized fixture surface</div><div><small>Country / raw and parsed</small><strong>"${record.country}" / ${record.country}</strong>Synthetic airport identifier: ${record.id}</div></div>
+  <details open><summary>Profile and provenance</summary><p class="compact">Profile: fixture-profile-v1 (width, surface, country). Source: synthetic-source-v1, fixture row ${record.id}. Overlay: ${record.overlay?`${run.scenario}-missing-width-v1`:"none"}. Quality: ${record.overlay?"required width missing":"required fixture fields present"}. These values are illustrative, not the full production profile or real OurAirports records.</p></details>
+  ${button("Back to saved planning run","team","Exercise Planning")}${caveat()}</section>`;
+}
+function evidence() {
+  const relevant = records().filter(r=>evidenceTab==="drafts" || r.released);
+  return `<section class="panel"><div class="team-label"><div class="eyebrow">Evidence Review / Operator observation</div><h2>Private assessments, separate from shared findings</h2></div>
+  <div class="tabs">${button("Approved findings","evidence","findings",evidenceTab==="findings")}${button("Private drafts / Operator only","evidence","drafts",evidenceTab==="drafts")}</div>
+  ${evidenceTab==="drafts"?`<div class="notice">${badge("PRIVATE / OPERATOR ONLY","private")}<p>This inspection does not grant Candidate Planner or Briefing Author draft access. Approval stays with the Release Reviewer agent; no human approval button.</p><small>No private notes, model exchanges or hidden reasoning.</small></div>`:`<p class="compact">Released findings can report insufficient evidence. Approval permits sharing, not completeness.</p>`}
+  ${relevant.map(r=>`<article id="finding-${r.id}" class="candidate ${r.id===candidateId?"selected":""}"><h3>${r.id} ${evidenceTab==="drafts"?badge("Private draft v1","private"):badge("Approved finding v1")}</h3><code>${esc(evidenceTab==="drafts"?r.draft:r.finding)}</code><p>${r.overlay?"Assessment: runway width is missing under the labelled overlay. Insufficient evidence for this profile.":"Assessment: the required fixture reference fields are present. Complete evidence for this profile."}</p><p class="compact"><strong>Release outcome:</strong> ${r.release}. ${r.release==="Release rejected"?"Fixture rejection: draft provenance could not be validated. No finding published.":""}</p><details><summary>Exact version bindings</summary><p class="compact">Draft v1 / ${r.draft}; source synthetic-source-v1; profile fixture-profile-v1; overlay ${r.overlay?`${run.scenario}-missing-width-v1`:"none"}. ${r.released?`Released finding v1 / ${r.finding}.`:"No approved finding observed."} No substitution with current data.</p></details></article>`).join("")}
+  ${button("Return to planning run","team","Exercise Planning")}${caveat()}</section>`;
+}
+function caveat(){return `<p class="caveat">Reference-data completeness is not accuracy, airport safety or operational suitability. Fictional exercise only. Approval permits sharing; it does not remove missing-evidence caveats.</p>`;}
+function content() {
+  if(observation==="empty") return `<section class="panel"><h2>Confirmed empty artifact observation</h2><p>No artifacts were returned in this fixture snapshot. No brief is shown. This is different from denied access, unavailable data or unknown execution.</p></section>`;
+  return team==="Exercise Planning"?planning():team==="Reference Data"?reference():evidence();
+}
+function lab() {
+  return `<section class="lab"><div class="eyebrow">Prototype controls / not product UI</div><p class="compact">Load discrete fixture snapshots. No real work, automatic progress or polling. Layouts share the same in-memory state.</p>
+  <label for="snapshot">Saved execution snapshot</label><select id="snapshot" data-change="snapshot"><option value="active" ${run.snapshot==="active"?"selected":""}>Incomplete / active</option><option value="complete" ${run.snapshot==="complete"?"selected":""}>Scenario's terminal outcome</option><option value="failed" ${run.snapshot==="failed"?"selected":""}>Technical failure / partial work</option></select>
+  <label for="observation">Observation condition</label><select id="observation" data-change="observation">${[["available","Available"],["stale","Refresh failed / stale"],["denied","Access denied"],["unavailable","Service unavailable"],["unknown","Execution unknown"],["empty","Confirmed empty artifacts"]].map(([value,label])=>`<option value="${value}" ${observation===value?"selected":""}>${label}</option>`).join("")}</select>
+  <p class="compact">Private fixtures are in this browser bundle. Visual separation is not an authorization test.</p></section>`;
+}
+function recovery() {
+  return `<section class="panel compact"><h3>Run recovery</h3><p>Ordinary recovery belongs in the intended UI. Its safe actions are still undecided; this prototype does not invent them.</p><button disabled>Recovery contract pending</button><p><a href="https://github.com/JoranBergfeld/citadel-example/issues/30" target="_blank" rel="noreferrer">Define safe browser-based run recovery</a></p><small>No reset, retry, cancellation, deadline extension or budget refill.</small></section>`;
+}
+function statePanel() {
+  const visible = records().map(r=> {
+    const {draft,...publicRecord} = r;
+    return team==="Evidence Review" && evidenceTab==="drafts" ? r : publicRecord;
+  });
+  return `<details class="panel"><summary>Prototype state / current view</summary><pre>${esc(JSON.stringify({variant,team,selectedRun:run.id,scenario:run.scenario,snapshot:run.snapshot,observation,lastSuccessfulObservation:run.observed,candidateId,evidenceTab:team==="Evidence Review"?evidenceTab:undefined,fixtureStarts:starts,runs:runs.map(r=>({id:r.id,snapshot:r.snapshot})),records:observation==="empty"?[]:visible},null,2))}</pre><small>Debug projection follows the selected team view; not a security boundary.</small></details>`;
+}
+function render() {
+  document.getElementById("variant-label").textContent = `${variant} / ${variants[variant]}`;
+  let layout;
+  if(variant==="A") layout = `<div class="panel dark intro"><div class="eyebrow">A / Scenario-first</div><h1>One run. Three team perspectives.</h1><p>Start with the exercise, follow the evidence, return to its saved brief.</p></div><div class="grid"><div><section class="panel">${scenarioChooser()}</section><section class="panel">${runPicker()}</section></div><section class="panel">${runSummary()}</section></div>${teamTabs()}${content()}<div class="grid">${recovery()}${lab()}</div>`;
+  if(variant==="B") layout = `<div class="workbench"><aside class="panel"><div class="eyebrow">B / Team workbench</div><h2>Your team views</h2>${teamTabs(true)}${runPicker()}</aside><div><section class="panel">${runSummary()}</section><h1>${team}</h1>${content()}</div><aside class="right"><section class="panel">${scenarioChooser()}</section>${recovery()}${lab()}</aside></div>`;
+  if(variant==="C") layout = `<div class="row between"><div><div class="eyebrow">C / Evidence ledger</div><h1>What was saved, and what supports it?</h1></div><div style="max-width:380px">${runPicker()}</div></div><div class="ledger"><aside><section class="panel"><h2>Artifact index</h2><p class="compact">Saved objects, not a mutation timeline.</p>${records().map(r=>`<div class="candidate"><strong>${r.id}</strong><br><small>${r.release}</small><div class="row">${button("Source","source",r.id)}${r.released?button("Finding v1","citation",r.id):button("Operator draft","draft",r.id)}</div></div>`).join("")}</section>${lab()}</aside><div class="ledger-main"><section class="panel">${runSummary()}</section>${teamTabs()}${content()}<details class="panel"><summary>Start another scenario</summary>${scenarioChooser()}</details>${recovery()}</div></div>`;
+  document.getElementById("app").innerHTML = `<div class="shell"><div id="announcement" role="status">${esc(message)}</div>${layout}${statePanel()}</div>`;
+}
+function cycle(offset) {
+  const keys = Object.keys(variants);
+  variant = keys[(keys.indexOf(variant)+offset+keys.length)%keys.length];
+  const url = new URL(location.href); url.searchParams.set("variant",variant); history.replaceState(null,"",url);
+  message = `Layout ${variant}: ${variants[variant]}. Selected run and team retained.`; render();
+}
+document.addEventListener("click",event=>{
+  const target = event.target.closest("[data-action]");
+  if(!target) return;
+  event.preventDefault();
+  const action = target.dataset.action, value = target.dataset.value;
+  if(action==="previous" || action==="next"){cycle(action==="next"?1:-1);return;}
+  message = "";
+  if(action==="team") team=value;
+  if(action==="scenario") scenario=value;
+  if(action==="candidate"){candidateId=value; if(team==="Exercise Planning") message=`Selected ${value}. Open Reference Data or Evidence Review to inspect the same candidate.`;}
+  if(action==="citation"){candidateId=value;team="Evidence Review";evidenceTab="findings";message=`Exact saved citation: ${run.id}/${value}/finding-v1.`;}
+  if(action==="source"){candidateId=value;team="Reference Data";}
+  if(action==="draft"){candidateId=value;team="Evidence Review";evidenceTab="drafts";}
+  if(action==="evidence") evidenceTab=value;
+  if(action==="refresh"){
+    if(observation==="available"){run.observed=new Date().toISOString();message="Fixture observation loaded. No work submitted or model called.";}
+    else message="Fixture observation condition retained. Use prototype controls to change the condition; refreshing does not recover execution.";
+  }
+  if(action==="start"){
+    if(runs.some(r=>r.snapshot!=="complete")){message="Start blocked by unresolved fixture run.";}
+    else {run={id:`fixture-${String(nextRun++).padStart(3,"0")}`,scenario,snapshot:"active",observed:new Date().toISOString()};runs.push(run);starts++;team=teams[0];observation="available";candidateId="TEST-A";message="Started a local fixture run. Use prototype controls to load its terminal snapshot; no agents run.";}
+  }
+  render();
+});
+document.addEventListener("change",event=>{
+  const target=event.target;
+  if(target.dataset.change==="run"){run=runs.find(r=>r.id===target.value);observation="available";candidateId="TEST-A";message="Reopened saved fixture run. No submission or regeneration.";}
+  if(target.dataset.change==="snapshot"){run.snapshot=target.value;run.observed=new Date().toISOString();observation="available";message="Loaded a synthetic saved snapshot, not an execution or recovery action.";}
+  if(target.dataset.change==="observation"){observation=target.value;message="Changed the fixture observation condition, not the underlying execution snapshot.";}
+  render();
+});
+document.addEventListener("keydown",event=>{
+  if(event.target.closest("input,textarea,select,[contenteditable]") || event.altKey || event.ctrlKey || event.metaKey) return;
+  if(event.key==="ArrowLeft" || event.key==="ArrowRight"){event.preventDefault();cycle(event.key==="ArrowRight"?1:-1);}
+});
+window.addEventListener("popstate",()=>{const key=new URLSearchParams(location.search).get("variant");variant=variants[key]?key:"A";render();});
+render();
+</script>
+</body>
+</html>
