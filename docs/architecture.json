@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Citadel Azure resource groups",
+    "locale": "en",
+    "quality_profile": "showcase",
+    "viewBox": [1240, 780]
+  },
+  "components": [
+    {"id": "apim", "type": "security", "label": "API Management", "sublabel": "BasicV2 / system identity", "pos": [55, 100], "size": [250, 80]},
+    {"id": "hosting", "type": "cloud", "label": "Container Apps environment", "sublabel": "Shared Consumption profile", "pos": [345, 100], "size": [250, 80]},
+    {"id": "registry", "type": "cloud", "label": "Container Registry", "sublabel": "Basic / immutable image digests", "pos": [635, 100], "size": [250, 80]},
+    {"id": "openai", "type": "cloud", "label": "Azure OpenAI", "sublabel": "S0 / regional gpt-4.1-mini", "pos": [925, 100], "size": [250, 80]},
+    {"id": "platformvault", "type": "security", "label": "Platform Key Vault", "sublabel": "Gateway certificate secret", "pos": [55, 240], "size": [250, 80]},
+    {"id": "inventory", "type": "cloud", "label": "API Center", "sublabel": "Workload and REST inventory", "pos": [345, 240], "size": [250, 80]},
+    {"id": "insights", "type": "backend", "label": "Application Insights", "sublabel": "Workspace-based / Entra ingestion", "pos": [635, 240], "size": [250, 80]},
+    {"id": "logs", "type": "database", "label": "Log Analytics", "sublabel": "12 tables / 30-day retention", "pos": [925, 240], "size": [250, 80]},
+    {"id": "reference", "type": "backend", "label": "Reference Data", "sublabel": "1 app + identity / Blob / Key Vault", "pos": [65, 495], "size": [330, 100]},
+    {"id": "evidence", "type": "backend", "label": "Evidence Review", "sublabel": "2 apps + identities / Blob / Key Vault", "pos": [455, 495], "size": [330, 100]},
+    {"id": "planning", "type": "backend", "label": "Exercise Planning", "sublabel": "2 apps + identities / Blob / Key Vault", "pos": [845, 495], "size": [330, 100]}
+  ],
+  "boundaries": [
+    {"kind": "region", "label": "citadel-<id>-platform", "wraps": ["apim", "hosting", "registry", "openai", "platformvault", "inventory", "insights", "logs"], "pad": 25},
+    {"kind": "security-group", "label": "citadel-<id>-reference", "wraps": ["reference"], "pad": 25},
+    {"kind": "security-group", "label": "citadel-<id>-evidence", "wraps": ["evidence"], "pad": 25},
+    {"kind": "security-group", "label": "citadel-<id>-planning", "wraps": ["planning"], "pad": 25}
+  ],
+  "cards": [
+    {"dot": "cyan", "title": "Placement", "items": ["One Azure subscription, West Europe.", "All five apps use the shared environment.", "Resource groups express ownership, not network isolation."]},
+    {"dot": "emerald", "title": "Team resources", "items": ["Reference: read-only MCP service.", "Evidence: Assessor and Reviewer.", "Planning: Planner and Author."]},
+    {"dot": "violet", "title": "Scope", "items": ["Bicep-declared services, not live inventory.", "Team bundles expand in architecture.md.", "No VNet or private endpoint is declared."]}
+  ]
+}

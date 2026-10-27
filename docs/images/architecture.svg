@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1140" height="520" viewBox="0 0 1140 520" role="img" aria-labelledby="title description">
+  <title id="title">Simplified runtime architecture</title>
+  <desc id="description">The operator CLI calls API Management. Five Container Apps exchange A2A, MCP and REST through API Management; all agent model calls also use that gateway. Only the gateway's managed identity accesses Azure OpenAI inference. Workloads directly access their scoped team Blob storage with their own managed identities. Key Vault, API Center and telemetry are explained in the README rather than shown here.</desc>
+  <style>
+    text { font-family: DejaVu Sans, sans-serif; fill: #172338; }
+    .heading { font-size: 24px; font-weight: 700; }
+    .label { font-size: 23px; font-weight: 700; }
+    .detail { font-size: 19px; fill: #405168; }
+    .edge { font-size: 18px; fill: #405168; }
+    .line { fill: none; stroke: #52657e; stroke-width: 2.5; }
+  </style>
+  <rect width="1140" height="520" rx="16" fill="#f3f6fb"/>
+  <text x="35" y="43" class="heading">One governed gateway; separate data authority</text>
+  <rect x="35" y="100" width="245" height="110" rx="12" fill="#fff" stroke="#697c96" stroke-width="2"/>
+  <text x="57" y="143" class="label">Operator CLI</text>
+  <text x="57" y="178" class="detail">Start / poll / inspect</text>
+  <rect x="425" y="100" width="275" height="110" rx="12" fill="#fff0f2" stroke="#b84259" stroke-width="2"/>
+  <text x="445" y="143" class="label">API Management</text>
+  <text x="445" y="178" class="detail">Caller + route controls</text>
+  <rect x="845" y="100" width="260" height="110" rx="12" fill="#e9f7f0" stroke="#267955" stroke-width="2"/>
+  <text x="863" y="143" class="label">5 Container Apps</text>
+  <text x="863" y="178" class="detail">4 agents + MCP</text>
+  <path d="M280 155H425" class="line"/>
+  <path d="M413 149L425 155L413 161Z" fill="#52657e"/>
+  <text x="303" y="137" class="edge">A2A</text>
+  <path d="M710 155H835" class="line"/>
+  <path d="M722 149L710 155L722 161Z M823 149L835 155L823 161Z" fill="#52657e"/>
+  <text x="722" y="133" class="edge">A2A / MCP</text>
+  <text x="722" y="188" class="edge">REST / model</text>
+  <rect x="425" y="360" width="275" height="105" rx="12" fill="#fff5df" stroke="#a56c18" stroke-width="2"/>
+  <text x="445" y="402" class="label">Azure OpenAI</text>
+  <text x="445" y="437" class="detail">gpt-4.1-mini</text>
+  <path d="M562 210V350" class="line"/>
+  <path d="M556 338L562 350L568 338Z" fill="#52657e"/>
+  <rect x="468" y="266" width="189" height="52" rx="6" fill="#f3f6fb"/>
+  <text x="562" y="287" class="edge" text-anchor="middle">APIM identity only</text>
+  <text x="562" y="310" class="edge" text-anchor="middle">for model inference</text>
+  <rect x="845" y="360" width="260" height="105" rx="12" fill="#f1edfc" stroke="#7452a8" stroke-width="2"/>
+  <text x="863" y="402" class="label">Team Blob storage</text>
+  <text x="863" y="437" class="detail">Evidence + durable state</text>
+  <path d="M975 210V350" class="line"/>
+  <path d="M969 338L975 350L981 338Z" fill="#52657e"/>
+  <rect x="873" y="266" width="204" height="52" rx="6" fill="#f3f6fb"/>
+  <text x="975" y="287" class="edge" text-anchor="middle">Direct SDK access</text>
+  <text x="975" y="310" class="edge" text-anchor="middle">own scoped identity</text>
+  <text x="35" y="284" class="detail">Also present:</text>
+  <text x="35" y="321" class="detail">Key Vault: secrets</text>
+  <text x="35" y="356" class="detail">API Center: inventory</text>
+  <text x="35" y="391" class="detail">Insights + Logs: evidence</text>
+  <text x="35" y="497" class="detail">Logical routes, not private-network topology. HTTPS origins still require application-enforced trust.</text>
+</svg>

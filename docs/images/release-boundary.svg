@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1140" height="460" viewBox="0 0 1140 460" role="img" aria-labelledby="title description">
+  <title id="title">Release is a data boundary, not a model opinion</title>
+  <desc id="description">Evidence Assessor writes an immutable private draft. Release Reviewer independently rechecks reference data and validates the exact draft version and hash. Only Reviewer can publish the shareable finding. Planning reads that exact version over REST; it cannot read private drafts or overwrite findings. Private notes, prompts and deliberation do not appear in the released projection. Approved findings may describe complete or insufficient evidence.</desc>
+  <style>
+    text { font-family: DejaVu Sans, sans-serif; fill: #172338; }
+    .heading { font-size: 24px; font-weight: 700; }
+    .label { font-size: 22px; font-weight: 700; }
+    .detail { font-size: 19px; fill: #405168; }
+    .edge { font-size: 17px; fill: #405168; }
+    .line { fill: none; stroke: #52657e; stroke-width: 2.5; }
+  </style>
+  <rect width="1140" height="460" rx="16" fill="#f3f6fb"/>
+  <text x="35" y="43" class="heading">Approval permits sharing one exact version</text>
+  <rect x="35" y="105" width="280" height="125" rx="12" fill="#f1edfc" stroke="#7452a8" stroke-width="2"/>
+  <text x="55" y="143" class="label">Private draft</text>
+  <text x="55" y="177" class="detail">Assessor writes</text>
+  <text x="55" y="206" class="detail">Version + hash + notes</text>
+  <rect x="430" y="105" width="280" height="125" rx="12" fill="#f1edfc" stroke="#7452a8" stroke-width="2"/>
+  <text x="450" y="143" class="label">Release Reviewer</text>
+  <text x="450" y="177" class="detail">Independent MCP recheck</text>
+  <text x="450" y="206" class="detail">Code validates projection</text>
+  <rect x="825" y="105" width="280" height="125" rx="12" fill="#e9f7f0" stroke="#267955" stroke-width="2"/>
+  <text x="845" y="143" class="label">Released finding</text>
+  <text x="845" y="177" class="detail">Evidence + gaps + caveats</text>
+  <text x="845" y="206" class="detail">Exact version / provenance</text>
+  <path d="M315 165H420" class="line"/>
+  <path d="M408 159L420 165L408 171Z" fill="#52657e"/>
+  <text x="337" y="146" class="edge">Read</text>
+  <path d="M710 165H815" class="line"/>
+  <path d="M803 159L815 165L803 171Z" fill="#52657e"/>
+  <text x="726" y="146" class="edge">Publish</text>
+  <rect x="35" y="290" width="675" height="110" rx="12" fill="#fff0f2" stroke="#b84259" stroke-width="2"/>
+  <text x="55" y="327" class="label">Private material does not cross this boundary</text>
+  <text x="55" y="360" class="detail">No private notes, prompts or reviewer deliberation in findings.</text>
+  <text x="55" y="385" class="detail">Planner / Author cannot read drafts or overwrite findings.</text>
+  <rect x="825" y="290" width="280" height="110" rx="12" fill="#e9f7f0" stroke="#267955" stroke-width="2"/>
+  <text x="845" y="327" class="label">Planner / Author</text>
+  <text x="845" y="360" class="detail">Read-only REST access</text>
+  <text x="845" y="385" class="detail">No approval authority</text>
+  <path d="M965 230V280" class="line"/>
+  <path d="M959 268L965 280L971 268Z" fill="#52657e"/>
+  <text x="35" y="437" class="detail">A finding may be complete OR insufficient. Neither classification is a safety certification.</text>
+</svg>
