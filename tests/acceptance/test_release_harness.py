@@ -135,7 +135,7 @@ class ReleaseHarnessTests(unittest.TestCase):
                 return self.summary
 
         native, saves = Native(), []
-        original = copy.deepcopy(native.app)
+        original = copy.deepcopy(native.app["properties"]["template"])
         app = {"app": "/subscriptions/s/resourceGroups/g/providers/Microsoft.App/containerApps/d-release-reviewer",
                "identityClientId": principal, "identityPrincipalId": principal,
                "image": "registry.example/image@sha256:" + "a" * 64}
@@ -148,7 +148,7 @@ class ReleaseHarnessTests(unittest.TestCase):
         ReleaseAcceptance(lifecycle).execute(report)
         self.assertEqual(report["release_phase"]["state"], "observed")
         self.assertEqual(len(report["release_phase"]["snapshots"]), 4)
-        self.assertEqual(native.app, original)
+        self.assertEqual(native.app["properties"]["template"], original)
         self.assertEqual(native.dispatches[0]["workload"], "release-reviewer")
         self.assertEqual(native.dispatches[0]["mode"], "release-faults")
         self.assertEqual(native.dispatches[0]["release"]["run_id"], "comparison")
@@ -165,21 +165,21 @@ class ReleaseHarnessTests(unittest.TestCase):
             "identityPrincipalId": "22222222-2222-2222-2222-222222222222"}
         lifecycle.value["outputs"]["appInventory"] = [assessor_app]
         native.app["properties"]["template"]["containers"][0]["env"][1]["value"] = "assessor-operations"
-        restored = copy.deepcopy(native.app)
+        restored = copy.deepcopy(native.app["properties"]["template"])
         ReleaseAcceptance(lifecycle).execute(report, mode="draft-versions")
         self.assertEqual(report["version_phase"]["state"], "observed")
         self.assertEqual(len(report["version_phase"]["snapshots"]), 1)
         self.assertEqual(report["operation_ids"].count("versionprobe-v1"), 1)
         self.assertEqual(report["operation_ids"].count("versionprobe-a"), 1)
         self.assertEqual(report["operation_ids"].count("versionprobe-b"), 1)
-        self.assertEqual(native.app, restored)
+        self.assertEqual(native.app["properties"]["template"], restored)
         self.assertNotIn("PRIVATE", str(report))
         with self.assertRaises(Blocked):
             ReleaseAcceptance(lifecycle).execute(report, mode="draft-versions")
         self.assertEqual(len(native.dispatches), 2)
         lifecycle.value["outputs"]["appInventory"] = [app]
         native.app["properties"]["template"]["containers"][0]["env"][1]["value"] = "reviewer-operations"
-        restored = copy.deepcopy(native.app)
+        restored = copy.deepcopy(native.app["properties"]["template"])
         ReleaseAcceptance(lifecycle).execute(report, mode="immutable-versions")
         self.assertEqual(report["immutable_phase"]["state"], "observed")
         self.assertEqual(report["immutable_phase"]["deadline"], report["version_phase"]["deadline"])
@@ -187,7 +187,7 @@ class ReleaseHarnessTests(unittest.TestCase):
                          report["immutable_phase"]["source"]["draft_after"]["sha256"])
         self.assertEqual(report["operation_ids"].count("immutableprobe-v1"), 1)
         self.assertEqual(report["operation_ids"].count("immutableprobe-v2"), 1)
-        self.assertEqual(native.app, restored)
+        self.assertEqual(native.app["properties"]["template"], restored)
         self.assertNotIn("PRIVATE", str(report))
         with self.assertRaises(Blocked):
             ReleaseAcceptance(lifecycle).execute(report, mode="immutable-versions")

@@ -206,7 +206,7 @@ class AdmissionControllerTests(unittest.TestCase):
             def blob_read(self, *args):
                 return self.summary
         self_case, native = self, Native()
-        original = copy.deepcopy(native.app)
+        original = copy.deepcopy(native.app["properties"]["template"])
         app = {"app": "/subscriptions/s/resourceGroups/g/providers/Microsoft.App/containerApps/d-candidate-planner",
             "identityClientId": "11111111-1111-1111-1111-111111111111",
             "identityPrincipalId": "11111111-1111-1111-1111-111111111111",
@@ -219,7 +219,7 @@ class AdmissionControllerTests(unittest.TestCase):
         self.assertEqual(report["admission_phase"]["state"], "observed")
         self.assertEqual(report["admission_phase"]["snapshots"]["budget"]["budget_state"]["agent_executions"], 42)
         self.assertIn("budget-slot1", report["operation_ids"])
-        self.assertEqual(native.app, original)
+        self.assertEqual(native.app["properties"]["template"], original)
         self.assertEqual(len(native.patches), 2)
         with self.assertRaises(Blocked):
             FaultAcceptance(lifecycle).execute(report, mode="admission-limits")

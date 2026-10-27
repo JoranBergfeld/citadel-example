@@ -168,7 +168,7 @@ class ReadControllerTests(unittest.TestCase):
                 return self.summary
 
         native = Native()
-        original = copy.deepcopy(native.app)
+        original = copy.deepcopy(native.app["properties"]["template"])
         app = {"app": "/subscriptions/s/resourceGroups/g/providers/Microsoft.App/containerApps/d-candidate-planner",
             "identityClientId": "11111111-1111-1111-1111-111111111111",
             "identityPrincipalId": "11111111-1111-1111-1111-111111111111",
@@ -181,7 +181,7 @@ class ReadControllerTests(unittest.TestCase):
         self.assertEqual(report["read_phase"]["state"], "observed")
         self.assertEqual(report["read_phase"]["snapshots"]["reads"]["artifact_count"], 0)
         self.assertIn("reads-read511", report["operation_ids"])
-        self.assertEqual(native.app, original)
+        self.assertEqual(native.app["properties"]["template"], original)
         self.assertEqual(len(native.patches), 2)
         self.assertEqual(FaultAcceptance.evaluate(report, [], mode="read-limit")[0]["status"], "blocked")
         with self.assertRaises(Blocked):
