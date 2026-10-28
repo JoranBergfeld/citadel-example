@@ -124,7 +124,7 @@ class EvidenceObservationTests(unittest.IsolatedAsyncioTestCase):
             calls.append(request)
             role, path = request.url.path.lstrip("/").split("/", 1)
             path = "/" + path
-            if fail:
+            if fail or role not in owner_clients:
                 return httpx.Response(503, json={"state": "unavailable"})
             return await owner_clients[role].get("https://gateway.test" + path,
                 headers={**signed(b"", role, path, "operator-web", "GET"),
@@ -143,7 +143,7 @@ class EvidenceObservationTests(unittest.IsolatedAsyncioTestCase):
             await browser.post("/login", headers={"origin": config.origin},
                 data={"username": "operator", "password": "fixture only passphrase"})
             pages = await asyncio.gather(browser.get(path), browser.get(path))
-            self.assertEqual(len(calls), 2)
+            self.assertEqual(len(calls), 4)
             self.assertIn("&lt;Saved assessment&gt;", pages[0].text)
             self.assertIn("Private Operator inspection", pages[0].text)
             self.assertNotIn("DO NOT EXPORT", pages[0].text)

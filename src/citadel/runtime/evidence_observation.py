@@ -222,7 +222,9 @@ def install(app, runtime):
             if not math.isfinite(end):
                 raise ValueError("Invalid deadline")
             async with runtime.observation_reads.request(deadline=end):
-                return JSONResponse(await function(*args))
+                result = await function(*args)
+                result["activity"] = runtime.activity.observe(args[0])
+                return JSONResponse(result)
         except OperationError as exc:
             state = {"forbidden": "denied", "not_found": "missing", "missing": "unavailable",
                      "exhausted": "exhausted"}.get(exc.code, "unavailable")

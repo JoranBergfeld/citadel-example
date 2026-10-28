@@ -20,6 +20,7 @@ from citadel.operations.limits import EDGES
 from citadel.acceptance.telemetry import correlation_headers
 from .reference import RetrievedReference
 from .state import reads
+from .activity import dispatched
 
 
 _exchange = ContextVar("citadel_network_exchange", default=None)
@@ -57,6 +58,7 @@ class GatewayPeers:
             await allowance.admit()
         request.headers["Ocp-Apim-Subscription-Key"] = self.key
         request.headers.update(correlation_headers())
+        dispatched()
 
     async def _received(self, response):
         admission = _exchange.get()

@@ -164,10 +164,61 @@ refreshes every 15 seconds while its page is visible. History/completed views ar
 manual. The dependency-free client stops on hidden pages, terminal/unknown
 execution, exhausted observation allowance or authentication denial. It has no
 submission, retry or recovery loop. Active stale observations remain labelled
-last-known, not live activity. No simulated stages, pulses or percentages exist.
+last-known, not live activity. No simulated stages or percentages exist.
 Manual/automatic requests share one in-flight backend read across tabs; automatic
 requests reuse the latest attempt for 15 seconds, including failed attempts.
 Authentication and explicit user submission remain separate from observation.
+
+### Cross-team flow and node inspection
+
+The current-run screen leads with an interactive, team-grouped architecture and
+short owner-action descriptions. Its arrows are **authored possible routes**, not
+a played-back timeline. The diagram includes all four agents, Reference Data,
+private drafts, approved findings, planning records, the UI/backend/APIM entry,
+gateway-mediated calls, scoped storage and the model route.
+
+Select an agent/data node to inspect its existing team-owned projection with the
+same selected run. Architecture/support nodes open explanatory detail without a
+service request. Exact brief citations still open the saved approved-finding
+version; private draft links remain Operator-only Evidence Review inspection.
+Planning receives no draft preview. Missing/partial history, provenance and
+source-versus-overlay distinctions are unchanged.
+
+Only an owning service's **actual in-flight call** can substantiate a highlighted
+agent or route. Services attach a small allowlisted, run-bound activity projection
+to their existing summary/draft/release/brief responses. It reports an awaiting
+reference, child, finding or model call, not downstream execution or model output.
+It is ephemeral, bounded to 32 concurrent local task entries, and absent after the
+call ends, cancellation or process restart. Evidence begins only at the outgoing
+HTTP boundary after confirmed protocol/model admission; waiting for admission
+does not light a route. A persisted running label, lease, expected sequence or
+saved artifact is never used to invent activity.
+
+Dispatch evidence expires within **15 seconds** (and before its original execution
+deadline). Reading a projection never renews that evidence. The browser removes pulses and changes descriptions to unknown/last
+observed on expiry or failed/stale observation, even if a refresh is still pending.
+Independent owner observations may disagree in age; they are not an atomic
+cross-team snapshot. Calls between observations may be missed; unknown does not
+mean idle. Only the reporting origin agent and its evidenced route light up, never
+a destination agent inferred from that route.
+
+The existing single 15-second visible selected-active-run refresh also updates
+the flow. Existing authorized cache keys and in-flight work are shared with team
+inspection and across tabs. There are no per-node pollers. The one client expiry
+timer only makes presentation stale; it does not fetch or dispatch anything.
+Additional outgoing owner projections and their underlying storage/supporting
+reads consume the same finite deployment observation allowance, within the same
+30-second composition deadline and without automatic retries. Activity itself
+requires no new persistence, gateway capability, model call or storage read.
+
+**Pause animation** and system **reduced motion** leave a static diagram without
+stopping observation or changing execution, recovery or retry controls. With no
+JavaScript there is no animation. Retry controls appearing in a later observation
+retain the separately confirmed retry client; refresh never submits them.
+The pinned throwaway prototype supplied only
+interaction reference: its synthetic playback code/data is not a production mode
+and is not evidence that agents or deployed Azure routes ran. Offline handler and
+Node tests do not establish live service, Azure/APIM enforcement or model quality.
 
 ## Private setup and replacement
 
