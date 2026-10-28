@@ -13,8 +13,11 @@ param createResourceGroups bool = true
 param createApiCenter bool = true
 @description('False provisions foundation only, before image build/push. True requires real digest-pinned images.')
 param deployRuntime bool = true
-@description('Five immutable ACR image references and actual command/args arrays, keyed by workload name.')
+@description('Five team workloads and separate Operator application, using immutable ACR images.')
 param applications object = {}
+@secure()
+@description('Privately prompted Operator username and Argon2id hash; never plaintext.')
+param operatorAuth object
 @secure()
 @description('Four agents plus operator: {caller: {primary: value, secondary: value}}. Both keys rotate explicitly.')
 param callerKeys object
@@ -99,6 +102,32 @@ module teams 'modules/team.bicep' = [for team in ['reference', 'evidence', 'plan
   }
   dependsOn: [referenceGroup, evidenceGroup, planningGroup]
 }]
+module operatorFoundation 'modules/operator-foundation.bicep' = {
+  name: 'operator-foundation-${deploymentId}'
+  scope: resourceGroup(groups.platform)
+  params: {
+    deploymentId: deploymentId
+    location: location
+    vaultName: platform.outputs.vaultName
+    registryName: platform.outputs.registryName
+    operatorAuth: operatorAuth
+  }
+}
+module operatorApp 'modules/operator-app.bicep' = if (deployRuntime) {
+  name: 'operator-web-${deploymentId}'
+  scope: resourceGroup(groups.platform)
+  params: {
+    deploymentId: deploymentId
+    location: location
+    environmentId: platform.outputs.environmentId
+    environmentName: last(split(platform.outputs.environmentId, '/'))
+    registryName: platform.outputs.registryName
+    identityId: operatorFoundation.outputs.identityId
+    usernameUrl: operatorFoundation.outputs.usernameUrl
+    verifierUri: operatorFoundation.outputs.verifierUri
+    application: applications['operator-web']
+  }
+}
 module apps 'modules/app.bicep' = [for (workload, i) in workloads: if (deployRuntime) {
   name: 'app-${workload.name}-${deploymentId}'
   scope: resourceGroup(groups[workload.team])
@@ -162,6 +191,11 @@ output teamInventory array = [for (team, i) in ['reference', 'evidence', 'planni
   credentials: teams[i].outputs.credentialInventory
 }]
 output appInventory array = [for (workload, i) in workloads: deployRuntime ? apps[i]!.outputs.inventory : { pending: workload.name }]
+output operatorInventory object = {
+  foundation: operatorFoundation.outputs.inventory
+  application: deployRuntime ? operatorApp!.outputs.inventory : { pending: 'operator-web' }
+  origin: deployRuntime ? operatorApp!.outputs.origin : ''
+}
 output inventory object = {
   deploymentId: deploymentId
   groups: [platformGroup!.id, referenceGroup!.id, evidenceGroup!.id, planningGroup!.id]
