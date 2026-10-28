@@ -141,6 +141,23 @@ class Native:
             # Never retry a write after an ambiguous outcome.
             raise Blocked("bootstrap_write_requires_reconciliation") from None
 
+    def blob_pool_lease(self, account, container, name, scope):
+        from azure.core.exceptions import AzureError, HttpResponseError
+        from azure.storage.blob import BlobLeaseClient
+        from uuid import NAMESPACE_URL, uuid5
+        try:
+            with self.blob(account, container, name) as client:
+                lease = BlobLeaseClient(client, lease_id=str(uuid5(
+                    NAMESPACE_URL, "citadel-ticket-pool:" + scope)))
+                try:
+                    lease.acquire(lease_duration=-1, timeout=5)
+                except HttpResponseError as exc:
+                    if exc.status_code != 409:
+                        raise
+                    lease.renew(timeout=5)
+        except AzureError:
+            raise Blocked("observation_descriptor_lease_unverified") from None
+
     def telemetry(self, workspace_id, *, since, timeout):
         query = (
             "union withsource=Source AppRequests, AppDependencies, AppTraces, "

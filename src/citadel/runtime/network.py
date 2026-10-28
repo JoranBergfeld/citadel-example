@@ -20,6 +20,7 @@ from citadel.operations.limits import EDGES
 from citadel.acceptance.telemetry import correlation_headers
 from .reference import RetrievedReference
 from .state import reads
+from .activity import dispatched
 
 
 _exchange = ContextVar("citadel_network_exchange", default=None)
@@ -57,6 +58,7 @@ class GatewayPeers:
             await allowance.admit()
         request.headers["Ocp-Apim-Subscription-Key"] = self.key
         request.headers.update(correlation_headers())
+        dispatched()
 
     async def _received(self, response):
         admission = _exchange.get()
@@ -212,3 +214,22 @@ class GatewayPeers:
         self.http.event_hooks["response"].remove(self._received)
         if self.owns_http:
             await self.http.aclose()
+
+    async def recover_child(self, target, operation_id, request_id, binding, deadline):
+        """Only explicit parent recovery uses this edge; no SendMessage or model work."""
+        if target not in EDGES[self.workload]:
+            raise OperationError("forbidden", "Recovery must follow the original child grant")
+
+        async def read():
+            response = await self.http.post(
+                f"{self.gateway}/{target}/operator/recovery/{operation_id}/{request_id}",
+                json=binding, headers={"x-citadel-recovery-deadline": str(deadline)},
+                timeout=max(0.001, deadline - self.clock()))
+            if response.status_code != 200:
+                raise OperationError("unavailable", "Child recovery proof unavailable; no release")
+            return response.json()
+
+        try:
+            return await self.exchange(target, deadline, read)
+        except (httpx.HTTPError, TimeoutError, ValueError, TypeError):
+            raise OperationError("unavailable", "Child recovery proof unavailable; no release") from None

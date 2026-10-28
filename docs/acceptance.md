@@ -1,10 +1,52 @@
-# Observable acceptance: implementation checkpoint
+# Legacy acceptance diagnostics and historical evidence
 
-**Task 20 is not complete. Do not start task 21 or claim cloud acceptance from
-the local tests.** The required coverage catalogue deliberately includes checks
-whose deployed drivers/proofs are still absent. Such checks remain `blocked`;
-rotation retirement cannot pass through placeholders. Denied-bypass continuation
-requires its four independently verified, actually executed storage denials.
+**This is opt-in diagnostic reference, not a development/merge programme.**
+The 278-check catalogue, two consecutive cloud passes, fresh-deployment proof
+and human narrative signoff are retired as development/merge obligations.
+Retained probes/helpers and report validators are not deleted or weakened:
+an optional report still cannot claim proof it did not collect. Do not claim
+cloud acceptance from local tests or mark outstanding real-cloud checks passed.
+
+## Mandatory contributor gate
+
+From the repository root in the installed pinned project environment:
+
+```sh
+python -m unittest discover -s tests/unit -v
+python -m unittest discover -s tests/unit -p 'test_release_reviewer.py' -v
+```
+
+The first is the full development/merge gate; the second is a focused iteration
+example. Explicit flat discovery is required; root/nested discovery can yield
+zero tests. No cloud deployment, credentials, Docker, source-data acquisition,
+telemetry collection or real model inference is needed. See
+[testing.md](testing.md) for discovery, other areas and optional-suite prerequisites.
+No timing benchmark or coverage target is introduced.
+
+## Diagnostic prerequisites and claim limits
+
+Broader SDK/protocol/in-process integration, multi-agent scenarios, retained
+external-data tests and local acceptance-tooling tests are optional; their
+individual commands and prerequisites are in [testing.md](testing.md#optional-diagnostics-not-additional-gates).
+`python -m unittest discover -s tests/acceptance -v` exercises the retained
+tooling with controlled fixtures/subprocesses, not a deployed acceptance run.
+Some harnesses use longer waits/polling; they need not pass to migrate the gate.
+
+The CLI acceptance/collection/review commands below require explicitly
+authorized real deployment state, private credentials and actual evidence.
+Paid cloud probes can change workload configuration; do not run implicitly or
+during presentations. Real readiness, authorization, plan checks, finite
+accounting, exact ownership, explicit paid actions and manual teardown are
+unchanged. No optional diagnostic grants privileged fallback.
+
+Passing units or fixtures proves only controlled behavior, not deployed Azure/
+APIM enforcement, real model quality, telemetry delivery, reproducibility or
+actual demo success. Historical evidence/status below is retained as recorded,
+not rerun or certified by this migration. Previous task20/21 completion plans are
+historical diagnostic work, not prerequisites to contributor changes.
+Missing deployed observations remain `blocked`/unverified; rotation retirement
+cannot pass through placeholders. Denied-bypass continuation still requires
+its four independently verified, actually executed storage denials.
 
 ## Implemented public boundaries
 
@@ -379,7 +421,7 @@ agent authorization, data-boundary, model, protocol or telemetry evidence.
   with the underlying client's 30-redirect ceiling) to the existing operator
   control budget in one local reservation, not Azure prepaid ticket writes.
 
-## Evidence and human review
+## Optional legacy reporting and human review
 
 ```sh
 python -m citadel.operator acceptance --state-dir "$CITADEL_STATE_DIR" --run-id acceptance001
@@ -389,7 +431,8 @@ python -m citadel.operator review-acceptance --state-dir "$CITADEL_STATE_DIR" \
   --run-id acceptance001 --review "$CITADEL_STATE_DIR/review.json"
 ```
 
-Do not run the paid/deployed suite until the missing facilities below are resolved.
+These are opt-in paid/deployed diagnostics, never the development/merge gate.
+Do not run them until their actual deployment/proof prerequisites are satisfied.
 These commands are implemented interfaces, **not evidence that deployment has run**.
 `collect-only` does not resubmit business work or reset the persisted 600-second
 collection deadline. Native queries share its remaining time allowance.
@@ -406,15 +449,16 @@ collection deadline. Native queries share its remaining time allowance.
 }
 ```
 
-The human must inspect each scenario's narrative/partial narrative for unsupported
-claims, hidden gaps and operational-suitability claims. Record the actual answers;
+For this optional legacy report, the human must inspect each scenario's
+narrative/partial narrative for unsupported claims, hidden gaps and
+operational-suitability claims. Record the actual answers;
 `false` is rejection, not approval. An automated test never writes human approval.
 The hash must match the stored scenario product. Missing review is
 `pending_human`; one reviewed complete cloud pass is `pending_second_pass`.
 Two consecutive complete passes require the same pinned fingerprints, matching
 deterministic semantics and disjoint operation/run IDs. An intervening failed
 attempt breaks the pair. Local mode, missing checks or skipped checks cannot pass.
-The required set is the shipped catalogue, not a report's self-declared subset.
+The report's required set is the shipped catalogue, not a self-declared subset.
 All four scenario products and application/gateway/storage evidence are mandatory;
 malformed identities, hashes or review records block before human confirmation.
 Report gates re-run independent storage/origin/read/invocation/durable-fault oracles using the fingerprinted
@@ -633,7 +677,8 @@ host, and does not claim a Container Apps platform restart.
 Implemented providers now cover all 278 canonical checks; this is source-provider
 coverage, **not a cloud pass count**. The three rotation families and actual
 900-second workflow boundary have fixed-purpose drivers and fail-closed exported
-proof oracles. Missing deployed observations still block the full gate.
+proof oracles. Missing deployed observations still block a complete legacy
+diagnostic report, not development/merge.
 
 1. Perform deployed validation of the implemented telemetry configuration,
    application ingestion counts and gateway/storage correlation proofs.
@@ -656,8 +701,9 @@ proof oracles. Missing deployed observations still block the full gate.
    bindings and no automatic replay. All other application deployment/revision
    APIs remain `2025-01-01`; no live console connection has run locally.
 
-Fresh deployment, safe repair, manual teardown/residue evidence and actual portal
-plan observation remain operator/task-21 evidence conditions. Ordinary managed
+Fresh-deployment proof remains a legacy diagnostic report condition, not a
+development/merge obligation. Safe repair, manual teardown/residue accounting
+and actual portal plan observation remain real-operation safeguards. Ordinary managed
 identities are not Entra Agent IDs. Agent 365, Conditional Access, Defender and
 Purview remain explicitly unexercised.
 

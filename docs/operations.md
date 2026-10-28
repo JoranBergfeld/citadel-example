@@ -1,10 +1,22 @@
 # Durable operations and release persistence
 
 Issue 16 supplies persistence/accounting interfaces, **not** an HTTP service, model
-orchestrator, deployment, or proof of cloud authorization. Use the locked Python
-environment and `python -m unittest discover -s tests/operations -v`.
-Local tests use deterministic conditional storage and the actual pinned Blob SDK
-with an offline HTTP transport. Four cloud tests explicitly skip without opt-in.
+orchestrator, deployment, or proof of cloud authorization.
+
+The development/merge gate is the offline unit suite in [testing.md](testing.md).
+From the repository root in the installed pinned environment:
+
+```sh
+python -m unittest discover -s tests/unit -v
+python -m unittest discover -s tests/unit -p 'test_operations.py' -v
+```
+
+The focused command is for iteration. The broader
+`python -m unittest discover -s tests/operations -v` suite is an **opt-in
+diagnostic**: local integration uses deterministic conditional storage and the
+actual pinned Blob SDK with an offline HTTP transport. With live opt-ins unset,
+cloud probes explicitly skip. This is not a requirement to run all nested
+suites or prove deployed authorization before merging.
 
 ## Authority and storage
 
@@ -211,7 +223,8 @@ new durable reservation. Do not borrow another workload's unused tickets.
 `unsupported_version`. Existing evidence validation preserves `EvidenceError`.
 Storage errors deliberately omit credentials, request bodies and service messages.
 
-Run real-storage tests **inside the explicitly allocated workload identity
+Real-storage tests are **opt-in paid diagnostics**, never part of the contributor
+gate. Run them **inside the explicitly allocated workload identity
 environment**, only after authorized paid provisioning by the operator:
 
 * `CITADEL_STORAGE_TESTS=1`

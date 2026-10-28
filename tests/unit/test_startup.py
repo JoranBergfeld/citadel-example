@@ -10,6 +10,8 @@ def environment(role="candidate-planner"):
     return {
         "CITADEL_TARGET": role, "AZURE_CLIENT_ID": "00000000-0000-0000-0000-000000000001",
         "CITADEL_DEPLOYMENT_ID": "citadeltest",
+        "CITADEL_OBSERVATION_BLOB_URL": "https://observe.blob.core.windows.net",
+        "CITADEL_REFERENCE_CONTEXT_BLOB_URL": "https://planning.blob.core.windows.net",
         "CITADEL_GATEWAY_URL": "https://gateway.test",
         "CITADEL_BLOB_URL": "https://team.blob.core.windows.net",
         "CITADEL_VAULT_URL": "https://team.vault.azure.net",
@@ -48,6 +50,8 @@ class StartupTests(unittest.TestCase):
             {"CITADEL_MODEL_TOKENS_PER_MINUTE": "0"},
             {"CITADEL_BLOB_API_VERSION": "latest"},
             {"CITADEL_CONTEXT_KEYS": "{}"},
+            {"CITADEL_OBSERVATION_BLOB_URL": "https://team.example.test"},
+            {"CITADEL_DEPLOYMENT_ID": ""},
             {"CITADEL_LIMITS": '{"workflow_seconds":901}'},
         ]:
             with self.subTest(altered=tuple(altered)):
@@ -62,3 +66,8 @@ class StartupTests(unittest.TestCase):
         config = Configuration.from_environment(values)
         self.assertEqual(config.target, "reference-data")
         self.assertIsNone(config.subscription_secret)
+        self.assertEqual(config.reference_context_blob, "https://planning.blob.core.windows.net")
+        for field in ("CITADEL_REFERENCE_CONTEXT_BLOB_URL", "CITADEL_OBSERVATION_BLOB_URL"):
+            with self.subTest(field=field):
+                with self.assertRaises(ValueError):
+                    Configuration.from_environment(values | {field: "https://untrusted.test"})

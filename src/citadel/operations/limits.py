@@ -45,10 +45,12 @@ class ReadAllowance:
 
 
 class Accounting:
-    def __init__(self, ledger, *, workload, clock=time.time, tokens_per_minute=120000):
+    def __init__(self, ledger, *, workload, clock=time.time, tokens_per_minute=120000,
+                 sleep=asyncio.sleep):
         if workload not in EDGES or type(tokens_per_minute) is not int or not 1 <= tokens_per_minute <= 120000:
             raise OperationError("invalid_input", "Invalid workload or actual model token quota")
         self.ledger, self.workload, self.clock = ledger, workload, clock
+        self.sleep = sleep
         self.tokens_per_minute = tokens_per_minute
 
     async def _load(self, budget_id, *, active=True):
@@ -237,7 +239,7 @@ class Accounting:
         """The supplied safe read must disable its SDK retries. Ambiguous writes never enter here."""
         for retry in range(3):
             permit = await self.safe_read(budget_id, retry=retry)
-            await asyncio.sleep(permit["backoff"])
+            await self.sleep(permit["backoff"])
             started = self.clock()
             remaining = permit["deadline"] - started
             if remaining <= 0:

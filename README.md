@@ -29,8 +29,9 @@ rules. The teams share one subscription and one human administrator.
 
 ## A comparison from start to finish
 
-The operator starts a scenario through the CLI, which submits a task to Planner
-and polls until it can retrieve the JSON result.
+The Operator chooses a scenario in the [protected hosted application](docs/operator-web.md)
+and follows its actual saved result. The CLI remains available; both paths
+share the Planner's durable global admission.
 
 ![The comparison workflow, including replacement and exhaustion outcomes.](docs/images/user-flow.svg)
 
@@ -66,6 +67,10 @@ service by resource group, with storage containers, identities and connections.
 
 Microsoft Agent Framework and FastAPI run in four Azure Container Apps, each
 with its own identity. A fifth app hosts Reference Data's MCP server.
+A separate [protected Operator application](docs/operator-web.md) provides the
+scenario chooser, linked team perspectives and manual retained-run history,
+including newly indexed CLI submissions. Its Run action remains disabled
+until real browser execution is implemented; it never simulates a run.
 
 Agents communicate over A2A, query data over MCP, and read findings over REST.
 Azure API Management (APIM) routes these calls, authenticates individual
@@ -133,14 +138,15 @@ Combined denied-bypass acceptance remains incomplete. One run's evidence had an
 invalid timestamp; another stopped during review with three drafts, two findings
 and no brief. The latter failure remains unexplained.
 
-Human review, remaining controls and two full acceptance passes are outstanding
-in #21. These results describe previous runs.
+Human review, remaining controls and two full acceptance passes were outstanding
+in #21. These historical results remain unverified where recorded; they are not
+development/merge prerequisites and are not marked passed by offline tests.
 
 ## Running it
 
 Follow [the operator guide](docs/operator.md) for the pinned toolchain, Azure
 permissions, model quota and private deployment configuration. Deployment creates
-paid resources, including five warm apps and APIM. They remain billable until
+paid resources, including five warm team apps, the Operator app and APIM. They remain billable until
 removed; there is no spending cap or automatic cleanup.
 
 With a deployed instance and `CITADEL_STATE_DIR` pointing to its private state:
@@ -163,3 +169,28 @@ For further detail, see [data and fixtures](docs/evidence.md),
 [acceptance checks](docs/acceptance.md). The
 [original specification](https://github.com/JoranBergfeld/citadel-example/issues/13)
 records the intended scope.
+
+## Development and merge gate
+
+In the installed project environment, from the repository root:
+
+```sh
+python -m unittest discover -s tests/unit -v
+python -m unittest discover -s tests/unit -p 'test_candidate_planner.py' -v
+```
+
+See [testing commands and boundaries](docs/testing.md) for other focused areas,
+fixtures, migration scope and claim limits. These tests need no cloud resources,
+credentials, real model, Docker or external network; passing them does not prove
+deployed enforcement or real-demo success.
+
+The full command is the contributor development/merge test gate; the focused
+command is for iteration, not a substitute for the full gate before merging.
+The `Offline units` workflow runs that full command on pushes, pull requests and
+merge queues. Broader SDK/protocol/integration suites, external-data checks,
+live probes and [legacy acceptance reports](docs/acceptance.md) are **opt-in
+diagnostics**, not additional signoff. The 278-check catalogue, two cloud passes,
+fresh-deployment proof and human narrative signoff are retired as development/
+merge obligations. Deployment readiness, authorization, explicit paid-action
+confirmation, ownership checks and manual teardown still apply when running or
+managing the real demo.

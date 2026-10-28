@@ -27,7 +27,7 @@ class OwnerRouteRuntimeTests(unittest.IsolatedAsyncioTestCase):
         sys.path.insert(0, runtime_tests)
         try:
             from test_reference import reference, trust
-            from test_read_tickets import CountingLedger
+            from tests.unit.test_read_tickets import CountingLedger
             from test_workflow import FixtureGateway
         finally:
             sys.path.remove(runtime_tests)

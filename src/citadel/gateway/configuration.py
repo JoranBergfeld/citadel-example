@@ -60,8 +60,19 @@ def validate_deployment_inputs(parameters: dict) -> None:
             raise ValueError("Actual application command and args arrays are required")
         if any(not isinstance(value, str) or not value for value in app["command"] + app["args"]):
             raise ValueError("Application command and args must contain nonempty strings")
-    if parameters.get("deployRuntime", True) and set(applications) != set(INVOCATION_CALLERS):
-        raise ValueError("Exactly five named applications are required")
+    expected_apps = set(INVOCATION_CALLERS)
+    if "operatorAuth" in parameters:
+        from citadel.operator.web import AuthConfig
+        auth = parameters["operatorAuth"]
+        AuthConfig(auth["username"], auth["passwordHash"], "https://configuration.invalid")
+        expected_apps.add("operator-web")
+        operator = applications.get("operator-web", {})
+        if parameters.get("deployRuntime", True) and (
+                operator.get("command") != ["python", "-m", "citadel.operator.web"]
+                or operator.get("args") != []):
+            raise ValueError("Operator requires its single-process entrypoint")
+    if parameters.get("deployRuntime", True) and set(applications) != expected_apps:
+        raise ValueError("Exact named application inventory required")
     certificates = parameters.get("gatewayCertificates", [])
     material = {
         item["sha256"]: (datetime.fromisoformat(item["not_before"]), datetime.fromisoformat(item["not_after"]))
@@ -85,8 +96,10 @@ def validate_deployment_inputs(parameters: dict) -> None:
         raise ValueError("Context signing keys must be isolated by backend and rotation version")
     callers = parameters.get("callerKeys", {})
     expected = (set(INVOCATION_CALLERS) - {"reference-data"}) | {"operator"}
+    if "operatorAuth" in parameters:
+        expected.add("operator-web")
     if set(callers) != expected:
-        raise ValueError("Exactly four agent and one operator credentials required")
+        raise ValueError("Exact isolated agent and Operator caller credentials required")
     all_caller_keys = []
     for entry in callers.values():
         for name in ("primary", "secondary"):

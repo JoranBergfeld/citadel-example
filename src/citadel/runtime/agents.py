@@ -27,18 +27,23 @@ from citadel.gateway import GatewayTrust
 from citadel.gateway.trust import INVOCATION_CALLERS
 from citadel.acceptance.telemetry import correlate, emit
 from .model import INSTRUCTIONS
-from .state import ScopedLedger, read_scope, snapshots
+from .state import ScopedLedger, read_scope, snapshots, read_deadline
 from .tickets import CAPACITY, TicketPool
+from .activity import OwnerActivity
 
 
 class Runtime:
     def __init__(self, workload, ledger, *, model, peers, gateway_url,
                  artifacts=None, drafts=None, tokens_per_minute=120000, clock=time.time,
-                 ticket_store=None, acceptance_hold=None, workflow_hold=None):
+                 ticket_store=None, acceptance_hold=None, workflow_hold=None, run_index=None,
+                 recovery_admission=None, observation_reads=None):
         self.workload, self.model, self.peers, self.clock = workload, model, peers, clock
         self.ledger = ScopedLedger(ledger)
         self.acceptance_hold = acceptance_hold
         self.workflow_hold = workflow_hold
+        self.run_index = run_index
+        self.recovery_admission = recovery_admission or (run_index.admission if run_index else None)
+        self.observation_reads = observation_reads
         self.ops = Operations(self.ledger, workload=workload, clock=clock)
         self.accounting = Accounting(self.ledger, workload=workload, clock=clock,
                                      tokens_per_minute=tokens_per_minute)
@@ -47,6 +52,7 @@ class Runtime:
                              if artifacts is not None else None)
         self.draft_reader = DraftReader(ScopedLedger(drafts)) if drafts is not None else None
         self.tasks = set()
+        self.activity = OwnerActivity(workload, clock)
         self.renew_at = {}
         self.events = {}
         self.ticket_store = ticket_store or getattr(ledger, "ticket_store", None)
@@ -85,6 +91,8 @@ class Runtime:
             raise OperationError("invalid_input", "Child operation must be its authenticated grant")
         elif payload["grant"]["allowance"]["reads"] != CAPACITY[self.workload]:
             raise OperationError("invalid_input", "Child read grant does not match its finite pool")
+        if self.run_index is not None:
+            await self.run_index.register(caller, payload)
         async with asyncio.timeout(10):
             pool = self.pool(caller, operation_id)
             if recover or retry:
@@ -138,16 +146,20 @@ class Runtime:
                         await self.accounting.adopt(grant, authenticated_issuer=caller)
                         deadline = grant["deadline"]
                     accepted = await self.ops.accept(caller, "invoke", operation_id, payload,
-                                                     run_id=run_id, deadline=deadline)
+                        run_id=run_id, deadline=deadline, retained_bindings=(
+                            {"draft": payload["draft"]} if self.workload == "release-reviewer" else None))
                 with read_scope(pool, deadline=deadline, cache=snapshots.get()):
                     ownership = await self.ops.claim(caller, "invoke", operation_id,
                                                      worker=uuid4().hex, lease_seconds=180)
-                    self.renew_at[ownership.key] = self.clock() + 90
-                    self.events[operation_id] = asyncio.Event()
-                    task = asyncio.create_task(self._execute(caller, payload, ownership, deadline))
-                    self.tasks.add(task)
-                    task.add_done_callback(self.tasks.discard)
+                    self.schedule(caller, payload, ownership, deadline)
             return accepted
+
+    def schedule(self, caller, payload, ownership, deadline):
+        self.renew_at[ownership.key] = self.clock() + 90
+        self.events[payload["operation_id"]] = asyncio.Event()
+        task = asyncio.create_task(self._execute(caller, payload, ownership, deadline))
+        self.tasks.add(task)
+        task.add_done_callback(self.tasks.discard)
 
     async def _execute(self, caller, payload, ownership, deadline):
         with correlate(payload["run_id"], payload["operation_id"], self.workload):
@@ -155,6 +167,7 @@ class Runtime:
 
     async def _run(self, caller, payload, ownership, deadline):
         started, monotonic_started = self.clock(), asyncio.get_running_loop().time()
+        indexed_state = "unknown"
         timer = asyncio.timeout(max(0, deadline - started))
         try:
             async with timer:
@@ -177,6 +190,7 @@ class Runtime:
                 await self.ops.complete(ownership, product=product, finding=finding,
                                         rejection=rejection, receipt=receipt,
                                         read_scope=result.get("read_scope") if product is None else None)
+                indexed_state = "succeeded"
                 if self.workload == "candidate-planner":
                     await self.ticket_store.release_run(self.pool(caller, payload["operation_id"]).scope,
                         generation=0 if ownership.generation == 1 else ownership.generation)
@@ -197,10 +211,17 @@ class Runtime:
                                                 self.workload, code)
             try:
                 await self.ops.mark_incomplete(ownership, code)
+                indexed_state = "indeterminate"
             except OperationError:
                 # Expired/fenced/unavailable state remains incomplete, never success.
                 pass
         finally:
+            if self.run_index is not None:
+                try:
+                    await self.run_index.update(payload["run_id"], indexed_state,
+                                                generation=ownership.generation)
+                except (OperationError, TimeoutError):
+                    logging.getLogger(__name__).warning("run_index_update_unavailable")
             self.renew_at.pop(ownership.key, None)
             event = self.events.pop(payload["operation_id"], None)
             if event is not None:
@@ -212,28 +233,61 @@ class Runtime:
             self.renew_at[ownership.key] = self.clock() + 90
 
     async def _explain(self, payload, evidence):
-        return await self.model.explain(self.accounting, payload["operation_id"],
-                                        payload["operation_id"], evidence)
+        with self.activity.calling(payload["run_id"], "model", read_deadline.get() or self.clock()):
+            return await self.model.explain(self.accounting, payload["operation_id"],
+                                            payload["operation_id"], evidence)
+
+    async def _reference(self, payload, deadline, ident=None):
+        with self.activity.calling(payload["run_id"], "reference", deadline):
+            return await self.peers.reference(payload["fixture"], deadline, *([ident] if ident else []))
+
+    async def _child(self, owner, payload, target, inputs, allowance, deadline):
+        with self.activity.calling(payload["run_id"], target, deadline):
+            return await self.peers.child(self, owner, payload, target, inputs, allowance)
+
+    async def _finding(self, payload, ref, deadline, scope):
+        with self.activity.calling(payload["run_id"], "findings", deadline):
+            return await self.peers.finding(ref, deadline, read_scope=scope)
 
     async def _plan(self, payload, owner, deadline):
         if self.workflow_hold is not None:
             await self.workflow_hold.wait(self, payload, owner, deadline)
         commentary = await self._explain(payload, {"fixture": payload["fixture"], "target": 3, "pool_limit": 20})
-        pool = await self.peers.reference(payload["fixture"], deadline)
+        pool = await self._reference(payload, deadline)
         selected, assessed, references, read_scopes = [], [], [], []
-        for airport in pool["airports"]:
+        context_available = self.run_index is not None
+
+        async def save_assessed(ident, complete, finding=None, *, pending=False):
+            nonlocal context_available
+            if context_available:
+                try:
+                    from .planning_observation import candidate_decision
+                    decision = candidate_decision(
+                        {"airport_ident": ident, "classification": "unknown"} if pending else assessed[-1], finding,
+                        replacement=(len(assessed) > 3 and
+                                     any(item["classification"] != "complete" for item in assessed[:-1])))
+                    await self.run_index.assessed(payload["run_id"], ident, pool["provenance"],
+                                                  complete=complete, decision=decision)
+                except (OperationError, TimeoutError):
+                    # Observation failure cannot fail/replay the admitted workflow.
+                    context_available = False
+                    logging.getLogger(__name__).warning("assessed_context_unavailable")
+
+        for number, airport in enumerate(pool["airports"]):
             ident = airport["ident"]["parsed"]
             await self.renew_if_needed(owner)
             await self.accounting.candidate(payload["operation_id"], ident)
-            result = await self.peers.child(self, owner, payload, "evidence-assessor", {"airport_ident": ident},
-                {"agents": 2, "models": 2, "tokens": 36000, "reads": CAPACITY["evidence-assessor"]})
+            result = await self._child(owner, payload, "evidence-assessor", {"airport_ident": ident},
+                {"agents": 2, "models": 2, "tokens": 36000, "reads": CAPACITY["evidence-assessor"]}, deadline)
             if result["kind"] == "rejected":
                 assessed.append({"airport_ident": ident, "classification": "release_rejected"})
+                await save_assessed(ident, number + 1 == len(pool["airports"]))
                 continue
             ref = result["finding"]
             if result["read_scope"]["run_id"] != payload["run_id"]:
                 raise OperationError("conflict", "Finding read pool differs from admitted run")
-            finding = await self.peers.finding(ref, deadline, read_scope=result["read_scope"])
+            await save_assessed(ident, False, ref, pending=True)
+            finding = await self._finding(payload, ref, deadline, result["read_scope"])
             if finding["airport_ident"] != ident or finding["provenance"] != pool["provenance"]:
                 raise OperationError("conflict", "Finding does not belong to this candidate/source/fixture")
             assessed.append(finding)
@@ -241,6 +295,7 @@ class Runtime:
                 selected.append(ident)
                 references.append(ref)
                 read_scopes.append(result["read_scope"])
+            await save_assessed(ident, len(selected) == 3 or number + 1 == len(pool["airports"]), ref)
             if len(selected) == 3:
                 break
         product = {
@@ -249,21 +304,21 @@ class Runtime:
             "provenance": pool["provenance"], "caveats": list(CAVEATS), "planner_commentary": commentary,
         }
         if len(selected) == 3:
-            product["brief"] = await self.peers.child(self, owner, payload, "briefing-author",
+            product["brief"] = await self._child(owner, payload, "briefing-author",
                 {"findings": references, "read_scopes": read_scopes},
-                {"agents": 1, "models": 1, "tokens": 18000, "reads": 16})
+                {"agents": 1, "models": 1, "tokens": 18000, "reads": 16}, deadline)
         return product
 
     async def _assess(self, payload, owner, deadline):
         ident = identity(payload["airport_ident"])
-        reference = await self.peers.reference(payload["fixture"], deadline, ident)
+        reference = await self._reference(payload, deadline, ident)
         assessment = reference.assess_airport(ident)
         notes = await self._explain(payload, self._summary(ident, assessment))
         operation_id = uuid4().hex
         draft = {
             "artifact_id": sha256({"run": payload["run_id"], "airport": ident}), "version": 1,
             "schema_version": 1, "run_id": payload["run_id"], "operation_id": operation_id,
-            "airport_ident": ident, **assessment, "private_notes": notes,
+            "airport_ident": ident, **assessment, "assessment_prose": notes,
         }
         inputs = {"draft": draft, "expected_version": 0}
         await self.ops.begin_external(owner, operation_id,
@@ -275,13 +330,13 @@ class Runtime:
         status = await self.artifact_ops.submit_draft(draft_owner, draft, expected_version=0, reference=reference)
         await self.ops.reconcile_external(owner, operation_id, status)
         ref = {key: status["result"][key] for key in ("artifact_id", "version", "sha256")}
-        return await self.peers.child(self, owner, payload, "release-reviewer", {"draft": ref},
-                                      {"agents": 1, "models": 1, "tokens": 18000, "reads": 11})
+        return await self._child(owner, payload, "release-reviewer", {"draft": ref},
+                                {"agents": 1, "models": 1, "tokens": 18000, "reads": 11}, deadline)
 
     async def _review(self, payload, owner, deadline):
         ref = payload["draft"]
         draft = await self.draft_reader.get_draft(ref["artifact_id"], ref["version"], ref["sha256"])
-        reference = await self.peers.reference(payload["fixture"], deadline, draft["airport_ident"])
+        reference = await self._reference(payload, deadline, draft["airport_ident"])
         try:
             projection = reference.shareable_projection(draft)
         except EvidenceError as exc:
@@ -321,7 +376,7 @@ class Runtime:
         scopes = payload["read_scopes"]
         if len(scopes) != len(refs) or any(scope["run_id"] != payload["run_id"] for scope in scopes):
             raise OperationError("invalid_input", "Finding reads require this run's funded reviewer pools")
-        findings = [await self.peers.finding(ref, deadline, read_scope=scope)
+        findings = [await self._finding(payload, ref, deadline, scope)
                     for ref, scope in zip(refs, scopes)]
         provenance = findings[0]["provenance"]
         if any(item["classification"] != "complete" or item["provenance"] != provenance
@@ -462,6 +517,16 @@ def agent_application(runtime, trust):
         await runtime.shutdown()
 
     app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
+    from .recovery import install_recovery_routes
+    install_recovery_routes(app, runtime)
+    from .retry import install_retry_routes
+    install_retry_routes(app, runtime)
+    if runtime.workload in ("evidence-assessor", "release-reviewer"):
+        from .evidence_observation import install
+        install(app, runtime)
+    if runtime.workload in ("candidate-planner", "briefing-author"):
+        from .planning_observation import install
+        install(app, runtime)
     add_a2a_routes_to_fastapi(app, jsonrpc_routes=create_jsonrpc_routes(
         DurableHandler(runtime), "/a2a", context_builder=TrustedContext(), enable_v0_3_compat=False))
 
@@ -477,6 +542,41 @@ def agent_application(runtime, trust):
             return JSONResponse({"error": exc.code}, status_code=429 if exc.code == "exhausted" else 409)
         except TimeoutError:
             return JSONResponse({"error": "unavailable"}, status_code=504)
+
+    if runtime.workload == "candidate-planner":
+        from .submission import attach_submission
+        attach_submission(app, runtime)
+
+        async def observation(request, *, run_id=None, cursor=None):
+            try:
+                if runtime.run_index is None:
+                    raise OperationError("unavailable", "Retained-run index unavailable")
+                end = float(request.headers.get("x-citadel-observation-deadline", runtime.clock() + 30))
+                async with runtime.run_index.admission.request(deadline=end):
+                    result = (await runtime.run_index.observe(run_id, runtime.ledger) if run_id is not None
+                              else await runtime.run_index.page_in_scope(cursor))
+                    if run_id is not None:
+                        result["activity"] = runtime.activity.observe(run_id)
+                    return JSONResponse(result)
+            except OperationError as exc:
+                state = {"forbidden": "denied", "missing": "missing", "exhausted": "exhausted"}.get(
+                    exc.code, "unavailable")
+                return JSONResponse({"state": state, "execution": "unknown"}, status_code={
+                    "denied": 403, "missing": 404, "exhausted": 429}.get(state, 503))
+            except (TimeoutError, ValueError, KeyError, TypeError):
+                return JSONResponse({"state": "unavailable", "execution": "unknown"}, status_code=503)
+
+        @app.get("/operator/runs")
+        async def retained_runs(request: Request):
+            return await observation(request)
+
+        @app.get("/operator/runs/page/{cursor}")
+        async def retained_page(cursor: str, request: Request):
+            return await observation(request, cursor=identity(cursor))
+
+        @app.get("/operator/runs/{run_id}")
+        async def retained_run(run_id: str, request: Request):
+            return await observation(request, run_id=identity(run_id))
 
     if runtime.workload == "release-reviewer":
         @app.get("/findings/{finding_id}/versions/{version}")

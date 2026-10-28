@@ -1,0 +1,147 @@
+"""Server-only, read-only owner clients and single-process shared view cache."""
+
+import asyncio
+import json
+from collections import OrderedDict
+from copy import deepcopy
+from dataclasses import dataclass
+import time
+
+import httpx
+
+from citadel.evidence.manifests import sha256
+from citadel.operations import OperationError, identity
+from citadel.runtime.configuration import endpoint
+from citadel.runtime.state import read_deadline
+
+
+@dataclass
+class Observed:
+    data: dict | None = None
+    last_success: float | None = None
+    state: str = "unknown"
+    stale: bool = False
+    last_attempt: float | None = None
+
+
+class ObservationClient:
+    def __init__(self, gateway, credential, admission, *, client=None, clock=time.time):
+        self.gateway, self.credential = endpoint(gateway), credential
+        self.admission, self.clock = admission, clock
+        self.client = client or httpx.AsyncClient(
+            transport=httpx.AsyncHTTPTransport(retries=0), follow_redirects=False)
+        self.cache, self.inflight, self.aliases = OrderedDict(), {}, {}
+        self.epoch = 0
+
+    def key(self, run_id, cursor):
+        if run_id is not None:
+            identity(run_id)
+        if cursor is not None:
+            identity(cursor)
+        return (self.admission.deployment, run_id, "planner-summary" if run_id else "run-list", cursor)
+
+    async def observe(self, run_id=None, *, cursor=None, refresh=False, automatic=False):
+        key = self.key(run_id, cursor)
+        return await self._observe_path(key, self.path(run_id, cursor), refresh, automatic=automatic)
+
+    async def evidence(self, run_id, projection, *, cursor=None, artifact_id=None, version=None,
+                       refresh=False, automatic=False):
+        from .evidence_view import observation_path
+        path = observation_path(run_id, projection, cursor, artifact_id, version)
+        key = (self.admission.deployment, run_id, "evidence-" + projection, cursor, artifact_id, version)
+        return await self._observe_path(key, path, refresh, automatic=automatic)
+
+    async def planning(self, run_id, projection, *, refresh=False, automatic=False):
+        from .planning_view import observation_path
+        path = observation_path(run_id, projection)
+        key = (self.admission.deployment, run_id, "planning-" + projection)
+        return await self._observe_path(key, path, refresh, automatic=automatic)
+
+    def selected_active(self, run_id):
+        observed = self.cache.get(self.aliases.get(self.key(run_id, None)))
+        return bool(observed and observed.state != "exhausted"
+                    and (observed.data or {}).get("execution") in ("pending", "running"))
+
+    async def _observe_path(self, key, path, refresh, *, automatic=False):
+        if key in self.inflight:
+            return deepcopy(await asyncio.shield(self.inflight[key]))
+        exact_key = self.aliases.get(key)
+        previous = self.cache.get(exact_key, Observed())
+        if previous.state == "exhausted":
+            return deepcopy(previous)
+        if automatic and previous.last_attempt is not None and self.clock() - previous.last_attempt < 15:
+            return deepcopy(previous)
+        if automatic and key[2] in ("planner-summary", "run-list") and (previous.data or {}).get("execution") not in ("pending", "running"):
+            return deepcopy(previous)
+        if exact_key in self.cache and not refresh:
+            return deepcopy(previous)
+        if len(self.inflight) >= 32:
+            return Observed(previous.data, previous.last_success, "unavailable", previous.data is not None)
+        # No await between checking and publishing: all tabs share this task.
+        task = asyncio.create_task(self._fetch(key, path, previous))
+        self.inflight[key] = task
+        task.add_done_callback(lambda completed: self.inflight.pop(key, None))
+        return deepcopy(await asyncio.shield(task))
+
+    def path(self, run_id, cursor):
+        return "/candidate-planner" + (
+            "/operator/runs/" + run_id if run_id is not None else
+            "/operator/runs/page/" + cursor if cursor else "/operator/runs")
+
+    async def _fetch(self, key, path, previous):
+        epoch = self.epoch
+        try:
+            async with self.admission.request():
+                await self.admission.charge()
+                async with self.client.stream("GET", self.gateway + path,
+                        headers={"Ocp-Apim-Subscription-Key": self.credential,
+                                 "X-Citadel-Observation-Deadline": str(read_deadline.get())},
+                        timeout=max(0.001, read_deadline.get() - self.clock())) as response:
+                    state = {403: "denied", 404: "missing", 429: "exhausted"}.get(response.status_code)
+                    if response.status_code != 200:
+                        raise OperationError(state or "unavailable", "Observation did not succeed")
+                    limit = 262144 if key[2].startswith("planning-") else None
+                    body = bytearray()
+                    async for chunk in response.aiter_bytes():
+                        if limit is not None and len(body) + len(chunk) > limit:
+                            raise OperationError("unavailable", "Observation exceeds response bound")
+                        body.extend(chunk)
+                data = json.loads(body)
+                if not isinstance(data, dict) or data.get("state") not in ("ok", "empty", "partial"):
+                    raise OperationError("unavailable", "Unknown observation result")
+                observed = Observed(data, self.clock(), data["state"], False)
+        except OperationError as exc:
+            state = {"forbidden": "denied"}.get(exc.code, exc.code)
+            if state not in ("denied", "missing", "exhausted", "unavailable"):
+                state = "unavailable"
+            observed = Observed(previous.data, previous.last_success, state, previous.data is not None)
+        except (httpx.HTTPError, TimeoutError, ValueError, TypeError):
+            observed = Observed(previous.data, previous.last_success, "unavailable", previous.data is not None)
+        observed.last_attempt = self.clock()
+        if epoch != self.epoch:
+            return Observed(observed.data, observed.last_success, "unknown", observed.data is not None,
+                            observed.last_attempt)
+        exact = key + (sha256((observed.data or {}).get("bindings", {})),)
+        old = self.aliases.get(key)
+        if old is not None and old != exact:
+            self.cache.pop(old, None)
+        self.aliases[key] = exact
+        self.cache[exact] = observed
+        self.cache.move_to_end(exact)
+        while len(self.cache) > 300:
+            removed, _ = self.cache.popitem(last=False)
+            self.aliases = {k: v for k, v in self.aliases.items() if v != removed}
+        return observed
+
+    def invalidate(self, run_id):
+        """A pre-control refresh may not repopulate invalidated mutable state."""
+        self.epoch += 1
+        for key in list(self.aliases):
+            if key[1] == run_id or key[2] == "run-list":
+                self.cache.pop(self.aliases.pop(key), None)
+
+    async def close(self):
+        for task in self.inflight.values():
+            task.cancel()
+        await asyncio.gather(*self.inflight.values(), return_exceptions=True)
+        await self.client.aclose()

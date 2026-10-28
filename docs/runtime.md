@@ -52,6 +52,11 @@ arguments or logged configuration. HTTPS origins reject credentials, queries,
 fragments, nonstandard paths and ports. Azure endpoints additionally require
 their service DNS suffix.
 
+The deployed Planner, Evidence Assessor and Release Reviewer also require trusted `CITADEL_DEPLOYMENT_ID` and
+`CITADEL_OBSERVATION_BLOB_URL` (the inventoried platform accounting account).
+The infrastructure supplies these to all workloads for later team projections;
+they never select a workflow pool or authorize data access.
+
 Agents additionally require:
 
 | Variable | Contract |
@@ -72,8 +77,9 @@ bundle objects from that container, via the pinned Azure Blob SDK and assigned
 managed identity. Each object has a bounded single GET, 30-second deadline and
 hidden-download-retry guard. The existing `ReferenceData.from_bundle` validates
 the independent source-row pin and all source/profile/fixture manifests.
-Changed cached bytes fail instead of silently refreshing. No runtime Blob
-write is available to Reference Data.
+Changed cached bytes fail instead of silently refreshing. No reference-dataset
+write is available to Reference Data; its separate accounting-only marker role
+cannot modify that dataset.
 
 The lifecycle must prepare/upload that bundle and preinitialize six
 `ledger-v1.json` blobs: the four operations containers plus Evidence Review's
@@ -88,6 +94,80 @@ root completion; crashes/ambiguity never trigger automatic replay or release.
 Missing admission storage fails closed. Runtime creates immutable ticket/pool
 objects only inside its already allocated operations container; no new identity,
 container, permission, or HTTP proxy is needed.
+
+### Retained-run observations
+
+Planner's deployed `RunIndex` records immutable original owner/run/operation/input
+bindings **before** root admission (also for CLI submissions), with a hard
+256-run bound. Execution updates summary state. Refresh never creates records or
+backfills old storage. Bootstrap initializes `retained-runs-v1.json` in
+`planner-operations` using `empty_index()`; missing binding collections and
+unavailable historical state remain unavailable, never confirmed empty.
+
+Only the separate `operator-web` caller can GET `/operator/runs`,
+`/operator/runs/page/{cursor}` and `/operator/runs/{run_id}` through Planner APIM.
+The certificate/signed context remains required at the origin. Existing
+workload status/GetTask ownership and 512 workflow reads are unchanged.
+
+Execution-path index writes use a separate, finite **64-read per-run** pool,
+`retained-index/{run_id}`, in Planner's existing `planner-operations` container.
+Its descriptor and conditional spent markers are retained alongside workflow
+accounting and included in that container's manual teardown. Registration,
+submission outcomes, assessed handoffs and execution updates prepay their actual
+index GETs there; they neither spend browsing/proof reads nor reduce the 512-read
+workflow pool. Reconstructing the pool cannot refill it. Operator observation
+and recovery still fund index reads from their respective deployment pools.
+
+Reusable implementation seams:
+
+- `runtime.observation.DeploymentReads.request(purpose, deadline=...)` opens a
+  trusted deployment observation/proof context; `charge()` prepays a protocol
+  dispatch. Capacities are 16,384/2,048, not supplied by requests.
+- `runtime.state.ScopedLedger` prepays each actual storage GET; its request-local
+  snapshots are free, not fictional physical reads. Do not use
+  `control_plane=True` for observation/supporting reads.
+- `RunIndex.resolve_in_scope(run_id)` returns the original internal binding to
+  owning-service code. `observe` projects only safe summary/binding fields,
+  never generic operation results, private drafts, receipts or paths.
+- `operator.observation.ObservationClient` coalesces manual work and keys cached
+  projections by deployment/run/projection/exact bindings. `invalidate(run_id)`
+  is the seam for later explicit control actions.
+
+Provisioning owns the two infinitely leased accounting descriptors; runtime
+only renews their leases and creates conditional spent markers. No recursive
+meter reads, read retries, refill, deadline extension, recovery or execution is
+authorized by observation. The complete observation has a 30-second ceiling.
+
+Evidence Review's owner implementation lives in
+`runtime.evidence_observation.EvidenceObservations`; `agent_application`
+installs its narrow Operator-only HTTP routes. It reads scoped owner ledgers,
+verifies exact committed draft/release references and filters before HTTP
+serialization. It never uses a workflow pool or private storage fallback.
+Reviewer invocation admission retains an exact draft binding alongside the
+original immutable input hash; observation never backfills old bindings.
+New assessments persist `assessment_prose` separately from filtered private
+notes. The release projection still excludes that prose from workload findings.
+See [Operator Evidence Review](operator-web.md#evidence-review-private-drafts-and-exact-releases)
+for routes, citation links and historical limitations.
+These paths are locally tested; deployed APIM/Azure enforcement remains unverified.
+
+Exercise Planning's narrow implementation is
+`runtime.planning_observation.PlanningObservations`. Planner resolves the retained
+submission, validates its operation/product binding and projects all saved
+candidate decisions. `RunIndex.assessed(..., decision=...)` saves public summaries
+before Author dispatch without turning observation failures into workflow replay.
+Completed saved products can supply missing supporting context, but no refresh
+writes or current-reference reconstruction occur. Author independently resolves
+the exact committed run-bound brief; ambiguous history never selects a latest
+product. Its projection contains only actual saved narrative, provenance, caveats
+and exact citations, never embedded finding/draft bodies or workflow receipts.
+
+`ObservationClient.planning(run_id, "decisions" | "brief", refresh=...)` and
+`operator.planning_view` compose these authorized projections with separate
+last-success/stale state. The existing
+`operator.evidence_view.finding_link(run_id, ref)` remains the citation interface.
+See [Exercise Planning](operator-web.md#exercise-planning-decisions-and-actual-saved-briefs)
+for owner paths, bounds and missing-history behavior.
 
 Only explicit `ManagedIdentityCredential(client_id=...)` is used. Secret
 acquisition reads the allocated subscription secret with the assigned identity,
@@ -222,19 +302,53 @@ infrastructure, rejection and insufficient evidence are distinct. Ambiguous
 external effects stay incomplete; missing state is not proof of non-execution.
 `mark_incomplete` fences local ownership without claiming `failed_no_commit`.
 If no storage deadline/ticket remains, durable running state remains incomplete.
-Existing explicit operations fencing/reconciliation/retry APIs are retained;
-this host adds no privileged HTTP recovery endpoint.
+Existing explicit operations fencing/reconciliation/retry APIs are retained.
+The hosted Operator now has a distinct, narrowly authorized recovery endpoint;
+it is not a workload ownership bypass. See [hosted recovery](operator-web.md#explicit-check-and-recover).
 The existing owner-bound `SendMessage` accepts metadata
 `{"citadel_recovery": true}` to invoke explicit fencing of that same
 input-bound operation. It never schedules persisted work and cannot recover a
 different caller's operation or escape exhausted tickets.
 
-## Validation and cloud gates
+Hosted `POST /operator/runs/{run_id}/recover/{request_id}` instead resolves the
+original retained Planner binding and uses the deployment recovery-proof pool.
+Parent services follow only exact recorded grants through separately authorized
+`POST /operator/recovery/{operation_id}/{request_id}` control actions. Those
+handlers never invoke `accept`, retry or workflow execution. Intent/proof/outcome
+records share each owner's existing operation ledger; no UI team-data role or new
+content store is introduced. Every physical ledger/protocol read is charged at
+dispatch, including audit and supporting bindings, with a single 30-second total
+deadline and no read retries. Quiescent partial work remains indeterminate and
+retained; unresolved model admissions remain blocked.
 
-Local tests use real A2A/MCP/Framework/OpenAI/Blob SDK serialization and ASGI
-hosts with bounded external transport adapters. Only tests provide model
-fixtures and in-memory ledgers. Set `CITADEL_EVIDENCE_DATA` to the retained
-approved snapshot to run both real-data workflow and Blob-bundle tests:
+## Development and merge gate
+
+Use the installed project's pinned environment from the repository root:
+
+```sh
+python -m unittest discover -s tests/unit -v
+python -m unittest discover -s tests/unit -p 'test_candidate_planner.py' -v
+```
+
+The full command is the development/merge gate; the second is a focused example
+for iteration. The flat unit suite exercises agents independently and selected
+shared boundaries without cloud, Docker, real models, external data or network.
+See [testing.md](testing.md) for all focused areas and discovery/claim limits.
+
+## Optional diagnostics
+
+The broader suites below are **opt-in diagnostics**, not development/merge gates.
+Neither all nested suites nor the legacy 278-check catalogue, two cloud passes,
+fresh-deployment proof or human narrative signoff is required for development/
+merge. Real deployment readiness and operational safeguards still apply to
+explicitly running or managing the demo.
+
+The broader local runtime suite uses real A2A/MCP/Framework/OpenAI/Blob SDK
+serialization and ASGI hosts with controlled external transport adapters,
+including in-process multi-agent scenarios and polling. Only tests provide
+model fixtures and in-memory ledgers. With live opt-ins unset, the command
+below stays local; set `CITADEL_EVIDENCE_DATA` to the already retained approved
+snapshot to include both real-data workflow and Blob-bundle checks:
 
 ```sh
 python -m unittest discover -s tests/runtime -v
@@ -244,13 +358,14 @@ python -m unittest discover -s tests/runtime -v
 `CITADEL_RUNTIME_LIVE=1`, `CITADEL_LIVE_GATEWAY`, and `CITADEL_OPERATOR_KEY`.
 It performs paid real workflow calls when enabled; ordinary validation never
 enables it. It checks real acceptance, polling, exact caveated products and an
-allowed/denied route control. These probes supplement—not replace—the four
-existing live storage probes and downstream comprehensive task20/21 acceptance.
+allowed/denied route control. The live runtime and storage probes and legacy
+task20/21 reporting are optional investigations with distinct claim limits;
+none replaces the offline development/merge gate.
 
-Unverified: effective Azure authority/certificate/HMAC/policy behavior, actual
-model inference/quota, storage fencing in the deployed topology, identity
+Offline tests do not verify effective Azure authority/certificate/HMAC/policy
+behavior, actual model inference/quota, storage fencing in the deployed topology, identity
 rotation, deployed latency, telemetry export/collection, two full cloud passes,
 operator narrative signoff, fresh deployment and teardown. SDK tracing and
 sanitized local incomplete-work logs alone do not establish unsampled deployed
-telemetry. No deployment, secret access or paid inference was performed for
-local implementation.
+telemetry. Historical cloud evidence/status is unchanged; no outstanding
+real-cloud verification is marked passed.

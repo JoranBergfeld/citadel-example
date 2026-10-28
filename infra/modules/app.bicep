@@ -12,6 +12,8 @@ param gatewayUrl string
 param gatewayCertificates array
 param modelDeployment string
 param insightsName string
+param observationBlobUrl string
+param referenceContextBlobUrl string
 resource identity 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' existing = { name: identityName }
 resource insights 'Microsoft.Insights/components@2020-02-02' existing = {
   name: insightsName
@@ -31,6 +33,7 @@ var baseEnvironment = [
   { name: 'AZURE_PRINCIPAL_ID', value: identity.properties.principalId }
   { name: 'CITADEL_TARGET', value: workload.name }
   { name: 'CITADEL_DEPLOYMENT_ID', value: deploymentId }
+  { name: 'CITADEL_OBSERVATION_BLOB_URL', value: observationBlobUrl }
   { name: 'CITADEL_GATEWAY_URL', value: gatewayUrl }
   { name: 'CITADEL_GATEWAY_CERTIFICATES', value: string(gatewayCertificates) }
   { name: 'CITADEL_CONTEXT_KEYS', secretRef: 'context-keys' }
@@ -85,6 +88,7 @@ resource app 'Microsoft.App/containerApps@2025-01-01' = {
         resources: { cpu: json('0.5'), memory: '1Gi' }
         env: concat(baseEnvironment, workload.name == 'reference-data' ? [
           { name: 'CITADEL_REFERENCE_CONTAINER', value: 'reference' }
+          { name: 'CITADEL_REFERENCE_CONTEXT_BLOB_URL', value: referenceContextBlobUrl }
         ] : [
           { name: 'CITADEL_OPERATIONS_CONTAINER', value: workload.operations }
           { name: 'CITADEL_SUBSCRIPTION_SECRET_NAME', value: 'subscription-${workload.name}' }

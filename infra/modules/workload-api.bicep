@@ -33,7 +33,64 @@ var findingOperations = [{
     { name: 'version', required: true, type: 'string' }
   ]
 }]
-var operations = target == 'reference-data' ? mcpOperations : concat(agentOperations, target == 'release-reviewer' ? findingOperations : [])
+var observationOperations = [
+  { name: 'operator-scenario-submit', method: 'POST', path: '/operator/scenarios', parameters: [] }
+  { name: 'operator-runs', method: 'GET', path: '/operator/runs', parameters: [] }
+  { name: 'operator-run-page', method: 'GET', path: '/operator/runs/page/{cursor}', parameters: [{ name: 'cursor', required: true, type: 'string' }] }
+  { name: 'operator-run', method: 'GET', path: '/operator/runs/{runId}', parameters: [{ name: 'runId', required: true, type: 'string' }] }
+  { name: 'operator-decisions', method: 'GET', path: '/operator/runs/{runId}/decisions', parameters: [{ name: 'runId', required: true, type: 'string' }] }
+]
+var briefObservationOperations = [
+  { name: 'operator-brief', method: 'GET', path: '/operator/runs/{runId}/brief', parameters: [{ name: 'runId', required: true, type: 'string' }] }
+]
+var recoveryOperations = target == 'candidate-planner' ? [{
+  name: 'operator-recover'
+  method: 'POST'
+  path: '/operator/runs/{runId}/recover/{requestId}'
+  parameters: [
+    { name: 'runId', required: true, type: 'string' }
+    { name: 'requestId', required: true, type: 'string' }
+  ]
+}] : [{
+  name: 'operator-recover-child'
+  method: 'POST'
+  path: '/operator/recovery/{operationId}/{requestId}'
+  parameters: [
+    { name: 'operationId', required: true, type: 'string' }
+    { name: 'requestId', required: true, type: 'string' }
+  ]
+}]
+var retryOperations = [{
+  name: 'operator-retry'
+  method: 'POST'
+  path: '/operator/runs/{runId}/retry/{requestId}'
+  parameters: [
+    { name: 'runId', required: true, type: 'string' }
+    { name: 'requestId', required: true, type: 'string' }
+  ]
+}]
+var draftObservationOperations = [
+  { name: 'operator-drafts', method: 'GET', path: '/operator/runs/{runId}/drafts', parameters: [{ name: 'runId', required: true, type: 'string' }] }
+  { name: 'operator-draft-page', method: 'GET', path: '/operator/runs/{runId}/drafts/page/{cursor}', parameters: [{ name: 'runId', required: true, type: 'string' }, { name: 'cursor', required: true, type: 'string' }] }
+  { name: 'operator-draft', method: 'GET', path: '/operator/runs/{runId}/drafts/{draftId}/versions/{version}', parameters: [{ name: 'runId', required: true, type: 'string' }, { name: 'draftId', required: true, type: 'string' }, { name: 'version', required: true, type: 'string' }] }
+]
+var releaseObservationOperations = [
+  { name: 'operator-releases', method: 'GET', path: '/operator/runs/{runId}/releases', parameters: [{ name: 'runId', required: true, type: 'string' }] }
+  { name: 'operator-release-page', method: 'GET', path: '/operator/runs/{runId}/releases/page/{cursor}', parameters: [{ name: 'runId', required: true, type: 'string' }, { name: 'cursor', required: true, type: 'string' }] }
+  { name: 'operator-finding', method: 'GET', path: '/operator/runs/{runId}/findings/{findingId}/versions/{version}', parameters: [{ name: 'runId', required: true, type: 'string' }, { name: 'findingId', required: true, type: 'string' }, { name: 'version', required: true, type: 'string' }] }
+]
+var referenceObservationOperations = [{
+  name: 'operator-reference'
+  method: 'GET'
+  path: '/operator/reference/runs/{runId}'
+  parameters: [{ name: 'runId', required: true, type: 'string' }]
+}]
+var operations = target == 'reference-data' ? concat(mcpOperations, referenceObservationOperations) : concat(agentOperations,
+  target == 'release-reviewer' ? concat(findingOperations, releaseObservationOperations) : [],
+  target == 'evidence-assessor' ? draftObservationOperations : [],
+  target == 'briefing-author' ? briefObservationOperations : [],
+  target == 'candidate-planner' ? observationOperations : [], recoveryOperations,
+  target == 'candidate-planner' ? retryOperations : [])
 resource routes 'Microsoft.ApiManagement/service/apis/operations@2024-05-01' = [for operation in operations: {
   parent: api
   name: operation.name

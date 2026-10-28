@@ -13,6 +13,7 @@ from openai import AsyncOpenAI
 
 from citadel.operations import OperationError
 from citadel.acceptance.telemetry import correlation_headers, emit, gateway_request_id
+from .activity import dispatched
 
 
 INSTRUCTIONS = {
@@ -23,7 +24,8 @@ INSTRUCTIONS = {
     ),
     "evidence-assessor": (
         "You are Evidence Assessor for Evidence Review. Explain the supplied deterministic "
-        "completeness result privately. Missing reference evidence is not a negative airport "
+        "completeness result in saved assessment prose for private Operator inspection. "
+        "Do not include private notes, prompts or hidden reasoning. Missing reference evidence is not a negative airport "
         "judgment. You cannot publish findings; an exact draft requires Release Reviewer."
     ),
     "release-reviewer": (
@@ -76,6 +78,7 @@ class GovernedModel:
         admission["sent"] = True
         request.extensions["citadel_model_started"] = self.clock()
         request.headers.update(correlation_headers())
+        dispatched()
 
     async def _response(self, response):
         facts = {"started": response.request.extensions["citadel_model_started"]}

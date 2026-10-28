@@ -141,7 +141,7 @@ class ProcessRestartWorkerTests(unittest.IsolatedAsyncioTestCase):
         from citadel.acceptance.worker import run_gateway_matrix
         from citadel.acceptance.process_restart import child
         from citadel.runtime.configuration import Configuration
-        from tests.runtime.test_startup import environment
+        from tests.unit.test_startup import environment
         from tests.runtime.test_storage import FixtureCredential
         from tests.runtime.test_ticket_storage import TicketWire
 

@@ -5,6 +5,33 @@
       var caller = (string)context.Variables[&quot;caller&quot;];
       var invocation = new [] { __CALLERS__ };
       var op = context.Operation.Id;
+      if (op == &quot;operator-retry&quot;) {
+        return &quot;__TARGET__&quot; == &quot;candidate-planner&quot; &amp;&amp; caller == &quot;operator-web&quot;;
+      }
+      if (op == &quot;operator-decisions&quot;) {
+        return &quot;__TARGET__&quot; == &quot;candidate-planner&quot; &amp;&amp; caller == &quot;operator-web&quot;;
+      }
+      if (op == &quot;operator-brief&quot;) {
+        return &quot;__TARGET__&quot; == &quot;briefing-author&quot; &amp;&amp; caller == &quot;operator-web&quot;;
+      }
+      if (op == &quot;operator-recover&quot;) {
+        return &quot;__TARGET__&quot; == &quot;candidate-planner&quot; &amp;&amp; caller == &quot;operator-web&quot;;
+      }
+      if (op == &quot;operator-recover-child&quot;) {
+        return &quot;__TARGET__&quot; != &quot;candidate-planner&quot; &amp;&amp; &quot;__TARGET__&quot; != &quot;reference-data&quot; &amp;&amp; invocation.Contains(caller);
+      }
+      if (new [] { &quot;operator-drafts&quot;, &quot;operator-draft-page&quot;, &quot;operator-draft&quot; }.Contains(op)) {
+        return &quot;__TARGET__&quot; == &quot;evidence-assessor&quot; &amp;&amp; caller == &quot;operator-web&quot;;
+      }
+      if (new [] { &quot;operator-releases&quot;, &quot;operator-release-page&quot;, &quot;operator-finding&quot; }.Contains(op)) {
+        return &quot;__TARGET__&quot; == &quot;release-reviewer&quot; &amp;&amp; caller == &quot;operator-web&quot;;
+      }
+      if (op == &quot;operator-reference&quot;) {
+        return &quot;__TARGET__&quot; == &quot;reference-data&quot; &amp;&amp; caller == &quot;operator-web&quot;;
+      }
+      if (new [] { &quot;operator-runs&quot;, &quot;operator-run-page&quot;, &quot;operator-run&quot;, &quot;operator-scenario-submit&quot; }.Contains(op)) {
+        return &quot;__TARGET__&quot; == &quot;candidate-planner&quot; &amp;&amp; caller == &quot;operator-web&quot;;
+      }
       if (op == &quot;findings-read&quot;) {
         return &quot;__TARGET__&quot; == &quot;release-reviewer&quot; &amp;&amp; (caller == &quot;candidate-planner&quot; || caller == &quot;briefing-author&quot;);
       }
@@ -48,6 +75,34 @@
     </choose>
     <set-variable name="originPath" value="@{
       var op = context.Operation.Id;
+      if (op == &quot;operator-retry&quot;) { return &quot;/operator/runs/&quot; + context.Request.MatchedParameters[&quot;runId&quot;] + &quot;/retry/&quot; + context.Request.MatchedParameters[&quot;requestId&quot;]; }
+      if (op == &quot;operator-decisions&quot;) {
+        return &quot;/operator/runs/&quot; + context.Request.MatchedParameters[&quot;runId&quot;] + &quot;/decisions&quot;;
+      }
+      if (op == &quot;operator-brief&quot;) {
+        return &quot;/operator/runs/&quot; + context.Request.MatchedParameters[&quot;runId&quot;] + &quot;/brief&quot;;
+      }
+      if (op == &quot;operator-recover&quot;) { return &quot;/operator/runs/&quot; + context.Request.MatchedParameters[&quot;runId&quot;] + &quot;/recover/&quot; + context.Request.MatchedParameters[&quot;requestId&quot;]; }
+      if (op == &quot;operator-recover-child&quot;) { return &quot;/operator/recovery/&quot; + context.Request.MatchedParameters[&quot;operationId&quot;] + &quot;/&quot; + context.Request.MatchedParameters[&quot;requestId&quot;]; }
+      if (op == &quot;operator-scenario-submit&quot;) { return &quot;/operator/scenarios&quot;; }
+      if (op == &quot;operator-draft&quot;) {
+        return &quot;/operator/runs/&quot; + context.Request.MatchedParameters[&quot;runId&quot;] + &quot;/drafts/&quot; + context.Request.MatchedParameters[&quot;draftId&quot;] + &quot;/versions/&quot; + context.Request.MatchedParameters[&quot;version&quot;];
+      }
+      if (op == &quot;operator-drafts&quot; || op == &quot;operator-draft-page&quot;) {
+        var path = &quot;/operator/runs/&quot; + context.Request.MatchedParameters[&quot;runId&quot;] + &quot;/drafts&quot;;
+        return op == &quot;operator-draft-page&quot; ? path + &quot;/page/&quot; + context.Request.MatchedParameters[&quot;cursor&quot;] : path;
+      }
+      if (op == &quot;operator-releases&quot; || op == &quot;operator-release-page&quot;) {
+        var path = &quot;/operator/runs/&quot; + context.Request.MatchedParameters[&quot;runId&quot;] + &quot;/releases&quot;;
+        return op == &quot;operator-release-page&quot; ? path + &quot;/page/&quot; + context.Request.MatchedParameters[&quot;cursor&quot;] : path;
+      }
+      if (op == &quot;operator-finding&quot;) {
+        return &quot;/operator/runs/&quot; + context.Request.MatchedParameters[&quot;runId&quot;] + &quot;/findings/&quot; + context.Request.MatchedParameters[&quot;findingId&quot;] + &quot;/versions/&quot; + context.Request.MatchedParameters[&quot;version&quot;];
+      }
+      if (op == &quot;operator-reference&quot;) { return &quot;/operator/reference/runs/&quot; + context.Request.MatchedParameters[&quot;runId&quot;]; }
+      if (op == &quot;operator-runs&quot;) { return &quot;/operator/runs&quot;; }
+      if (op == &quot;operator-run-page&quot;) { return &quot;/operator/runs/page/&quot; + context.Request.MatchedParameters[&quot;cursor&quot;]; }
+      if (op == &quot;operator-run&quot;) { return &quot;/operator/runs/&quot; + context.Request.MatchedParameters[&quot;runId&quot;]; }
       if (op == &quot;a2a&quot;) { return &quot;/a2a&quot;; }
       if (op == &quot;discovery&quot;) { return &quot;/.well-known/agent-card.json&quot;; }
       if (op.StartsWith(&quot;mcp-&quot;)) { return &quot;/mcp&quot;; }

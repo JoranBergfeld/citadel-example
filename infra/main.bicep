@@ -13,13 +13,17 @@ param createResourceGroups bool = true
 param createApiCenter bool = true
 @description('False provisions foundation only, before image build/push. True requires real digest-pinned images.')
 param deployRuntime bool = true
-@description('Five immutable ACR image references and actual command/args arrays, keyed by workload name.')
+@description('Five team workloads and separate Operator application, using immutable ACR images.')
 param applications object = {}
 @secure()
-@description('Four agents plus operator: {caller: {primary: value, secondary: value}}. Both keys rotate explicitly.')
+@description('Privately prompted Operator username and Argon2id hash; never plaintext.')
+param operatorAuth object
+@secure()
+@description('Four agents plus isolated operator and operator-web: {caller: {primary: value, secondary: value}}. Both keys rotate explicitly.')
 param callerKeys object
 param callerStates object = {
   operator: 'active'
+  'operator-web': 'active'
   'candidate-planner': 'active'
   'evidence-assessor': 'active'
   'release-reviewer': 'active'
@@ -99,6 +103,58 @@ module teams 'modules/team.bicep' = [for team in ['reference', 'evidence', 'plan
   }
   dependsOn: [referenceGroup, evidenceGroup, planningGroup]
 }]
+module operatorFoundation 'modules/operator-foundation.bicep' = {
+  name: 'operator-foundation-${deploymentId}'
+  scope: resourceGroup(groups.platform)
+  params: {
+    deploymentId: deploymentId
+    location: location
+    vaultName: platform.outputs.vaultName
+    registryName: platform.outputs.registryName
+    operatorAuth: operatorAuth
+    callerKeys: callerKeys
+  }
+}
+module observation 'modules/observation.bicep' = {
+  name: 'observation-${deploymentId}'
+  scope: resourceGroup(groups.platform)
+  params: {
+    deploymentId: deploymentId
+    location: location
+    suffix: suffix
+    principalIds: concat(teams[0].outputs.observationPrincipalIds, teams[1].outputs.observationPrincipalIds,
+      teams[2].outputs.observationPrincipalIds, [operatorFoundation.outputs.principalId])
+  }
+}
+module referenceContext 'modules/reference-context.bicep' = {
+  name: 'reference-context-${deploymentId}'
+  scope: resourceGroup(groups.planning)
+  params: {
+    deploymentId: deploymentId
+    storageName: 'planning${suffix}'
+    referencePrincipalId: teams[0].outputs.observationPrincipalIds[0]
+  }
+  dependsOn: [teams]
+}
+module operatorApp 'modules/operator-app.bicep' = if (deployRuntime) {
+  name: 'operator-web-${deploymentId}'
+  scope: resourceGroup(groups.platform)
+  params: {
+    deploymentId: deploymentId
+    location: location
+    environmentId: platform.outputs.environmentId
+    environmentName: last(split(platform.outputs.environmentId, '/'))
+    registryName: platform.outputs.registryName
+    identityId: operatorFoundation.outputs.identityId
+    usernameUrl: operatorFoundation.outputs.usernameUrl
+    verifierUri: operatorFoundation.outputs.verifierUri
+    subscriptionUri: operatorFoundation.outputs.subscriptionUri
+    clientId: operatorFoundation.outputs.clientId
+    gatewayUrl: platform.outputs.gatewayUrl
+    observationBlobUrl: observation.outputs.blobUrl
+    application: applications['operator-web']
+  }
+}
 module apps 'modules/app.bicep' = [for (workload, i) in workloads: if (deployRuntime) {
   name: 'app-${workload.name}-${deploymentId}'
   scope: resourceGroup(groups[workload.team])
@@ -117,6 +173,8 @@ module apps 'modules/app.bicep' = [for (workload, i) in workloads: if (deployRun
     gatewayCertificates: gatewayCertificates
     insightsName: platform.outputs.insightsName
     modelDeployment: platform.outputs.modelDeployment
+    observationBlobUrl: observation.outputs.blobUrl
+    referenceContextBlobUrl: 'https://planning${suffix}.blob.${environment().suffixes.storage}'
   }
   dependsOn: [teams]
 }]
@@ -162,6 +220,14 @@ output teamInventory array = [for (team, i) in ['reference', 'evidence', 'planni
   credentials: teams[i].outputs.credentialInventory
 }]
 output appInventory array = [for (workload, i) in workloads: deployRuntime ? apps[i]!.outputs.inventory : { pending: workload.name }]
+output operatorInventory object = {
+  referenceContextAssignments: referenceContext.outputs.assignments
+  foundation: operatorFoundation.outputs.inventory
+  application: deployRuntime ? operatorApp!.outputs.inventory : { pending: 'operator-web' }
+  origin: deployRuntime ? operatorApp!.outputs.origin : ''
+  accounting: observation.outputs.inventory
+  accountingBlobUrl: observation.outputs.blobUrl
+}
 output inventory object = {
   deploymentId: deploymentId
   groups: [platformGroup!.id, referenceGroup!.id, evidenceGroup!.id, planningGroup!.id]

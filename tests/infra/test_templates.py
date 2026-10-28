@@ -37,11 +37,42 @@ class TemplateTests(unittest.TestCase):
             self.assertIn(self.template["parameters"][key]["type"].lower(), {"secureobject", "securestring"})
         self.assertEqual(self.template["parameters"]["location"]["allowedValues"], ["westeurope"])
 
+    def test_operator_accounting_roles_cannot_read_or_delete_team_or_supporting_data(self):
+        accounting = self.module("observation-")
+        role = next(r for r in accounting["resources"] if r["type"] == "Microsoft.Authorization/roleDefinitions")
+        self.assertEqual(role["properties"]["permissions"], [{
+            "actions": [], "notActions": [],
+            "dataActions": ["Microsoft.Storage/storageAccounts/blobServices/containers/blobs/write"],
+            "notDataActions": [],
+        }])
+        assignment = next(r for r in accounting["resources"] if r["type"] == "Microsoft.Authorization/roleAssignments")
+        self.assertIn("read-accounting", assignment["scope"])
+        self.assertNotIn("team", assignment["scope"])
+        gateway = self.module("gateway-")
+        self.assertIn("operator-web", gateway["variables"]["callers"])
+        operator = self.module("operator-web-")
+        app = next(r for r in operator["resources"] if r["type"] == "Microsoft.App/containerApps")
+        env = app["properties"]["template"]["containers"][0]["env"]
+        self.assertIn("CITADEL_OBSERVATION_BLOB_URL", {entry["name"] for entry in env})
+        self.assertFalse(any(entry["name"] in ("CITADEL_BLOB_URL", "CITADEL_MODEL_DEPLOYMENT") for entry in env))
+
     def module(self, name):
         for resource in self.template["resources"]:
             if resource["type"] == "Microsoft.Resources/deployments" and resource["name"].startswith(f"[format('{name}"):
                 return resource["properties"]["template"]
         self.fail(f"Missing module {name}")
+
+    def test_reference_supporting_context_role_is_path_restricted_read_only_and_inventoried(self):
+        context = self.module("reference-context-")
+        role = next(r for r in context["resources"] if r["type"] == "Microsoft.Authorization/roleAssignments")
+        self.assertIn("planner-operations", role["scope"])
+        properties = role["properties"]
+        self.assertIn("2a2b9908-6ea1-4ae2-8e65-a410df84e7d1", properties["roleDefinitionId"])
+        self.assertEqual(properties["conditionVersion"], "2.0")
+        self.assertIn("retained-runs-v1.json", properties["condition"])
+        self.assertIn("!(SubOperationMatches{'Blob.List'})", properties["condition"])
+        self.assertIn("assignments", context["outputs"])
+        self.assertIn("referenceContextAssignments", self.template["outputs"]["operatorInventory"]["value"])
 
     def test_exact_warm_application_and_identity_only_storage_boundaries(self):
         app = self.module("app-")

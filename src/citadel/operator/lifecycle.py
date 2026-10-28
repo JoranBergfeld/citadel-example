@@ -67,6 +67,9 @@ class Lifecycle:
         self.groups = {team: f"citadel-{self.id}-{team}" for team in TEAMS}
 
     def command(self, args):
+        if args.command == "configure-web-login":
+            from .web_admin import configure
+            return configure(self)
         if args.command == "record-plan-observation":
             from .plan import record_observation
             return record_observation(self, args.observation, args.evidence)
@@ -150,11 +153,17 @@ class Lifecycle:
     def credentials(self):
         path = self.state.directory / "credentials.json"
         if path.exists():
-            return read_private(path)
+            existing = read_private(path)
+            if "operator-web" not in existing["callerKeys"]:
+                existing["callerKeys"]["operator-web"] = {
+                    "primary": secrets.token_urlsafe(32), "secondary": secrets.token_urlsafe(32)}
+                existing["callerStates"]["operator-web"] = "active"
+                write_private(path, existing)
+            return existing
         if self.value.get("foundation_started"):
             raise Blocked("existing_identity_credentials_missing")
         from .rotation import certificate
-        callers = ["operator", *(w["name"] for w in WORKLOADS if w["operations"])]
+        callers = ["operator", "operator-web", *(w["name"] for w in WORKLOADS if w["operations"])]
         result = {
             "callerKeys": {c: {"primary": secrets.token_urlsafe(32), "secondary": secrets.token_urlsafe(32)}
                            for c in callers},
@@ -186,6 +195,8 @@ class Lifecycle:
                 raise Blocked("existing_api_center_configuration_conflict")
         result["createApiCenter"] = not centers
         result.update(self.credentials())
+        from .web_admin import authentication
+        result["operatorAuth"] = authentication(self)
         result["deployRuntime"] = runtime
         result["applications"] = self.value.get("applications", {}) if runtime else {}
         validate_deployment_inputs(result)
@@ -194,6 +205,9 @@ class Lifecycle:
     def arm(self, action, *, runtime=False):
         if runtime:
             self.require_plan_observation()
+        if action == "create":
+            from .web_admin import stop
+            stop(self)
         parameters = {"parameters": {key: {"value": value} for key, value in self.parameters(runtime).items()}}
         with self.native.document(parameters) as path:
             result = self.native.az(
@@ -204,6 +218,11 @@ class Lifecycle:
                 *(["--validation-level", "Provider"] if action == "validate" else []), timeout=7200)
         if not isinstance(result, dict) or result.get("properties", {}).get("provisioningState") != "Succeeded":
             raise Blocked("arm_deployment_not_succeeded")
+        if action == "create" and runtime:
+            # Use the just-returned inventory, including initial creation.
+            self.capture_outputs(result)
+            from .web_admin import start
+            start(self)
         return result
 
     def preflight(self):
@@ -242,12 +261,13 @@ class Lifecycle:
                         "Microsoft.KeyVault/vaults/write")
             if any(not permits(permissions, a) for a in required):
                 raise Blocked("scoped_deployment_role_or_identity_permissions_missing")
-            if group != self.groups["platform"] and any(not permits(permissions, a, data=True) for a in DATA_ACTIONS):
+            if any(not permits(permissions, a, data=True) for a in DATA_ACTIONS):
                 raise Blocked("operator_scoped_blob_bootstrap_permissions_missing")
             if group == self.groups["platform"] and any(not permits(permissions, a) for a in (
+                    "Microsoft.Authorization/roleDefinitions/write",
                     "Microsoft.ContainerRegistry/registries/push/write",
                     "Microsoft.OperationalInsights/workspaces/query/read")):
-                raise Blocked("operator_registry_push_or_telemetry_permissions_missing")
+                raise Blocked("operator_platform_role_registry_or_telemetry_permissions_missing")
         policies = self.native.az("policy", "assignment", "list", "--scope", self.subscription,
                                   "--disable-scope-strict-match")
         region = self.subscription + "/providers/Microsoft.CognitiveServices/locations/westeurope"
@@ -288,7 +308,7 @@ class Lifecycle:
 
     def capture_outputs(self, result):
         outputs = result["properties"].get("outputs", {})
-        for required in ("inventory", "teamInventory", "appInventory", "gatewayUrl"):
+        for required in ("inventory", "teamInventory", "appInventory", "gatewayUrl", "operatorInventory"):
             if required not in outputs:
                 raise Blocked("deployment_inventory_outputs_missing")
         resolved = {k: v["value"] for k, v in outputs.items()}
@@ -353,7 +373,9 @@ class Lifecycle:
                               if team == "evidence" else ["planner-operations", "author-operations"])
                 objects = {(c, "ledger-v1.json"): canonical_bytes(empty_ledger()) for c in containers}
                 if team == "planning":
+                    from citadel.runtime.observation import RunIndex, empty_index
                     objects[("planner-operations", "active-run-slot.json")] = b"{}"
+                    objects[("planner-operations", "retained-runs-v1.json")] = canonical_bytes(empty_index())
             for (container, name), content in objects.items():
                 key = team + "/" + container + "/" + name
                 recorded = self.value["bootstrap"].get(key)
@@ -377,8 +399,39 @@ class Lifecycle:
                         raise Blocked("existing_ledger_invalid")
                     if name == "active-run-slot.json" and value != {}:
                         raise Blocked("admission_blob_invalid")
+                    if name == "retained-runs-v1.json" and (
+                            type(value.get("schema_version")) is not int or value["schema_version"] != 1
+                            or not isinstance(value.get("retained_runs"), dict)
+                            or len(value["retained_runs"]) > RunIndex.capacity):
+                        raise Blocked("retained_run_index_invalid")
                 self.value["bootstrap"][key] = "verified"
                 self.state.save()
+        self.bootstrap_observation()
+
+    def bootstrap_observation(self):
+        from citadel.evidence.manifests import sha256
+        from citadel.runtime.observation import DeploymentReads
+        account = self.value["outputs"]["operatorInventory"]["accountingBlobUrl"]
+        for purpose, capacity in DeploymentReads.capacities.items():
+            scope = f"deployment/{self.id}/{purpose}"
+            name = "ticket-pools/" + sha256(scope) + ".json"
+            key = "accounting/" + purpose
+            expected = canonical_bytes({"kind": "finite-read-pool", "deployment": self.id,
+                                        "purpose": purpose, "capacity": capacity})
+            recorded = self.value["bootstrap"].get(key)
+            current = self.native.blob_read(account, "read-accounting", name)
+            if current is None:
+                if recorded:
+                    raise Blocked("existing_observation_descriptor_missing")
+                self.value["bootstrap"][key] = "creating"
+                self.state.save()
+                self.native.blob_create(account, "read-accounting", name, expected)
+                current = self.native.blob_read(account, "read-accounting", name)
+            if current != expected:
+                raise Blocked("observation_descriptor_conflict")
+            self.native.blob_pool_lease(account, "read-accounting", name, scope)
+            self.value["bootstrap"][key] = "verified"
+            self.state.save()
 
     def registry(self):
         registry = [r for r in self.value["outputs"]["inventory"]["platform"]["resources"]
@@ -459,6 +512,9 @@ class Lifecycle:
         self.value["applications"] = {w["name"]: {"image": image,
             "command": ["python", "-m", "citadel.runtime"], "args": [],
             "modelTokensPerMinute": self.config["modelTokensPerMinute"]} for w in WORKLOADS}
+        self.value["applications"]["operator-web"] = {
+            "image": image, "command": ["python", "-m", "citadel.operator.web"], "args": [],
+        }
         self.parameters(runtime=True)
         self.lock_image(registry, repository, image_digest)
         self.state.save()
@@ -556,6 +612,8 @@ class Lifecycle:
     def verify_inventory(self):
         self.inventory()
         self.verify_vault_configuration()
+        from .web_admin import verify
+        verify(self)
         capabilities = self.value["outputs"]["inventory"]["capabilities"]
         center = self.native.rest("get", capabilities["service"], "2024-03-01")
         if center.get("properties", {}).get("provisioningState") != "Succeeded":
@@ -657,7 +715,7 @@ class Lifecycle:
                       "rotation_proof", "operator_prose_signoff", "two_consecutive_passes",
                       "fresh_deployment", "manual_teardown"],
                   "costInputs": ["APIM BasicV2", "ACR Basic and image operations",
-                      "five warm 0.5vCPU/1GiB apps and rolling revisions", "regional Standard model tokens",
+                      "five warm team apps plus one 0.5vCPU/1GiB Operator app; Operator stop-before-start downtime", "regional Standard model tokens",
                       "storage and vault operations", "unsampled ingestion and retention",
                       "all acceptance/failed runs and probes", "residual/delayed charges"],
                   "monetaryCeiling": None, "automaticDeletion": False}
@@ -703,6 +761,8 @@ class Lifecycle:
                 group = next((g for g in groups if g["name"] == name), None)
                 if group is None:
                     continue
+                if team == "platform":
+                    self.teardown_accounting_roles()
                 self.native.az("group", "delete", "--name", group["name"], "--yes",
                                "--subscription", self.config["subscriptionId"], timeout=7200)
                 if any(g["name"] == group["name"] for g in self.owned_groups()):
@@ -741,3 +801,23 @@ class Lifecycle:
         self.value["phase"] = "teardown_partial" if failed or self.value["active"] else "deleted_recoverable"
         self.state.event("teardown", self.value["phase"])
         return {"status": self.value["phase"], **self.value["residue"], "immediateErasure": False}
+
+    def teardown_accounting_roles(self):
+        accounting = self.value.get("outputs", {}).get("operatorInventory", {}).get("accounting")
+        if not accounting:
+            return
+        prefix = self.subscription + "/resourceGroups/" + self.groups["platform"] + "/providers/"
+        known = set(self.value["inventory"])
+        containers = [r for r in accounting["resources"] if r.endswith("/containers/read-accounting")]
+        definitions = [r for r in accounting["resources"] if "/Microsoft.Authorization/roleDefinitions/" in r]
+        if len(containers) != 1 or len(definitions) != 1:
+            raise Blocked("accounting_teardown_inventory_conflict")
+        targets = accounting["assignments"] + definitions
+        if any(r not in known or not r.startswith(prefix) for r in targets) or any(
+                not r.startswith(containers[0] + "/providers/Microsoft.Authorization/roleAssignments/")
+                for r in accounting["assignments"]):
+            raise Blocked("accounting_teardown_ownership_conflict")
+        # Delete assignments before the custom role; neither is an authority to
+        # alter markers during runtime. This only runs after explicit teardown.
+        for resource in targets:
+            self.native.rest("delete", resource, "2022-04-01")

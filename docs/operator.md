@@ -1,13 +1,44 @@
 # Operator lifecycle — issue 19
 
 Run all commands from this checkout with the exact environment in [stack.md](stack.md).
+The invocation working directory is the checkout root, including for a
+non-editable installed package: deployment inputs, native-tool working
+directory and source fingerprints come from that checkout, not the wheel.
 Public entrypoint: **`python -m citadel.operator`**. Deployment uses native CLI/Bicep;
 one approved human Azure portal observation verifies the actual API Center plan.
-No hosted control plane, human-user creation, silent region/model replacement,
-or automatic cleanup.
+The [protected Operator application](operator-web.md) is the explicit hosted-UI
+exception: it submits browser scenarios, reopens retained run summaries (including
+CLI-created and partial submissions), and explicitly checks and recovers incomplete
+runs. Infrastructure administration stays CLI/manual. No human-user creation, silent region/model
+replacement, or automatic cleanup.
 Certificate generation declares `cryptography==50.0.2` directly; that exact version
 and all its artifacts were already in the accepted lock. No resolved version,
 image/tool pin, requirement hash, or wheelhouse artifact changed.
+
+## Contributor testing versus real operation
+
+The development/merge gate is the offline unit suite, from the repository root
+in the installed pinned environment:
+
+```sh
+python -m unittest discover -s tests/unit -v
+python -m unittest discover -s tests/unit -p 'test_operator_quiescence.py' -v
+```
+
+Use the focused example while iterating and the full command before merging.
+See [testing.md](testing.md) for discovery behavior and other areas. Broader
+Operator/SDK/protocol/integration suites, external-data checks, live probes and
+legacy acceptance/reporting are **opt-in diagnostics**. The 278-check catalogue,
+two cloud passes, fresh-deployment proof and human narrative signoff are not
+development/merge obligations. Offline/fixture success does not prove Azure/
+APIM enforcement, real model quality, telemetry delivery, reproducibility or
+actual demo success; historical incomplete/blocked evidence remains so.
+
+This retirement does not bypass operational readiness: deployment plan
+verification, private configuration, authorization, exact resource ownership,
+explicit paid-action approval, rotation/recovery restrictions and manual
+inventory-scoped teardown still apply whenever operating the real demo.
+`azure.yaml` lifecycle hooks retain those safeguards; they are not merge tests.
 
 ## Approved manual gate: API Center plan verification
 
@@ -99,6 +130,7 @@ Booleans cannot substitute for integer inputs. No actual subscription is a defau
 chmod 600 .citadel/config.json
 export CITADEL_STATE_DIR="$PWD/.citadel/sample19"
 python -m citadel.operator init --config .citadel/config.json --state-dir "$CITADEL_STATE_DIR"
+python -m citadel.operator configure-web-login --state-dir "$CITADEL_STATE_DIR"
 python -m citadel.operator check --state-dir "$CITADEL_STATE_DIR"
 ```
 
@@ -135,7 +167,9 @@ Host Docker/cloud CLI configuration is not modified.
 passwordless self-signed certificate, generated with **exactly 90 × 86400 seconds**
 validity. It is private operator recovery material; cloud persistence is only in
 allocated vault secrets. Never copy it to telemetry/evidence/Git.
-Applications always use the five allocated workload MIs, never the operator credential.
+The five team applications use their allocated workload MIs. The additional
+Operator web app has a separate platform MI, allocated login secrets and no
+team-data or CLI credential access; see [private setup and downtime](operator-web.md).
 Generation backdates the start by 30 seconds to tolerate small clock regressions;
 the end is start plus exactly 90 days. Validation is not relaxed and no grace
 period is added to the signed interval.
@@ -193,7 +227,8 @@ The actual deployment graph is:
    to the **created** ACR, push, compare remote digest to local RepoDigests, and
    lock image writes/deletes. Unrecorded existing tags conflict. Ambiguous pushes
    require matching recorded intent/local image/registry digest before adoption.
-6. Validate/deploy the same Bicep with all five exact digest images and
+6. Validate/deploy the same Bicep with five team apps plus the separate Operator
+   app using exact digest images and
    `["python","-m","citadel.runtime"]`; pass each app the verified TPM.
    The existing template configures identities, runtime/data/gateway, inventory,
    secrets, telemetry and all fixed limits.
@@ -355,8 +390,15 @@ exact owned admission lease. The private `<run-id>-quiescence.json` receipt bind
 those observations to the deployment/configuration and unchanged run; its digest
 is retained as `quiescenceProof`. Fresh runs and controls require that bound
 receipt. It never authorizes retry of the partial run or refunds its tickets.
-An exhausted pool needs a separately approved, bounded operator-only observation
-allowance for reconciliation; this never adds tickets to the workload pool.
+The CLI path above cannot escape an exhausted workflow pool. Hosted
+**Check and recover** uses the separately provisioned 2,048-read recovery-proof
+pool; the 16,384-read observation pool remains separate. It resolves original
+CLI/UI ownership server-side, persists intent/proof/outcomes in owner ledgers and
+checks bound downstream/private effects without replay. Hosted partial-quiescence
+proof is service-owned, not a copied CLI receipt or CLI state-directory mount.
+Missing proof, outstanding model effects and live owners stay blocked. There is
+no browser retry, reset or force release. See
+[hosted recovery and limitations](operator-web.md#explicit-check-and-recover).
 Audited source migrations that enlarge a child reservation must permanently
 disable the newly addressable marker positions in retained historical pools;
 the old grant must not gain new readable capacity.
@@ -385,9 +427,21 @@ Reference Data MCP through APIM; no denial or service-proof requirement is relax
 
 Only while normal runs are quiescent:
 
+Rotation/revocation acquire the same authoritative deployment-wide admission
+lease as UI and CLI execution, holding it throughout credential changes and
+controls. A CLI-local empty run list is not proof of quiescence. Concurrent UI,
+CLI and retry admissions cannot execute during maintenance. The nonexpiring
+maintenance lease and its private lifecycle intent remain blocked after ambiguous
+acquisition/release or process loss; retain diagnostics and reconcile exact
+ownership, never force-unlock or delete the admission blob.
+A matching explicit command may renew only its persisted exact maintenance lease;
+failed renewal never acquires a replacement lease or clears another owner.
+
 ```sh
 python -m citadel.operator rotate subscription --target operator --stage prepare --state-dir "$CITADEL_STATE_DIR"
 python -m citadel.operator rotate subscription --target operator --stage finalize --state-dir "$CITADEL_STATE_DIR"
+python -m citadel.operator rotate subscription --target operator-web --stage prepare --state-dir "$CITADEL_STATE_DIR"
+python -m citadel.operator rotate subscription --target operator-web --stage finalize --state-dir "$CITADEL_STATE_DIR"
 python -m citadel.operator rotate context --target candidate-planner --stage prepare --state-dir "$CITADEL_STATE_DIR"
 python -m citadel.operator rotate context --target candidate-planner --stage finalize --state-dir "$CITADEL_STATE_DIR"
 python -m citadel.operator rotate certificate --stage prepare --state-dir "$CITADEL_STATE_DIR"
@@ -397,6 +451,14 @@ python -m citadel.operator revoke --caller operator --state-dir "$CITADEL_STATE_
 
 Subscription preparation preserves the old primary as secondary while installing
 the new primary in the allocated vault, then restarts the actual workload revision.
+`operator-web` uses its separate Operator application/secret inventory, never the
+five-team workload inventory. Its exact allocated version is checked before
+rotation, and restart means confirmed stop followed by start, not a rolling
+revision restart. Administrative subscription controls use only its authorized
+Planner run-list projection, checking the deployed allocated secret and independently
+queried APIM/backend evidence. Like CLI Operator controls, these prove subscription
+authorization/retirement, not execution under the hosted managed identity; they
+grant no workload discovery/invocation or team-data authority.
 Context rotation first installs dual verification keys, restarts that backend,
 then changes APIM's active signing key. Certificate rotation deploys the dual
 allowlist before switching the versionless vault secret and issuing the actual
@@ -451,7 +513,13 @@ shared with evidence collection and never replenished. No business dispatch,
 deadline extension, budget refund or root replay is permitted after expiry.
 These implementations do not authorize deployment or live rotation by themselves.
 
-## Evidence, acceptance and manual teardown
+## Evidence, optional acceptance diagnostics and manual teardown
+
+Inventory and manual teardown remain operational responsibilities. Collection
+and legacy acceptance/reporting are explicitly selected diagnostics, not
+development/merge tests. Cloud acceptance can dispatch paid work and temporarily
+change revisions/configuration; use an authorized, ready deployment, private
+state and the existing quiescence/confirmation controls, never a presentation.
 
 ```sh
 python -m citadel.operator inventory --state-dir "$CITADEL_STATE_DIR"
@@ -465,9 +533,11 @@ query (no raw request bodies, prompt/message text, drafts or deliberation).
 Missing tables/query authority/oversized results fail instead of silently passing.
 Collection has a separate 600-second allowance. Empty/uncorrelated telemetry and
 missing checks **do not prove acceptance**. Repeated reports retain prior exports.
-The full task 20 oracle must still correlate identities/protocol/storage/model
-facts and collect every required check, followed by operator narrative signoff.
-Two complete consecutive cloud passes and fresh-deployment proof belong to task 21.
+For a complete **legacy diagnostic report**, the task 20 oracle still requires
+correlated identities/protocol/storage/model facts and its catalogue checks,
+followed by actual human narrative review. Its two-pass/fresh-deployment proof
+conditions are preserved as report semantics, not contributor obligations.
+Historical task-21 verification is not closed or marked passed.
 
 Task 20 interface: `citadel.acceptance.operator_hooks.run`, keyword
 arguments `lifecycle`, `check_id`, `run_id`. Fixed check IDs:
@@ -480,9 +550,10 @@ Before invoking any provider, task 19 rechecks the human plan proof against the
 current resource incarnation and requires deployed runtime. Trusted providers can
 call `lifecycle.require_plan_observation()` to obtain that validated private proof.
 The partial harness, collection-resume and explicit per-product human-review
-interfaces are documented in [acceptance.md](acceptance.md). Task 20 is not yet
-complete: missing deployed probes, assigned-MI ingestion and no-effect/correlation
-proof remain blocked. No canned acceptance provider or automatic prose approval
+interfaces are documented in [acceptance.md](acceptance.md). Historical incomplete
+deployed probes, assigned-MI ingestion and no-effect/correlation proof remain
+unverified; source providers and local tests do not supply those observations.
+No canned acceptance provider or automatic prose approval
 is included. `acceptance --collect-only` resumes evidence collection without
 replaying the run or resetting its 600-second collection allowance;
 `review-acceptance --review PRIVATE_FILE` records the human's explicit answers.
@@ -524,7 +595,7 @@ teardown; 130 means interrupted—reconcile before retry. Child errors are never
 Use the stable event code and owning prerequisite to remediate; do not copy secure
 parameter files or turn on body/debug logging to diagnose failures.
 
-Costs are informational: APIM/ACR, all five warm apps, revisions, model attempts,
+Costs are informational: APIM/ACR, five warm team apps plus the Operator app, revisions, model attempts,
 Blob/vault operations, unsampled telemetry/retention, probes, every acceptance and
 failed run, and delayed/residual charges. Inventory warns after 24 hours.
 There is **no financial ceiling**, automatic expiry deletion, or promise that all
