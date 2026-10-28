@@ -59,7 +59,7 @@ output clientId string = identity.properties.clientId
 output subscriptionUri string = subscription.properties.secretUriWithVersion
 output usernameUrl string = username.properties.secretUriWithVersion
 output verifierUri string = passwordHash.properties.secretUriWithVersion
-var readerInventory = [for (name, i) in secretNames: readers[i].id]
+var readerInventory = [for (name, i) in secretNames: extensionResourceId(allocatedSecrets[i].id, 'Microsoft.Authorization/roleAssignments', readers[i].name)]
 output inventory object = {
   identity: identity.id
   clientId: identity.properties.clientId

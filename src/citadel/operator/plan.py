@@ -61,6 +61,16 @@ def current_request(lifecycle):
 
 def require_observation(lifecycle):
     request = current_request(lifecycle)
+    exception = lifecycle.value.get("sandboxPlanException")
+    if exception is not None:
+        if exception != {
+            "source": "explicit-operator-sandbox-exception",
+            "binding": {key: request[key] for key in BINDING_FIELDS},
+            "configurationFingerprint": digest(lifecycle.config),
+            "planVerified": False,
+        }:
+            raise Blocked("api_center_sandbox_exception_binding_conflict")
+        return exception
     expected = lifecycle.value.get("planProof")
     if not expected:
         raise Blocked("api_center_portal_observation_required")
@@ -124,6 +134,9 @@ def observation_summary(lifecycle):
         return {"status": "blocked", "code": exc.code}
     except (OSError, ValueError, TypeError, KeyError):
         return {"status": "blocked", "code": "api_center_observation_unavailable"}
+    if proof.get("source") == "explicit-operator-sandbox-exception":
+        return {"status": "operator_exception_plan_unverified", "source": proof["source"],
+                "planVerified": False, "resourceBindingSha256": digest(proof["binding"])}
     observation = proof["observation"]
     return {"status": "human_observed_free", "source": proof["source"],
             "proofSha256": digest(proof), "evidenceSha256": observation["evidenceSha256"],

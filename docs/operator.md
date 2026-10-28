@@ -71,6 +71,14 @@ There is no `--assume-free`/boolean bypass or automatic continuation. Local fixt
 exercise this same public command graph with clearly synthetic evidence, never a
 production bypass. No real resource was created or observed during issue 19.
 
+For the explicitly approved sandbox-demo exception, private deployment state may
+instead retain `sandboxPlanException`: source `explicit-operator-sandbox-exception`,
+the exact `BINDING_FIELDS` from the actual plan request, the configuration digest,
+and `planVerified: false`. This is a recorded Operator policy exception, not portal
+evidence or a claim that the plan is Free. It does not carry across a changed
+configuration, request or resource incarnation. Without that explicit, bound
+exception, the human-observation gate remains unchanged.
+
 All other documented cloud commands below are implemented, but were **not run
 against Azure** for issue 19. Deployment success must never be inferred from the
 foundation, native exit zero without outputs, local tests, or fixture adapters.

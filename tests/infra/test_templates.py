@@ -170,6 +170,12 @@ class TemplateTests(unittest.TestCase):
         for row in copies:
             self.assertNotIn("copyIndex()", json.dumps(row), row["name"])
 
+    def test_operator_extension_role_inventory_preserves_its_named_variable_loop_index(self):
+        copies = self.module("operator-foundation-")["variables"]["copy"]
+        readers = next(row for row in copies if row["name"] == "readerInventory")
+        self.assertIn("copyIndex('readerInventory')", readers["input"])
+        self.assertNotIn("copyIndex()", json.dumps(readers))
+
     def test_gateway_has_no_wildcard_routes_and_verifies_every_backend_tls_identity(self):
         gateway = self.module("gateway-")
         for resource in gateway["resources"]:
