@@ -37,6 +37,10 @@ var observationOperations = [
   { name: 'operator-runs', method: 'GET', path: '/operator/runs', parameters: [] }
   { name: 'operator-run-page', method: 'GET', path: '/operator/runs/page/{cursor}', parameters: [{ name: 'cursor', required: true, type: 'string' }] }
   { name: 'operator-run', method: 'GET', path: '/operator/runs/{runId}', parameters: [{ name: 'runId', required: true, type: 'string' }] }
+  { name: 'operator-decisions', method: 'GET', path: '/operator/runs/{runId}/decisions', parameters: [{ name: 'runId', required: true, type: 'string' }] }
+]
+var briefObservationOperations = [
+  { name: 'operator-brief', method: 'GET', path: '/operator/runs/{runId}/brief', parameters: [{ name: 'runId', required: true, type: 'string' }] }
 ]
 var draftObservationOperations = [
   { name: 'operator-drafts', method: 'GET', path: '/operator/runs/{runId}/drafts', parameters: [{ name: 'runId', required: true, type: 'string' }] }
@@ -57,6 +61,7 @@ var referenceObservationOperations = [{
 var operations = target == 'reference-data' ? concat(mcpOperations, referenceObservationOperations) : concat(agentOperations,
   target == 'release-reviewer' ? concat(findingOperations, releaseObservationOperations) : [],
   target == 'evidence-assessor' ? draftObservationOperations : [],
+  target == 'briefing-author' ? briefObservationOperations : [],
   target == 'candidate-planner' ? observationOperations : [])
 resource routes 'Microsoft.ApiManagement/service/apis/operations@2024-05-01' = [for operation in operations: {
   parent: api

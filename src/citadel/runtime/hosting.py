@@ -89,7 +89,7 @@ async def application(config):
             stack.push_async_callback(model.close)
             stack.push_async_callback(peers.close)
             run_index = admission = None
-            if config.target in ("candidate-planner", "evidence-assessor", "release-reviewer"):
+            if config.target in ("candidate-planner", "evidence-assessor", "release-reviewer", "briefing-author"):
                 accounting = await stack.enter_async_context(ContainerClient(
                     config.observation_blob,
                     "read-accounting", credential=credential, api_version="2026-10-06",

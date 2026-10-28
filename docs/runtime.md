@@ -142,6 +142,24 @@ See [Operator Evidence Review](operator-web.md#evidence-review-private-drafts-an
 for routes, citation links and historical limitations.
 These paths are locally tested; deployed APIM/Azure enforcement remains unverified.
 
+Exercise Planning's narrow implementation is
+`runtime.planning_observation.PlanningObservations`. Planner resolves the retained
+submission, validates its operation/product binding and projects all saved
+candidate decisions. `RunIndex.assessed(..., decision=...)` saves public summaries
+before Author dispatch without turning observation failures into workflow replay.
+Completed saved products can supply missing supporting context, but no refresh
+writes or current-reference reconstruction occur. Author independently resolves
+the exact committed run-bound brief; ambiguous history never selects a latest
+product. Its projection contains only actual saved narrative, provenance, caveats
+and exact citations, never embedded finding/draft bodies or workflow receipts.
+
+`ObservationClient.planning(run_id, "decisions" | "brief", refresh=...)` and
+`operator.planning_view` compose these authorized projections with separate
+last-success/stale state. The existing
+`operator.evidence_view.finding_link(run_id, ref)` remains the citation interface.
+See [Exercise Planning](operator-web.md#exercise-planning-decisions-and-actual-saved-briefs)
+for owner paths, bounds and missing-history behavior.
+
 Only explicit `ManagedIdentityCredential(client_id=...)` is used. Secret
 acquisition reads the allocated subscription secret with the assigned identity,
 zero automatic retries and a total timeout. There is no operator/developer

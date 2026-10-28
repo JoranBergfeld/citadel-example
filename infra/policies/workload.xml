@@ -5,6 +5,12 @@
       var caller = (string)context.Variables[&quot;caller&quot;];
       var invocation = new [] { __CALLERS__ };
       var op = context.Operation.Id;
+      if (op == &quot;operator-decisions&quot;) {
+        return &quot;__TARGET__&quot; == &quot;candidate-planner&quot; &amp;&amp; caller == &quot;operator-web&quot;;
+      }
+      if (op == &quot;operator-brief&quot;) {
+        return &quot;__TARGET__&quot; == &quot;briefing-author&quot; &amp;&amp; caller == &quot;operator-web&quot;;
+      }
       if (new [] { &quot;operator-drafts&quot;, &quot;operator-draft-page&quot;, &quot;operator-draft&quot; }.Contains(op)) {
         return &quot;__TARGET__&quot; == &quot;evidence-assessor&quot; &amp;&amp; caller == &quot;operator-web&quot;;
       }
@@ -60,6 +66,12 @@
     </choose>
     <set-variable name="originPath" value="@{
       var op = context.Operation.Id;
+      if (op == &quot;operator-decisions&quot;) {
+        return &quot;/operator/runs/&quot; + context.Request.MatchedParameters[&quot;runId&quot;] + &quot;/decisions&quot;;
+      }
+      if (op == &quot;operator-brief&quot;) {
+        return &quot;/operator/runs/&quot; + context.Request.MatchedParameters[&quot;runId&quot;] + &quot;/brief&quot;;
+      }
       if (op == &quot;operator-draft&quot;) {
         return &quot;/operator/runs/&quot; + context.Request.MatchedParameters[&quot;runId&quot;] + &quot;/drafts/&quot; + context.Request.MatchedParameters[&quot;draftId&quot;] + &quot;/versions/&quot; + context.Request.MatchedParameters[&quot;version&quot;];
       }

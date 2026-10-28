@@ -261,6 +261,12 @@ def create_app(config, *, clock=time.monotonic, observation=None, reference_obse
                     return page("Evidence Review", header + await render(request, observer, run, csrf))
                 except OperationError:
                     return Response("Invalid Evidence Review selection", status_code=400)
+            if selected == "planning":
+                from .planning_view import render
+                try:
+                    return page("Exercise Planning", header + await render(request, observer, run, csrf))
+                except OperationError:
+                    return Response("Invalid Exercise Planning selection", status_code=400)
             observed = (await observer.observe(run, cursor=cursor, refresh=request.method == "POST")
                         if observer else None)
             content = history_content(observed, csrf, run, cursor)
