@@ -62,6 +62,18 @@ class TemplateTests(unittest.TestCase):
                 return resource["properties"]["template"]
         self.fail(f"Missing module {name}")
 
+    def test_reference_supporting_context_role_is_path_restricted_read_only_and_inventoried(self):
+        context = self.module("reference-context-")
+        role = next(r for r in context["resources"] if r["type"] == "Microsoft.Authorization/roleAssignments")
+        self.assertIn("planner-operations", role["scope"])
+        properties = role["properties"]
+        self.assertIn("2a2b9908-6ea1-4ae2-8e65-a410df84e7d1", properties["roleDefinitionId"])
+        self.assertEqual(properties["conditionVersion"], "2.0")
+        self.assertIn("retained-runs-v1.json", properties["condition"])
+        self.assertIn("!(SubOperationMatches{'Blob.List'})", properties["condition"])
+        self.assertIn("assignments", context["outputs"])
+        self.assertIn("referenceContextAssignments", self.template["outputs"]["operatorInventory"]["value"])
+
     def test_exact_warm_application_and_identity_only_storage_boundaries(self):
         app = self.module("app-")
         resource = next(r for r in app["resources"] if r["type"] == "Microsoft.App/containerApps")
