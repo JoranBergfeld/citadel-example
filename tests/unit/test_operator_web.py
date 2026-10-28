@@ -45,13 +45,13 @@ class OperatorWebTests(unittest.IsolatedAsyncioTestCase):
         shell = await self.client.get("/")
         self.assertEqual(shell.status_code, 200)
         for text in ("Comparison", "Replacement", "Exhaustion", "Reference Data",
-                     "Evidence Review", "Exercise Planning", "not available"):
+                     "Evidence Review", "Exercise Planning", "unavailable"):
             self.assertIn(text, shell.text)
         for scenario in ("comparison", "replacement", "exhaustion"):
             self.assertIn(f'name="scenario" value="{scenario}"', shell.text)
         self.assertIn("disabled", shell.text)
         self.assertNotIn("<script", shell.text)
-        self.assertEqual((await self.client.post("/run")).status_code, 404)
+        self.assertEqual((await self.client.post("/run")).status_code, 403)
 
     async def test_mutations_require_origin_and_session_bound_csrf_and_logout_revokes(self):
         cross_origin = await self.client.post("/login", headers={"origin": "https://attacker.test"},

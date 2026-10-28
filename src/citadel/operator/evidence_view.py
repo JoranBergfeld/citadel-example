@@ -78,6 +78,7 @@ async def render(request, observer, run_id, csrf):
     artifact_id, version = params.get("artifact_id"), params.get("version")
     projection, cursor = params.get("projection"), params.get("detail_cursor")
     refresh = request.method == "POST"
+    automatic = request.headers.get("x-citadel-refresh") == "automatic"
     if artifact_id:
         if (params.get("collection") not in (None, "drafts")
                 or not version.isdecimal() or len(version) > 9):
@@ -91,7 +92,8 @@ async def render(request, observer, run_id, csrf):
     else:
         queries = [("drafts", {}), ("releases", {})]
     observations = (await asyncio.gather(*(
-        observer.evidence(run_id, kind, refresh=refresh, **options) for kind, options in queries))
+        observer.evidence(run_id, kind, refresh=refresh, **({"automatic": True} if automatic else {}),
+                          **options) for kind, options in queries))
         if observer and hasattr(observer, "evidence") else [Observed(state="unavailable") for _ in queries])
     content = f"""<main><h2>Evidence Review · {escape(run_id)}</h2>
 <p>Private Operator inspection. Assessment drafts are unpublished and private to Evidence Review.

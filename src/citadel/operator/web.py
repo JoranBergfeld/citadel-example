@@ -15,6 +15,8 @@ import threading
 import time
 from datetime import datetime, timezone
 from urllib.parse import parse_qs, urlsplit
+from uuid import uuid4
+from pathlib import Path
 
 from cryptography.exceptions import InvalidKey
 from cryptography.hazmat.primitives.kdf.argon2 import Argon2id
@@ -198,7 +200,8 @@ async def form(request):
         return {}
 
 
-def create_app(config, *, clock=time.monotonic, observation=None, reference_observation=None, lifespan=None):
+def create_app(config, *, clock=time.monotonic, observation=None, submission=None,
+               reference_observation=None, lifespan=None):
     auth = Authentication(config, clock)
 
     def same_origin(request):
@@ -249,24 +252,57 @@ def create_app(config, *, clock=time.monotonic, observation=None, reference_obse
                 if (not same_origin(request) or not hmac.compare_digest(
                         values.get("csrf", "").encode(), csrf.encode())):
                     return Response("Request denied", status_code=403)
+            observer = observation or getattr(request.app.state, "observation", None)
+            automatic = request.headers.get("x-citadel-refresh") == "automatic"
+            detail = None
+            active = observer and getattr(observer, "selected_active", lambda _: False)(run)
+            compose = observer and (active or request.headers.get("x-citadel-refresh") in ("automatic", "manual"))
             if selected == "reference":
                 from .reference_observation import reference_content
-                observer = reference_observation or getattr(request.app.state, "reference_observation", None)
-                observed = await observer.observe(run, refresh=request.method == "POST") if observer else None
-                return page("Reference Data", header + reference_content(observed, csrf, run))
-            observer = observation or getattr(request.app.state, "observation", None)
-            if selected == "evidence":
+                reference = reference_observation or getattr(request.app.state, "reference_observation", None)
+                if not compose:
+                    observed = await reference.observe(run, refresh=request.method == "POST") if reference else None
+                    return page("Reference Data", header + reference_content(observed, csrf, run))
+                try:
+                    async with asyncio.timeout(30):
+                        if reference:
+                            observed, reference_result = await asyncio.gather(
+                                observer.observe(run, refresh=request.method == "POST", automatic=automatic),
+                                reference.observe(run, refresh=request.method == "POST", automatic=automatic))
+                        else:
+                            observed = await observer.observe(run, refresh=request.method == "POST", automatic=automatic)
+                            reference_result = None
+                    detail = reference_content(reference_result, csrf, run)
+                except TimeoutError:
+                    return Response("Observation unavailable; execution outcome remains unknown", status_code=503)
+            elif selected == "evidence":
                 from .evidence_view import render
                 try:
-                    return page("Evidence Review", header + await render(request, observer, run, csrf))
+                    if not compose:
+                        return page("Evidence Review", header + await render(request, observer, run, csrf))
+                    async with asyncio.timeout(30):
+                        observed, detail = await asyncio.gather(
+                            observer.observe(run, refresh=request.method == "POST", automatic=automatic),
+                            render(request, observer, run, csrf))
                 except OperationError:
                     return Response("Invalid Evidence Review selection", status_code=400)
-            observed = (await observer.observe(run, cursor=cursor, refresh=request.method == "POST")
-                        if observer else None)
-            content = history_content(observed, csrf, run, cursor)
-            if selected:
+                except TimeoutError:
+                    return Response("Observation unavailable; execution outcome remains unknown", status_code=503)
+            else:
+                observed = (await observer.observe(run, cursor=cursor, refresh=request.method == "POST",
+                                                  **({"automatic": True} if automatic else {}))
+                            if observer else None)
+            current = bool(run and not request.url.path.startswith("/history"))
+            content = history_content(observed, csrf, run, cursor, current=current,
+                                      refresh_target=request.url.path.removesuffix("/refresh") if current else None)
+            if detail:
+                content += detail
+            elif selected:
                 content += f"<aside>{perspectives[selected]} detail is not yet available. Run selection is preserved.</aside>"
-            return page("Retained run" if run else "Earlier runs", header + content)
+            if current:
+                content = (f'<section data-run-observation="{escape(run)}">{content}</section>'
+                           '<script type="module" src="/scenario-client.mjs"></script>')
+            return page("Current run" if run else "Earlier runs", header + content)
         if selected:
             notes = {
                 "reference": "Only candidates assessed in a selected run will be inspectable, with original source and labelled overlays.",
@@ -275,8 +311,14 @@ def create_app(config, *, clock=time.monotonic, observation=None, reference_obse
             }
             return page(perspectives[selected], header + f"<main><h2>{perspectives[selected]}</h2><p>{notes[selected]}</p>"
                         "<aside>No run selected. Connected run inspection is not available in this release.</aside></main>")
+        enabled = submission or getattr(request.app.state, "submission", None)
+        controls = (f'<input type="hidden" name="csrf" value="{escape(csrf)}">'
+                    f'<input type="hidden" name="request_id" value="{uuid4().hex}">'
+                    '<button>Run scenario</button>' if enabled else
+                    '<button type="button" disabled>Run scenario</button><p>Connected submission is unavailable; no work has been submitted.</p>')
         return page("Choose a scenario", header + """<main><h2>Choose a scenario</h2>
 <p>Observe Reference Data, Evidence Review and Exercise Planning collaborate on a fictional airport comparison.</p>
+<form method="post" action="/run">
 <fieldset><legend>Scenario</legend><div class="cards"><article><h3><label>
 <input type="radio" name="scenario" value="comparison" checked> Comparison</label></h3><p>Agents assess three complete-evidence candidates,
 review release and write a comparison brief.</p><p>Expected: three complete candidates and a saved brief citing exact approved findings.</p></article>
@@ -284,10 +326,35 @@ review release and write a comparison brief.</p><p>Expected: three complete cand
 that candidate and assess a replacement.</p><p>Expected: the gap, skipped candidate, replacement and saved brief remain visible. Original source values are unchanged.</p></article>
 <article><h3><label><input type="radio" name="scenario" value="exhaustion"> Exhaustion</label></h3><p>Agents assess a bounded candidate pool with insufficient evidence and no alternative.</p>
 <p>Expected: an explained exhausted pool and no brief, not a technical failure.</p></article></div></fieldset>
-<button type="button" disabled aria-describedby="unavailable">Run scenario</button>
-<p id="unavailable">Scenario execution is not available in this release. No run has been submitted.
-Connected execution arrives in a later slice. <a href="/history">Reopen retained runs</a>;
+""" + controls + """</form><p><a href="/history">Reopen retained runs</a>;
 this page never plays back fixtures.</p></main>""")
+
+    async def run_scenario(request):
+        csrf = auth.context(request.cookies.get(COOKIE))
+        if not csrf:
+            return Response("Authentication required", status_code=401)
+        values = await form(request)
+        if not same_origin(request) or not hmac.compare_digest(values.get("csrf", "").encode(), csrf.encode()):
+            return Response("Request denied", status_code=403)
+        from citadel.operations import OperationError, identity
+        from citadel.runtime.submission import SCENARIOS
+        try:
+            if values.keys() != {"csrf", "scenario", "request_id"} or values["scenario"] not in SCENARIOS:
+                raise OperationError("invalid_input", "Invalid scenario selection")
+            identity(values["request_id"])
+        except OperationError:
+            return Response("Invalid scenario selection", status_code=400)
+        submitter = submission or getattr(request.app.state, "submission", None)
+        if not submitter:
+            return Response("Connected submission unavailable; no dispatch", status_code=503)
+        result = await submitter.submit(values["request_id"], values["scenario"])
+        if result.get("state") == "conflict":
+            response = page("Run blocked", "<main><h1>Run blocked</h1><p>An unresolved prior dispatch "
+                            "or conflicting immutable submission blocks this start. No automatic replay, "
+                            "reset or admission bypass is available.</p><a href=\"/history\">Inspect retained runs</a></main>")
+            response.status_code = 409
+            return response
+        return RedirectResponse("/runs/" + result["run_id"], status_code=303)
 
     async def logout(request):
         csrf = auth.context(request.cookies.get(COOKIE))
@@ -306,7 +373,15 @@ this page never plays back fixtures.</p></main>""")
     async def style(request):
         return Response(STYLE, media_type="text/css")
 
+    async def scenario_client(request):
+        return Response(Path(__file__).with_name("scenario-client.mjs").read_text(),
+                        media_type="text/javascript")
+
     app = Starlette(lifespan=lifespan, routes=[Route("/", shell), Route("/teams/{team}", shell),
+                           Route("/run", run_scenario, methods=["POST"]),
+                           Route("/runs/{run_id}", shell),
+                           Route("/runs/{run_id}/refresh", shell, methods=["POST"]),
+                           Route("/scenario-client.mjs", scenario_client),
                            Route("/teams/{team}/runs/{run_id}", shell),
                            Route("/teams/{team}/runs/{run_id}/refresh", shell, methods=["POST"]),
                            Route("/teams/{team}/runs/{run_id}/{projection}/page/{detail_cursor}", shell),
@@ -337,7 +412,7 @@ this page never plays back fixtures.</p></main>""")
         response.headers.update({
             "Cache-Control": "no-store",
             "Pragma": "no-cache",
-            "Content-Security-Policy": "default-src 'none'; style-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'",
+            "Content-Security-Policy": "default-src 'none'; style-src 'self'; script-src 'self'; connect-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'",
             "X-Content-Type-Options": "nosniff",
             "Referrer-Policy": "no-referrer",
             "Strict-Transport-Security": "max-age=31536000",
@@ -348,7 +423,7 @@ this page never plays back fixtures.</p></main>""")
     return app
 
 
-def history_content(observed, csrf, run_id, cursor):
+def history_content(observed, csrf, run_id, cursor, *, current=False, refresh_target=None):
     state = observed.state if observed else "unavailable"
     descriptions = {
         "denied": "Observation denied; no execution outcome is established.",
@@ -365,13 +440,20 @@ def history_content(observed, csrf, run_id, cursor):
                  if observed and observed.last_success is not None else "none")
     target = "/history/" + escape(run_id) if run_id else (
         "/history/page/" + escape(cursor) if cursor else "/history")
-    content = f"""<main><h2>{'Retained run' if run_id else 'Earlier runs'}</h2>
+    target = escape(refresh_target) if refresh_target else target
+    attributes = (f' data-current-run="{escape(run_id)}" data-execution="{escape(data.get("execution", "unknown"))}"'
+                  f' data-state="{escape(state)}"' if current else "")
+    content = f"""<main{attributes}><h2>{'Current run' if current else 'Retained run' if run_id else 'Earlier runs'}</h2>
 <p>Planner projection: {escape(state)}. {descriptions.get(state, descriptions['unknown'])}</p>
 <p>Last successful observation (UTC): {timestamp}. Not an atomic cross-team snapshot.</p>"""
     if observed and observed.stale:
-        content += "<aside>stale — refresh failed; showing last successfully observed data, not current activity.</aside>"
+        content += "<aside>stale — refresh failed or observation invalidated; showing last successfully observed data, not current activity.</aside>"
     if run_id:
         content += f"<h3>{escape(run_id)}</h3><p>Execution: {escape(data.get('execution', 'unknown'))}</p>"
+        from .scenario_views import scenario_content
+        content += scenario_content(data)
+        if data.get("outcome") == "incomplete_execution":
+            content += f'<aside>Incomplete execution; technical failure: {escape(data.get("technical_failure", "unknown"))}. Partial effects may remain.</aside>'
         content += "<p>A saved running state does not establish a live owner. Indeterminate means incomplete execution with unknown effects; missing history never proves no work.</p>"
         content += f"<p>Scenario binding: {escape(data.get('fixture', 'unavailable'))}</p>"
         content += "<p>Original immutable source binding: " + (
@@ -394,9 +476,10 @@ def history_content(observed, csrf, run_id, cursor):
             for item in data.get("runs", [])) + "</ul>"
         if data.get("next_cursor"):
             content += f'<a href="/history/page/{escape(data["next_cursor"])}">Next 20 runs</a>'
-    return content + f"""<form method="post" action="{target}/refresh">
+    return content + f"""<form data-observation-refresh method="post" action="{target}/refresh">
 <input type="hidden" name="csrf" value="{escape(csrf)}"><button>Refresh observation</button></form>
-<p>History refresh is manual. Opening or refreshing never submits, retries or recovers work.</p></main>"""
+<p>{'Visible active run: automatic observation every 15 seconds; terminal/unknown/exhausted views stop.' if current else 'History refresh is manual.'}
+Opening or refreshing never submits, retries or recovers work.</p></main>"""
 
 
 def main():
@@ -432,6 +515,8 @@ async def production_observation(app):
             from .reference_observation import ReferenceObservationClient
             reference = ReferenceObservationClient(gateway, credential_value, reads)
             app.state.observation = observer
+            from .submission import SubmissionClient
+            app.state.submission = SubmissionClient(observer, related=(reference,))
             app.state.reference_observation = reference
             try:
                 yield

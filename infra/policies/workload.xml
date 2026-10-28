@@ -14,7 +14,7 @@
       if (op == &quot;operator-reference&quot;) {
         return &quot;__TARGET__&quot; == &quot;reference-data&quot; &amp;&amp; caller == &quot;operator-web&quot;;
       }
-      if (new [] { &quot;operator-runs&quot;, &quot;operator-run-page&quot;, &quot;operator-run&quot; }.Contains(op)) {
+      if (new [] { &quot;operator-runs&quot;, &quot;operator-run-page&quot;, &quot;operator-run&quot;, &quot;operator-scenario-submit&quot; }.Contains(op)) {
         return &quot;__TARGET__&quot; == &quot;candidate-planner&quot; &amp;&amp; caller == &quot;operator-web&quot;;
       }
       if (op == &quot;findings-read&quot;) {
@@ -60,6 +60,7 @@
     </choose>
     <set-variable name="originPath" value="@{
       var op = context.Operation.Id;
+      if (op == &quot;operator-scenario-submit&quot;) { return &quot;/operator/scenarios&quot;; }
       if (op == &quot;operator-draft&quot;) {
         return &quot;/operator/runs/&quot; + context.Request.MatchedParameters[&quot;runId&quot;] + &quot;/drafts/&quot; + context.Request.MatchedParameters[&quot;draftId&quot;] + &quot;/versions/&quot; + context.Request.MatchedParameters[&quot;version&quot;];
       }

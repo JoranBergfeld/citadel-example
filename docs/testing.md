@@ -30,6 +30,7 @@ response, not downloaded source data or actual inference.
 The gate began with 75 migrated units; subsequent feature slices add tests.
 Focused commands select matching flat test modules. Use the runner's reported
 count for the current total; a zero-test result is not a successful gate.
+The `candidate_planner` focused example includes four cases.
 
 These commands require only the already-installed project dependencies. No Azure
 deployment, credentials, Docker, real model, network, retained dataset,
@@ -51,6 +52,18 @@ failures. The Operator CLI resolves deployment assets and source fingerprints
 from that invocation checkout, not from `site-packages`; deployment still needs
 the checkout's infrastructure/image inputs, which are not wheel resources.
 
+Client-only refresh behavior has a dependency-free local gate, using Node 20+
+and its built-in test runner (no npm install, browser or network):
+
+```sh
+node --test tests/client/*.test.mjs
+```
+
+The same workflow runs it after the Python gate. Tests use controlled visibility
+and timers to cover selected-active-only scheduling, coalesced manual/automatic
+requests, hidden/history/terminal/unknown/exhausted stopping. Server-side tests
+own cross-tab physical-read coalescing, timestamps and stale projections.
+
 ## Boundaries and focused areas
 
 | Area | Behavior exercised |
@@ -67,6 +80,7 @@ the checkout's infrastructure/image inputs, which are not wheel resources.
 | `gateway`, `startup` | Local ASGI authorization/signature/path denials and explicit workload configuration/capability validation. |
 | `operator_checkout` | Relocated-package CLI uses invocation-checkout deployment resources and still denies unconfirmed paid actions. |
 | `operator_web*` | Actual protected HTTP handlers/server-rendered chooser, fake-time sessions/throttling, private login configuration and controlled deployment contracts; see [operator-web.md](operator-web.md). |
+| `submission`, `browser_scenarios`, `scenario_summary`, `observation` | Actual hosted Planner/HTTP dispatch, immutable intent before execution, duplicate/ambiguous refusal, shared CLI admission, fixed scenario bindings, saved summary privacy and shared observation/cache behavior. |
 
 Agent tests create **one runtime per case**. `agent_fixtures.py` supplies controlled
 peer-service responses, `MemoryLedger`, a fake clock and a real `GovernedModel`
