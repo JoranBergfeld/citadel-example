@@ -143,7 +143,7 @@ class WorkflowRuntimeTests(unittest.IsolatedAsyncioTestCase):
     async def test_cancelled_root_waits_for_original_absolute_deadline_before_refusal_even_with_clock_skew(self):
         from citadel.acceptance.workflow_timeout import WorkflowHold
         from citadel.runtime.agents import Runtime
-        from test_read_tickets import CountingLedger
+        from tests.unit.test_read_tickets import CountingLedger
         now = [time.time()]
         run = "clock-skew-control"
         ledger = CountingLedger(clock=lambda: now[0])
@@ -176,7 +176,7 @@ class WorkflowRuntimeTests(unittest.IsolatedAsyncioTestCase):
         from citadel.runtime.agents import Runtime, agent_application
         from test_workflow import FixtureGateway
         from test_reference import trust
-        from test_read_tickets import CountingLedger
+        from tests.unit.test_read_tickets import CountingLedger
 
         run, started, monotonic = "workflow-control", time.time(), time.monotonic()
         ledger, output = CountingLedger(clock=time.time), io.StringIO()

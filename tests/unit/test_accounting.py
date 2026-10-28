@@ -1,7 +1,7 @@
 import unittest
 
 from citadel.operations import OperationError
-from citadel.operations.limits import Accounting, CEILINGS
+from citadel.operations.limits import Accounting
 from citadel.operations.testing import MemoryLedger
 
 
@@ -9,7 +9,11 @@ class LimitsTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.now = 1000.0
         self.store = MemoryLedger(clock=lambda: self.now)
-        self.planner = Accounting(self.store, workload="candidate-planner", clock=lambda: self.now)
+        async def sleep(seconds):
+            self.now += seconds
+
+        self.planner = Accounting(self.store, workload="candidate-planner", clock=lambda: self.now,
+                                  sleep=sleep)
 
     async def test_one_durable_run_inherits_deadline_and_precharges_delegated_budgets(self):
         root = await self.planner.start_run("run1")
@@ -173,3 +177,21 @@ class LimitsTests(unittest.IsolatedAsyncioTestCase):
             await self.planner.read_with_retry("run1", ambiguous)
         self.assertEqual(caught.exception.code, "indeterminate")
         self.assertEqual((await self.planner.status("run1"))["remaining"]["reads"], 508)
+
+    async def test_backoff_cannot_restart_a_read_deadline_or_dispatch_after_it(self):
+        async def stalled_scheduler(seconds):
+            self.now += 31
+
+        accounting = Accounting(self.store, workload="candidate-planner",
+                                clock=lambda: self.now, sleep=stalled_scheduler)
+        await accounting.start_run("run1")
+        dispatched = []
+
+        async def read():
+            dispatched.append("physical read")
+
+        with self.assertRaises(OperationError) as caught:
+            await accounting.read_with_retry("run1", read)
+        self.assertEqual(caught.exception.code, "deadline")
+        self.assertEqual(dispatched, [])
+        self.assertEqual((await accounting.status("run1"))["remaining"]["reads"], 511)

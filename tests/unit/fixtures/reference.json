@@ -1,0 +1,16 @@
+{
+  "airports": [
+    {"id": "1", "ident": "EB01", "name": "Fictional unit fixture 1", "type": "small_airport", "latitude_deg": "51", "longitude_deg": "4", "iso_country": "BE", "iso_region": "BE-VAN"},
+    {"id": "2", "ident": "EB02", "name": "Fictional unit fixture 2", "type": "small_airport", "latitude_deg": "51", "longitude_deg": "4", "iso_country": "BE", "iso_region": "BE-VAN"},
+    {"id": "3", "ident": "EB03", "name": "Fictional unit fixture 3", "type": "small_airport", "latitude_deg": "51", "longitude_deg": "4", "iso_country": "BE", "iso_region": "BE-VAN"},
+    {"id": "4", "ident": "EB04", "name": "Fictional unit fixture 4", "type": "small_airport", "latitude_deg": "51", "longitude_deg": "4", "iso_country": "BE", "iso_region": "BE-VAN"}
+  ],
+  "runways": [
+    {"id": "1", "airport_ref": "1", "airport_ident": "EB01", "length_ft": "1200", "width_ft": "80", "surface": "grass", "closed": "0", "lighted": "0"},
+    {"id": "2", "airport_ref": "2", "airport_ident": "EB02", "length_ft": "1200", "width_ft": "80", "surface": "grass", "closed": "0", "lighted": "0"},
+    {"id": "3", "airport_ref": "3", "airport_ident": "EB03", "length_ft": "1200", "width_ft": "80", "surface": "grass", "closed": "0", "lighted": "0"},
+    {"id": "4", "airport_ref": "4", "airport_ident": "EB04", "length_ft": "1200", "width_ft": "80", "surface": "grass", "closed": "0", "lighted": "0"}
+  ],
+  "countries": [{"code": "BE", "name": "Belgium"}],
+  "regions": [{"code": "BE-VAN", "name": "Antwerp", "iso_country": "BE"}]
+}

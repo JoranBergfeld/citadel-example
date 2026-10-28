@@ -166,3 +166,17 @@ For further detail, see [data and fixtures](docs/evidence.md),
 [acceptance checks](docs/acceptance.md). The
 [original specification](https://github.com/JoranBergfeld/citadel-example/issues/13)
 records the intended scope.
+
+## Offline unit tests
+
+In the installed project environment, from the repository root:
+
+```sh
+python -m unittest discover -s tests/unit -v
+python -m unittest discover -s tests/unit -p 'test_candidate_planner.py' -v
+```
+
+See [testing commands and boundaries](docs/testing.md) for other focused areas,
+fixtures, migration scope and claim limits. These tests need no cloud resources,
+credentials, real model, Docker or external network; passing them does not prove
+deployed enforcement or real-demo success.
