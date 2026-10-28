@@ -3,8 +3,10 @@
 Run all commands from this checkout with the exact environment in [stack.md](stack.md).
 Public entrypoint: **`python -m citadel.operator`**. Deployment uses native CLI/Bicep;
 one approved human Azure portal observation verifies the actual API Center plan.
-No hosted control plane, human-user creation, silent region/model replacement,
-or automatic cleanup.
+The [protected Operator landing page](operator-web.md) is the explicit hosted-UI
+exception: it currently cannot run or recover scenarios. Infrastructure
+administration stays CLI/manual. No human-user creation, silent region/model
+replacement, or automatic cleanup.
 Certificate generation declares `cryptography==50.0.2` directly; that exact version
 and all its artifacts were already in the accepted lock. No resolved version,
 image/tool pin, requirement hash, or wheelhouse artifact changed.
@@ -124,6 +126,7 @@ Booleans cannot substitute for integer inputs. No actual subscription is a defau
 chmod 600 .citadel/config.json
 export CITADEL_STATE_DIR="$PWD/.citadel/sample19"
 python -m citadel.operator init --config .citadel/config.json --state-dir "$CITADEL_STATE_DIR"
+python -m citadel.operator configure-web-login --state-dir "$CITADEL_STATE_DIR"
 python -m citadel.operator check --state-dir "$CITADEL_STATE_DIR"
 ```
 
@@ -160,7 +163,9 @@ Host Docker/cloud CLI configuration is not modified.
 passwordless self-signed certificate, generated with **exactly 90 × 86400 seconds**
 validity. It is private operator recovery material; cloud persistence is only in
 allocated vault secrets. Never copy it to telemetry/evidence/Git.
-Applications always use the five allocated workload MIs, never the operator credential.
+The five team applications use their allocated workload MIs. The additional
+Operator web app has a separate platform MI, allocated login secrets and no
+team-data or CLI credential access; see [private setup and downtime](operator-web.md).
 Generation backdates the start by 30 seconds to tolerate small clock regressions;
 the end is start plus exactly 90 days. Validation is not relaxed and no grace
 period is added to the signed interval.
@@ -218,7 +223,8 @@ The actual deployment graph is:
    to the **created** ACR, push, compare remote digest to local RepoDigests, and
    lock image writes/deletes. Unrecorded existing tags conflict. Ambiguous pushes
    require matching recorded intent/local image/registry digest before adoption.
-6. Validate/deploy the same Bicep with all five exact digest images and
+6. Validate/deploy the same Bicep with five team apps plus the separate Operator
+   app using exact digest images and
    `["python","-m","citadel.runtime"]`; pass each app the verified TPM.
    The existing template configures identities, runtime/data/gateway, inventory,
    secrets, telemetry and all fixed limits.
@@ -558,7 +564,7 @@ teardown; 130 means interrupted—reconcile before retry. Child errors are never
 Use the stable event code and owning prerequisite to remediate; do not copy secure
 parameter files or turn on body/debug logging to diagnose failures.
 
-Costs are informational: APIM/ACR, all five warm apps, revisions, model attempts,
+Costs are informational: APIM/ACR, five warm team apps plus the Operator app, revisions, model attempts,
 Blob/vault operations, unsampled telemetry/retention, probes, every acceptance and
 failed run, and delayed/residual charges. Inventory warns after 24 hours.
 There is **no financial ceiling**, automatic expiry deletion, or promise that all

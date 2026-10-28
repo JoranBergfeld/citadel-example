@@ -66,6 +66,9 @@ service by resource group, with storage containers, identities and connections.
 
 Microsoft Agent Framework and FastAPI run in four Azure Container Apps, each
 with its own identity. A fifth app hosts Reference Data's MCP server.
+A separate [protected Operator landing page](docs/operator-web.md) provides the
+scenario chooser and linked team perspectives. Its Run action remains disabled
+until real browser execution is implemented; it never simulates a run.
 
 Agents communicate over A2A, query data over MCP, and read findings over REST.
 Azure API Management (APIM) routes these calls, authenticates individual
@@ -141,7 +144,7 @@ development/merge prerequisites and are not marked passed by offline tests.
 
 Follow [the operator guide](docs/operator.md) for the pinned toolchain, Azure
 permissions, model quota and private deployment configuration. Deployment creates
-paid resources, including five warm apps and APIM. They remain billable until
+paid resources, including five warm team apps, the Operator app and APIM. They remain billable until
 removed; there is no spending cap or automatic cleanup.
 
 With a deployed instance and `CITADEL_STATE_DIR` pointing to its private state:

@@ -16,7 +16,9 @@ deployment. Four groups are created: `citadel-<id>-platform`, `-reference`,
 arbitrary existing groups. The operator must verify inventory ownership and
 effective permissions before choosing it. Group placement is not authorization.
 Every explicit resource, role assignment and policy has a deterministic name.
-Save all three inventory outputs: `inventory`, `teamInventory`, `appInventory`.
+Save all inventory outputs: `inventory`, `teamInventory`, `appInventory`, and
+`operatorInventory` (the separate hosted Operator app, identity, login secrets
+and roles).
 Nested ARM deployment records, managed-environment infrastructure, revisions,
 provider-created resources and probes must also be enumerated by live lifecycle
 inventory; declared outputs alone do not prove a complete cloud inventory.
@@ -34,7 +36,8 @@ applications, origin URLs, fake certificates or success endpoints.
 | --- | --- |
 | `deploymentId`, `location` | Stable ID; only `westeurope` is permitted. |
 | `publisherEmail` | Real operator contact for APIM; do not put it in public evidence. |
-| `applications` | Exact five workload keys from `infra/workloads.json`; each has `image` (`<created-acr>.azurecr.io/<repository>@sha256:<digest>`), actual `command` and `args` string arrays. Empty only for foundation. |
+| `applications` | Five workload keys from `infra/workloads.json` plus separate `operator-web`; each has `image` (`<created-acr>.azurecr.io/<repository>@sha256:<digest>`), actual `command` and `args` string arrays. Empty only for foundation. |
+| `operatorAuth` **secure** | Privately prompted `{username, passwordHash}` for the shared Operator login; Argon2id with the exact parameters in [operator-web.md](operator-web.md). No plaintext/default credentials. |
 | `callerKeys` **secure** | Four agents plus `operator`; distinct `primary` and `secondary` subscription keys. No Reference Data outgoing credential is needed. |
 | `callerStates` | Same five callers, each `active` or `suspended`; explicit suspension/revocation hook. |
 | `contextKeys` **secure** | Each of five targets: `{activeId, keys: {keyId: secret}}`. Per-target keys must differ; 32+ random bytes encoded unpadded base64url. Public key identifiers are alphanumeric/underscore/hyphen. |
@@ -70,6 +73,13 @@ digests and pending-state markers are output.
   `minReplicas=maxReplicas=1`; Single revision mode and TCP probes.
   Rolling revisions may briefly add replicas. TCP readiness is not business
   readiness or evidence of accepted credentials.
+- One additional platform-owned Operator app and distinct MI, using the same
+  immutable image/environment but no team-data/model/management roles or CLI
+  credentials. Two allocated login secrets have secret-scoped readers; ACR Pull
+  is its only other role. One process/replica, Single revision mode and
+  **confirmed stop-before-start updates**, not normal rolling replacement.
+  The lifecycle includes it in manual inventory/teardown and billable resources.
+  See [Operator web setup and limitations](operator-web.md).
 - One RBAC vault and private StorageV2/Standard_LRS account per team. No shared
   storage keys, blob public access, optional soft-delete/versioning or archive.
 - Vaults: RBAC, seven-day soft-delete, no purge protection. Conflicting policy
