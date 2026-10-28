@@ -95,7 +95,7 @@ class RunIndex:
                 raise OperationError("exhausted", "Retained run index is full")
             entries[run_id] = {"binding": binding, "execution": "unknown",
                                "retained_at": self.clock(), "provenance": None, "assessed": [],
-                               "assessed_complete": False}
+                               "assessed_complete": False, "decisions": []}
             await self.ledger.commit(document, etag, deadline=read_deadline.get())
 
     @staticmethod
@@ -133,7 +133,7 @@ class RunIndex:
         entry["execution"] = state
         await self.ledger.commit(document, etag, deadline=read_deadline.get())
 
-    async def assessed(self, run_id, airport_ident, provenance, *, complete=False):
+    async def assessed(self, run_id, airport_ident, provenance, *, complete=False, decision=None):
         """Only Planner's completed assessment handoff can extend this context."""
         airport_ident = identity(airport_ident)
         async with self.admission.request(deadline=read_deadline.get()):
@@ -153,6 +153,10 @@ class RunIndex:
                 raise OperationError("result_limit", "Assessed candidate bound exceeded")
             entry["provenance"] = deepcopy(provenance)
             candidates.append(airport_ident)
+            if decision is not None:
+                if decision["airport_ident"] != airport_ident:
+                    raise OperationError("conflict", "Decision differs from assessed candidate")
+                entry.setdefault("decisions", []).append(deepcopy(decision))
             entry["assessed_complete"] = complete
             await self.ledger.commit(document, etag, deadline=read_deadline.get())
 
@@ -186,11 +190,19 @@ class RunIndex:
             return await self.resolve_in_scope(run_id)
 
     async def resolve_in_scope(self, run_id):
+        return (await self.context_in_scope(run_id))["binding"]
+
+    async def context_in_scope(self, run_id):
         document, _ = await self._read()
         entry = document["retained_runs"].get(identity(run_id))
         if entry is None:
             raise OperationError("missing", "Run is not in the retained index; no backfill is performed")
-        return deepcopy(entry["binding"])
+        binding = entry["binding"]
+        if (binding["run_id"] != run_id or binding["inputs"]["run_id"] != run_id
+                or binding["inputs"]["fixture"] != binding["fixture"]
+                or sha256(binding["inputs"]) != binding["input_hash"]):
+            raise OperationError("conflict", "Retained inputs differ")
+        return deepcopy(entry)
 
     async def observe(self, run_id, operation_ledger):
         binding = await self.resolve_in_scope(run_id)

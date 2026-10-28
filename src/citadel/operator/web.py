@@ -288,13 +288,28 @@ def create_app(config, *, clock=time.monotonic, observation=None, submission=Non
                     return Response("Invalid Evidence Review selection", status_code=400)
                 except TimeoutError:
                     return Response("Observation unavailable; execution outcome remains unknown", status_code=503)
+            elif selected == "planning":
+                from .planning_view import render
+                try:
+                    async with asyncio.timeout(30):
+                        if observer:
+                            observed, detail = await asyncio.gather(
+                                observer.observe(run, refresh=request.method == "POST", automatic=automatic),
+                                render(request, observer, run, csrf))
+                        else:
+                            observed, detail = None, await render(request, None, run, csrf)
+                except OperationError:
+                    return Response("Invalid Exercise Planning selection", status_code=400)
+                except TimeoutError:
+                    return Response("Observation unavailable; execution outcome remains unknown", status_code=503)
             else:
                 observed = (await observer.observe(run, cursor=cursor, refresh=request.method == "POST",
                                                   **({"automatic": True} if automatic else {}))
                             if observer else None)
             current = bool(run and not request.url.path.startswith("/history"))
             content = history_content(observed, csrf, run, cursor, current=current,
-                                      refresh_target=request.url.path.removesuffix("/refresh") if current else None)
+                                      refresh_target=request.url.path.removesuffix("/refresh") if current else None,
+                                      scenario_summary=selected != "planning")
             if detail:
                 content += detail
             elif selected:
@@ -446,7 +461,7 @@ this page never plays back fixtures.</p></main>""")
     return app
 
 
-def history_content(observed, csrf, run_id, cursor, *, current=False, refresh_target=None):
+def history_content(observed, csrf, run_id, cursor, *, current=False, refresh_target=None, scenario_summary=True):
     state = observed.state if observed else "unavailable"
     descriptions = {
         "denied": "Observation denied; no execution outcome is established.",
@@ -473,8 +488,9 @@ def history_content(observed, csrf, run_id, cursor, *, current=False, refresh_ta
         content += "<aside>stale — refresh failed or observation invalidated; showing last successfully observed data, not current activity.</aside>"
     if run_id:
         content += f"<h3>{escape(run_id)}</h3><p>Execution: {escape(data.get('execution', 'unknown'))}</p>"
-        from .scenario_views import scenario_content
-        content += scenario_content(data)
+        if scenario_summary:
+            from .scenario_views import scenario_content
+            content += scenario_content(data)
         if data.get("outcome") == "incomplete_execution":
             content += f'<aside>Incomplete execution; technical failure: {escape(data.get("technical_failure", "unknown"))}. Partial effects may remain.</aside>'
         content += "<p>A saved running state does not establish a live owner. Indeterminate means incomplete execution with unknown effects; missing history never proves no work.</p>"

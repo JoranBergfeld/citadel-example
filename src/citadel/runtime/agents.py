@@ -238,11 +238,16 @@ class Runtime:
         selected, assessed, references, read_scopes = [], [], [], []
         context_available = self.run_index is not None
 
-        async def save_assessed(ident, complete):
+        async def save_assessed(ident, complete, finding=None):
             nonlocal context_available
             if context_available:
                 try:
-                    await self.run_index.assessed(payload["run_id"], ident, pool["provenance"], complete=complete)
+                    from .planning_observation import candidate_decision
+                    decision = candidate_decision(assessed[-1], finding,
+                        replacement=(len(assessed) > 3 and
+                                     any(item["classification"] != "complete" for item in assessed[:-1])))
+                    await self.run_index.assessed(payload["run_id"], ident, pool["provenance"],
+                                                  complete=complete, decision=decision)
                 except (OperationError, TimeoutError):
                     # Observation failure cannot fail/replay the admitted workflow.
                     context_available = False
@@ -255,8 +260,8 @@ class Runtime:
             result = await self.peers.child(self, owner, payload, "evidence-assessor", {"airport_ident": ident},
                 {"agents": 2, "models": 2, "tokens": 36000, "reads": CAPACITY["evidence-assessor"]})
             if result["kind"] == "rejected":
-                await save_assessed(ident, number + 1 == len(pool["airports"]))
                 assessed.append({"airport_ident": ident, "classification": "release_rejected"})
+                await save_assessed(ident, number + 1 == len(pool["airports"]))
                 continue
             ref = result["finding"]
             if result["read_scope"]["run_id"] != payload["run_id"]:
@@ -269,7 +274,7 @@ class Runtime:
                 selected.append(ident)
                 references.append(ref)
                 read_scopes.append(result["read_scope"])
-            await save_assessed(ident, len(selected) == 3 or number + 1 == len(pool["airports"]))
+            await save_assessed(ident, len(selected) == 3 or number + 1 == len(pool["airports"]), ref)
             if len(selected) == 3:
                 break
         product = {
@@ -495,6 +500,9 @@ def agent_application(runtime, trust):
     install_recovery_routes(app, runtime)
     if runtime.workload in ("evidence-assessor", "release-reviewer"):
         from .evidence_observation import install
+        install(app, runtime)
+    if runtime.workload in ("candidate-planner", "briefing-author"):
+        from .planning_observation import install
         install(app, runtime)
     add_a2a_routes_to_fastapi(app, jsonrpc_routes=create_jsonrpc_routes(
         DurableHandler(runtime), "/a2a", context_builder=TrustedContext(), enable_v0_3_compat=False))
