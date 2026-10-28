@@ -38,8 +38,8 @@ applications, origin URLs, fake certificates or success endpoints.
 | `publisherEmail` | Real operator contact for APIM; do not put it in public evidence. |
 | `applications` | Five workload keys from `infra/workloads.json` plus separate `operator-web`; each has `image` (`<created-acr>.azurecr.io/<repository>@sha256:<digest>`), actual `command` and `args` string arrays. Empty only for foundation. |
 | `operatorAuth` **secure** | Privately prompted `{username, passwordHash}` for the shared Operator login; Argon2id with the exact parameters in [operator-web.md](operator-web.md). No plaintext/default credentials. |
-| `callerKeys` **secure** | Four agents plus `operator`; distinct `primary` and `secondary` subscription keys. No Reference Data outgoing credential is needed. |
-| `callerStates` | Same five callers, each `active` or `suspended`; explicit suspension/revocation hook. |
+| `callerKeys` **secure** | Four agents plus separate `operator` and `operator-web`; distinct `primary` and `secondary` subscription keys. No Reference Data outgoing credential is needed. |
+| `callerStates` | Same six callers, each `active` or `suspended`; explicit suspension/revocation hook. |
 | `contextKeys` **secure** | Each of five targets: `{activeId, keys: {keyId: secret}}`. Per-target keys must differ; 32+ random bytes encoded unpadded base64url. Public key identifiers are alphanumeric/underscore/hyphen. |
 | `gatewayCertificatePfx` **secure** | Externally generated exportable, self-signed, passwordless base64 PKCS12, exactly 90 days. Platform vault only. |
 | `gatewayCertificates` | Public allowlist: `{sha256, not_before, not_after}`; timezone-aware ISO timestamps. No certificate/private-key values in output. |
@@ -75,11 +75,22 @@ digests and pending-state markers are output.
   readiness or evidence of accepted credentials.
 - One additional platform-owned Operator app and distinct MI, using the same
   immutable image/environment but no team-data/model/management roles or CLI
-  credentials. Two allocated login secrets have secret-scoped readers; ACR Pull
-  is its only other role. One process/replica, Single revision mode and
+  credentials. Two allocated login secrets and its own isolated APIM subscription
+  secret have secret-scoped readers. ACR Pull and accounting-only marker admission
+  are its other roles. One process/replica, Single revision mode and
   **confirmed stop-before-start updates**, not normal rolling replacement.
   The lifecycle includes it in manual inventory/teardown and billable resources.
   See [Operator web setup and limitations](operator-web.md).
+- One platform `observe<suffix>` StorageV2/Standard_LRS account with private
+  `read-accounting` container. It contains only deployment descriptors and spent
+  markers (16,384 observation; 2,048 recovery-proof), never team data or credentials.
+  The custom admission role allows only Blob writes/leases, no GET/list/delete,
+  scoped to this container. All five workload identities, including Reference
+  Data, and the separate UI identity are explicitly assigned. UI gets no team
+  data roles; Reference Data gets no dataset writes. `operatorInventory.accounting`
+  inventories the account/service/container, custom role and assignments for
+  ownership-checked manual teardown. Bootstrap, not refresh/startup, funds the
+  permanently leased descriptors; repair must preserve markers and capacities.
 - One RBAC vault and private StorageV2/Standard_LRS account per team. No shared
   storage keys, blob public access, optional soft-delete/versioning or archive.
 - Vaults: RBAC, seven-day soft-delete, no purge protection. Conflicting policy
@@ -122,13 +133,16 @@ extension.
 | Evidence `reviewer-operations` | Reviewer Contributor only |
 | Planning `candidate-lists`, `planner-operations` | Planner Contributor only |
 | Planning `briefs`, `author-operations` | Author Contributor only |
+| Platform `read-accounting` | Five workload MIs and UI MI: marker/lease writes only; no GET/list/delete |
 
 No grants are on a prefix, storage account, team group or subscription.
 Contributor still permits deletes/overwrites: immutable versions, conditional
 updates, release uniqueness, ownership and fencing are application duties.
 Issue 16 agrees that draft/release commit ledgers may live beside their
 artifacts in `drafts`/`findings`; generic operation containers remain separate.
-There is no shared cross-team accounting container or shared identity.
+Workflow accounting remains isolated per workload, with no shared identity.
+The deployment observation/proof container is the narrow accounting-only
+exception; it contains no team products, credentials or workflow budget.
 
 ## Public gateway interfaces
 
@@ -136,6 +150,7 @@ Each workload's APIM prefix is `/<workload-name>`. Origin paths omit that prefix
 
 | Origin path | Method and distinct capability |
 | --- | --- |
+| `/operator/runs`, `/operator/runs/page/{cursor}`, `/operator/runs/{run_id}` | GET retained Planner list/page/summary; only isolated `operator-web`, not workload callers |
 | `/a2a` | POST A2A 1.0 JSON-RPC `SendMessage` (invoke) or `GetTask` (status); no other RPC methods/batches |
 | `/.well-known/agent-card.json` | GET discovery on permitted invocation edges |
 | `/operations/{operationId}` | GET status on permitted invocation edges; owner check remains in operation service |

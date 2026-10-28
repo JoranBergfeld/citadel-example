@@ -3,7 +3,7 @@
     <set-variable name="caller" value="@{
       if (context.Subscription == null) { return &quot;&quot;; }
       var id = context.Subscription.Id;
-      var known = new [] { &quot;operator&quot;, &quot;candidate-planner&quot;, &quot;evidence-assessor&quot;, &quot;release-reviewer&quot;, &quot;briefing-author&quot; };
+      var known = new [] { &quot;operator&quot;, &quot;operator-web&quot;, &quot;candidate-planner&quot;, &quot;evidence-assessor&quot;, &quot;release-reviewer&quot;, &quot;briefing-author&quot; };
       return known.Contains(id) ? id : &quot;&quot;;
     }" />
     <choose>

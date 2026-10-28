@@ -79,6 +79,14 @@ def verify(lifecycle):
         {"name": "CITADEL_OPERATOR_PASSWORD_HASH", "secretRef": "operator-password-hash"},
         {"name": "CITADEL_OPERATOR_ORIGIN", "value": inventory["origin"]},
     ]
+    if "accounting" in inventory:
+        expected_environment += [
+            {"name": "AZURE_CLIENT_ID", "value": inventory["foundation"]["clientId"]},
+            {"name": "CITADEL_DEPLOYMENT_ID", "value": lifecycle.id},
+            {"name": "CITADEL_GATEWAY_URL", "value": lifecycle.value["outputs"]["gatewayUrl"]},
+            {"name": "CITADEL_OBSERVATION_BLOB_URL", "value": inventory["accountingBlobUrl"]},
+            {"name": "CITADEL_OPERATOR_SUBSCRIPTION", "secretRef": "operator-subscription"},
+        ]
     if (properties.get("provisioningState") != "Succeeded"
             or (document.get("tags") or {}).get("citadel-deployment") != lifecycle.id
             or set(document["identity"]["userAssignedIdentities"]) != {identity}

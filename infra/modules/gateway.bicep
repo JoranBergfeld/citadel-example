@@ -23,7 +23,7 @@ resource certificate 'Microsoft.ApiManagement/service/certificates@2024-05-01' =
     keyVault: { secretIdentifier: '${vault.properties.vaultUri}secrets/gateway-certificate' }
   }
 }
-var callers = ['operator', 'candidate-planner', 'evidence-assessor', 'release-reviewer', 'briefing-author']
+var callers = ['operator', 'operator-web', 'candidate-planner', 'evidence-assessor', 'release-reviewer', 'briefing-author']
 resource subscriptions 'Microsoft.ApiManagement/service/subscriptions@2024-05-01' = [for caller in callers: {
   parent: apim
   name: caller

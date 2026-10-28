@@ -96,8 +96,10 @@ def validate_deployment_inputs(parameters: dict) -> None:
         raise ValueError("Context signing keys must be isolated by backend and rotation version")
     callers = parameters.get("callerKeys", {})
     expected = (set(INVOCATION_CALLERS) - {"reference-data"}) | {"operator"}
+    if "operatorAuth" in parameters:
+        expected.add("operator-web")
     if set(callers) != expected:
-        raise ValueError("Exactly four agent and one operator credentials required")
+        raise ValueError("Exact isolated agent and Operator caller credentials required")
     all_caller_keys = []
     for entry in callers.values():
         for name in ("primary", "secondary"):

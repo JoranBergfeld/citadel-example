@@ -39,6 +39,7 @@ resource identities 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31
   location: location
   tags: tags
 }]
+output observationPrincipalIds array = [for (w, i) in workloads: identities[i].properties.principalId]
 resource storage 'Microsoft.Storage/storageAccounts@2023-05-01' = {
   name: '${team}${suffix}'
   location: location

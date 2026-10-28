@@ -1,7 +1,8 @@
-"""Single-process Operator shell. No workflow, gateway or team-data client."""
+"""Single-process Operator application; no direct team-data access."""
 
 import asyncio
 from collections import deque
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 import hashlib
 import hmac
@@ -12,6 +13,7 @@ import re
 import secrets
 import threading
 import time
+from datetime import datetime, timezone
 from urllib.parse import parse_qs, urlsplit
 
 from cryptography.exceptions import InvalidKey
@@ -196,7 +198,7 @@ async def form(request):
         return {}
 
 
-def create_app(config, *, clock=time.monotonic):
+def create_app(config, *, clock=time.monotonic, observation=None, lifespan=None):
     auth = Authentication(config, clock)
 
     def same_origin(request):
@@ -225,11 +227,35 @@ def create_app(config, *, clock=time.monotonic):
         perspectives = {"reference": "Reference Data", "evidence": "Evidence Review", "planning": "Exercise Planning"}
         if selected and selected not in perspectives:
             return Response("Not found", status_code=404)
-        nav = '<nav aria-label="Team perspectives"><a href="/">Choose a scenario</a>' + "".join(
-            f'<a href="/teams/{key}"' + (' aria-current="page"' if key == selected else '') +
+        run = request.path_params.get("run_id")
+        suffix = f'/runs/{escape(run)}' if run else ''
+        nav = '<nav aria-label="Team perspectives"><a href="/">Choose a scenario</a><a href="/history">Earlier runs</a>' + "".join(
+            f'<a href="/teams/{key}{suffix}"' + (' aria-current="page"' if key == selected else '') +
             f'>{value}</a>' for key, value in perspectives.items()) + "</nav>"
         header = f"""<header><h1>Citadel · Operator</h1><form method="post" action="/logout">
 <input type="hidden" name="csrf" value="{escape(csrf)}"><button>Log out</button></form></header>{nav}"""
+        if request.url.path.startswith("/history") or run:
+            from citadel.operations import OperationError, identity
+            cursor = request.path_params.get("cursor")
+            try:
+                if run:
+                    identity(run)
+                if cursor:
+                    identity(cursor)
+            except OperationError:
+                return Response("Invalid run selection", status_code=400)
+            if request.method == "POST":
+                values = await form(request)
+                if (not same_origin(request) or not hmac.compare_digest(
+                        values.get("csrf", "").encode(), csrf.encode())):
+                    return Response("Request denied", status_code=403)
+            observer = observation or getattr(request.app.state, "observation", None)
+            observed = (await observer.observe(run, cursor=cursor, refresh=request.method == "POST")
+                        if observer else None)
+            content = history_content(observed, csrf, run, cursor)
+            if selected:
+                content += f"<aside>{perspectives[selected]} detail is not yet available. Run selection is preserved.</aside>"
+            return page("Retained run" if run else "Earlier runs", header + content)
         if selected:
             notes = {
                 "reference": "Only candidates assessed in a selected run will be inspectable, with original source and labelled overlays.",
@@ -249,7 +275,8 @@ that candidate and assess a replacement.</p><p>Expected: the gap, skipped candid
 <p>Expected: an explained exhausted pool and no brief, not a technical failure.</p></article></div></fieldset>
 <button type="button" disabled aria-describedby="unavailable">Run scenario</button>
 <p id="unavailable">Scenario execution is not available in this release. No run has been submitted.
-Connected execution and retained-run inspection arrive in later slices; this page never plays back fixtures.</p></main>""")
+Connected execution arrives in a later slice. <a href="/history">Reopen retained runs</a>;
+this page never plays back fixtures.</p></main>""")
 
     async def logout(request):
         csrf = auth.context(request.cookies.get(COOKIE))
@@ -268,7 +295,13 @@ Connected execution and retained-run inspection arrive in later slices; this pag
     async def style(request):
         return Response(STYLE, media_type="text/css")
 
-    app = Starlette(routes=[Route("/", shell), Route("/teams/{team}", shell),
+    app = Starlette(lifespan=lifespan, routes=[Route("/", shell), Route("/teams/{team}", shell),
+                           Route("/teams/{team}/runs/{run_id}", shell),
+                           Route("/history", shell), Route("/history/refresh", shell, methods=["POST"]),
+                           Route("/history/page/{cursor}", shell),
+                           Route("/history/page/{cursor}/refresh", shell, methods=["POST"]),
+                           Route("/history/{run_id}", shell),
+                           Route("/history/{run_id}/refresh", shell, methods=["POST"]),
                            Route("/login", login, methods=["GET", "POST"]),
                            Route("/logout", logout, methods=["POST"]), Route("/style.css", style)])
 
@@ -293,12 +326,92 @@ Connected execution and retained-run inspection arrive in later slices; this pag
     return app
 
 
+def history_content(observed, csrf, run_id, cursor):
+    state = observed.state if observed else "unavailable"
+    descriptions = {
+        "denied": "Observation denied; no execution outcome is established.",
+        "missing": "Confirmed missing from this retained index. No backfill or proof of non-execution.",
+        "empty": "Confirmed empty retained page. Earlier unindexed work is not reconstructed.",
+        "partial": "Partial history: missing records or immutable source bindings. Execution may be unknown.",
+        "unavailable": "Observation unavailable. This is not an execution failure.",
+        "exhausted": "Deployment observation allowance exhausted. No fallback or refill.",
+        "unknown": "Execution unknown; missing observations are not proof of no work.",
+        "ok": "Saved service observation; no live activity is implied.",
+    }
+    data = observed.data if observed and observed.data else {}
+    timestamp = (datetime.fromtimestamp(observed.last_success, timezone.utc).isoformat()
+                 if observed and observed.last_success is not None else "none")
+    target = "/history/" + escape(run_id) if run_id else (
+        "/history/page/" + escape(cursor) if cursor else "/history")
+    content = f"""<main><h2>{'Retained run' if run_id else 'Earlier runs'}</h2>
+<p>Planner projection: {escape(state)}. {descriptions.get(state, descriptions['unknown'])}</p>
+<p>Last successful observation (UTC): {timestamp}. Not an atomic cross-team snapshot.</p>"""
+    if observed and observed.stale:
+        content += "<aside>stale — refresh failed; showing last successfully observed data, not current activity.</aside>"
+    if run_id:
+        content += f"<h3>{escape(run_id)}</h3><p>Execution: {escape(data.get('execution', 'unknown'))}</p>"
+        content += "<p>A saved running state does not establish a live owner. Indeterminate means incomplete execution with unknown effects; missing history never proves no work.</p>"
+        content += f"<p>Scenario binding: {escape(data.get('fixture', 'unavailable'))}</p>"
+        content += "<p>Original immutable source binding: " + (
+            "retained" if data.get("bindings", {}).get("source") else "unavailable; not replaced with current data") + "</p>"
+        bindings = data.get("bindings", {})
+        content += f'<details><summary>Exact saved bindings</summary><p>Inputs: {escape(bindings.get("inputs", "unavailable"))}</p>'
+        source = bindings.get("source")
+        if source:
+            for name in ("source", "profile", "fixture"):
+                item = source[name]
+                content += f'<p>{name}: {escape(str(item.get("id", item.get("snapshot", ""))))} · {escape(item["sha256"])}</p>'
+        if bindings.get("product"):
+            product = bindings["product"]
+            content += f'<p>Product {escape(product["artifact_id"])} · version {escape(str(product["version"]))} · {escape(product["sha256"])}</p>'
+        content += "</details>"
+    else:
+        content += "<ul>" + "".join(
+            f'<li><a href="/history/{escape(item["run_id"])}">{escape(item["run_id"])}</a>'
+            f' · {escape(item["fixture"])} · last indexed execution: {escape(item["execution"])}</li>'
+            for item in data.get("runs", [])) + "</ul>"
+        if data.get("next_cursor"):
+            content += f'<a href="/history/page/{escape(data["next_cursor"])}">Next 20 runs</a>'
+    return content + f"""<form method="post" action="{target}/refresh">
+<input type="hidden" name="csrf" value="{escape(csrf)}"><button>Refresh observation</button></form>
+<p>History refresh is manual. Opening or refreshing never submits, retries or recovers work.</p></main>"""
+
+
 def main():
     import uvicorn
     logging.basicConfig(level=logging.INFO, format="%(name)s %(message)s")
     config = AuthConfig.from_environment()
-    uvicorn.run(create_app(config), host="0.0.0.0", port=8000, workers=1,
+    uvicorn.run(create_app(config, lifespan=production_observation), host="0.0.0.0", port=8000, workers=1,
                 proxy_headers=False, access_log=False, limit_concurrency=32)
+
+
+@asynccontextmanager
+async def production_observation(app):
+    from azure.identity.aio import ManagedIdentityCredential
+    from azure.storage.blob.aio import ContainerClient
+    from citadel.runtime.configuration import endpoint
+    from citadel.runtime.observation import DeploymentReads
+    from citadel.runtime.tickets import AzureTicketStore
+    from .observation import ObservationClient
+    from uuid import UUID
+
+    client_id = str(UUID(os.environ["AZURE_CLIENT_ID"]))
+    blob = endpoint(os.environ["CITADEL_OBSERVATION_BLOB_URL"], ".blob.core.windows.net")
+    gateway = endpoint(os.environ["CITADEL_GATEWAY_URL"])
+    credential_value = os.environ["CITADEL_OPERATOR_SUBSCRIPTION"]
+    if not re.fullmatch(r"[A-Za-z0-9_-]{32,128}", credential_value):
+        raise ValueError("Invalid allocated Operator caller credential")
+    async with ManagedIdentityCredential(client_id=client_id) as credential:
+        async with ContainerClient(blob, "read-accounting", credential=credential,
+                api_version="2026-10-06", retry_total=0, retry_connect=0, retry_read=0,
+                retry_status=0, connection_timeout=5, read_timeout=30) as container:
+            reads = DeploymentReads(AzureTicketStore(container), os.environ["CITADEL_DEPLOYMENT_ID"])
+            observer = ObservationClient(gateway, credential_value, reads)
+            app.state.observation = observer
+            try:
+                yield
+            finally:
+                await observer.close()
 
 
 if __name__ == "__main__":
