@@ -2,11 +2,56 @@
 
 The hosted Operator application is not a scenario playback. It opens
 on Comparison, Replacement and Exhaustion descriptions with expected outcomes and
-linked Reference Data, Evidence Review and Exercise Planning perspectives. **Run
-scenario is disabled**. Earlier runs lists and reopens retained Planner observations.
-No browser execution, recovery or model calls are implemented here. Continue using
-the CLI for actual runs; its submissions enter the same durable Planner index.
+linked Reference Data, Evidence Review and Exercise Planning perspectives. Choose
+one scenario and use **Run scenario** to start the actual deterministic workflow.
+The current run becomes the primary view; Earlier runs reopens retained Planner
+observations. CLI submissions enter the same durable Planner index and share
+global admission with browser submissions.
 There is no simulated production mode or automatic submission after login.
+
+## Running and observing scenarios
+
+The browser sends only a scenario and opaque request identity to its authenticated
+backend. The backend's isolated `operator-web` caller invokes
+`POST /candidate-planner/operator/scenarios`; only this explicit control authority
+maps to the Planner's existing root ownership. It grants no generic A2A invocation
+or CLI-key access. Planner resolves fixed bindings: comparison → `base-source`,
+replacement → `missing-width-replacement`, exhaustion → `no-alternative`.
+Browser-provided fixture, owner, run ID and storage paths are rejected.
+
+Planner derives one run identity per submission request and conditionally persists
+immutable inputs plus dispatch intent **before calling the existing runtime**.
+Only the confirmed intent writer may dispatch once. Duplicates, lost responses,
+concurrent requests and backend restart reconcile that retained intent; an
+ambiguous write never authorizes dispatch. An intent with no known outcome stays
+unknown, even when no workflow was actually started. There is deliberately no
+background resubmission or automatic repair. Persisted intent/outcome races can
+remain unknown and require explicit recovery inspection, not another click.
+An unresolved intent or ambiguous dispatch also blocks fresh UI and CLI starts
+through the shared index, even before a workflow slot was confirmed. Missing
+proof is not permission to clear it.
+The existing durable global slot blocks concurrent CLI/UI execution; a blocker or
+conflicting state is shown without a reset or ownership bypass.
+
+The selected current run shows only exact saved Planner products: selected and
+skipped candidates, evidence gaps, labelled overlay provenance, an actual embedded
+saved brief and its exact approved-finding references. Replacement candidates are
+identified after the initial three candidates. Exhaustion explains the finite
+pool with no brief. Technical/incomplete execution, release rejection and
+insufficient evidence stay distinct. Missing prose/artifacts are not regenerated;
+original source data is unchanged and fictional-use caveats remain visible.
+Detailed team inspection and exact citation navigation compose through the
+separate team-view slices; this summary does not grant draft access.
+
+Only a selected **current** run whose observed execution is pending/running
+refreshes every 15 seconds while its page is visible. History/completed views are
+manual. The dependency-free client stops on hidden pages, terminal/unknown
+execution, exhausted observation allowance or authentication denial. It has no
+submission, retry or recovery loop. Active stale observations remain labelled
+last-known, not live activity. No simulated stages, pulses or percentages exist.
+Manual/automatic requests share one in-flight backend read across tabs; automatic
+requests reuse the latest attempt for 15 seconds, including failed attempts.
+Authentication and explicit user submission remain separate from observation.
 
 ## Private setup and replacement
 
@@ -56,9 +101,10 @@ Failed/ambiguous stop never permits replacement; reconcile explicitly.
   login secrets and isolated `subscription-operator-web`, and write-only admission
   to the platform accounting container. No team Blob roles, agent/context/CLI subscription secrets, model
   permission, Azure-management authority, CLI state mount or generic proxy.
-  The distinct `operator-web` APIM caller can only GET the Planner's narrow retained
-  list/page/summary paths. It cannot invoke agents, owner status, findings, models,
-  arbitrary URLs or recovery. It never copies the CLI Operator key.
+  The distinct `operator-web` APIM caller can GET the Planner's narrow retained
+  list/page/summary paths and POST its narrow scenario-submission action. It cannot
+  use generic agent invocation, owner status, models or arbitrary URLs.
+  It never copies the CLI Operator key.
 - Exactly one container/process (`python -m citadel.operator.web`, one Uvicorn
   worker, no reload) and `minReplicas=maxReplicas=1`. The deployment verifier rejects
   extra environment authority, mounts, worker commands and scaling.
@@ -92,13 +138,15 @@ SameSite=Strict, Path=/, with no persistent lifetime. Expiry is exactly eight ho
 after login, never extended by use. Every protected view checks it. Login POST
 requires the configured HTTPS Origin; logout additionally requires the
 session-bound CSRF value. GET never submits work or logs out. Responses are
-`no-store`, with a restrictive CSP; no frontend JavaScript/storage is used.
+`no-store`, with a restrictive same-origin script/connect CSP. The external
+refresh module stores no credentials or authority in browser storage.
 
 Logout revokes the session and clears its cookie. Restart discards all sessions
 and throttle counters. **Restart-proof throttling and individual attribution are
 not promised.** Tabs share the cookie, and another successful login displaces the
-previous session. Authentication never cancels/replays runs; the shell has no
-workflow dispatch path. Do not expose the container port outside HTTPS ingress.
+previous session. Authentication never cancels/replays runs; only an explicit
+CSRF/origin-protected Run scenario POST can submit. Do not expose the container
+port outside HTTPS ingress.
 Only fixed authentication outcomes are logged, never usernames, passwords,
 hashes, cookies or CSRF tokens.
 
@@ -108,8 +156,8 @@ Use **Earlier runs**, then select a run. Pages contain at most 20 summaries;
 team links preserve selection. Initial loading observes once; subsequent reads
 use the shared server cache. **Refresh observation** is explicit, origin/CSRF
 protected and coalesced across tabs, with one request in flight per selection.
-History/completed views never poll. No JavaScript, client storage, submission,
-model work or recovery is involved.
+History/completed views never poll. Opening history invokes no submission,
+model work or recovery.
 
 Planner persists the index before admission, including partial/ambiguous CLI
 submissions, and updates it during execution, never during observation.
@@ -117,8 +165,8 @@ The example index holds at most **256 runs**; reaching capacity blocks new
 submissions rather than evicting unresolved history. It is not a scan of all
 storage and does not backfill pre-index runs. Original owner/input bindings are
 server-resolved. Missing source/profile/overlay/product bindings remain partial,
-not inferred from a current bundle. Private products, receipts and paths never
-leave the service through this summary surface.
+not inferred from a current bundle. Private draft content, receipts and paths
+never leave the service through this allowlisted summary surface.
 
 Each projection shows its last-successful observation time, not an artifact
 modification time or an atomic cross-team snapshot. Refresh failure preserves
@@ -127,7 +175,8 @@ history, unavailable source, exhausted allowance and unknown execution differ.
 A saved running label is not fresh activity; no pulses are fabricated.
 
 The connected deployment shares **16,384 observation** and **2,048 recovery-proof**
-physical reads across runs/tabs/logins/restarts. Recovery is not exposed yet.
+physical reads across runs/tabs/logins/restarts. Recovery is a separate explicit
+control, never an observation side effect.
 Protocol GETs and every actual supporting/team storage GET are separately prepaid
 by confirmed conditional markers, including failed attempts. Descriptor checks
 use leases, not recursive meter GETs. SDK/read retries are disabled; the whole
@@ -151,6 +200,10 @@ full development/merge gate or the focused landing-page checks while iterating:
 python -m unittest discover -s tests/unit -v
 python -m unittest discover -s tests/unit -p 'test_operator_web*.py' -v
 python -m unittest discover -s tests/unit -p 'test_observation.py' -v
+python -m unittest discover -s tests/unit -p 'test_submission.py' -v
+python -m unittest discover -s tests/unit -p 'test_browser_scenarios.py' -v
+python -m unittest discover -s tests/unit -p 'test_scenario_summary.py' -v
+node --test tests/client/*.test.mjs
 ```
 
 The full command is required before merging. See [testing.md](testing.md) for
@@ -164,7 +217,10 @@ session/throttling checks, controlled cryptographic-concurrency checks, private
 CLI/configuration checks and controlled management/deployment-contract checks.
 They require no Azure credentials, cloud services, paid models, Docker, browser
 runner or external data. Fixtures/credentials are explicitly test-only. There is
-no browser-only logic requiring a separate client runner.
+also a small dependency-free Node built-in test runner (Node 20+), covering the
+actual client refresh scheduler with controlled visibility, terminal states,
+coalescing and fake timers. It does not require browser automation or npm
+installation. The hosted workflow runs these client units alongside Python units.
 
 The offline results and local template compilation do **not** prove deployed
 Azure enforcement, real rolling-update behavior, model quality or demo success.

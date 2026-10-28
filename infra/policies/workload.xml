@@ -5,7 +5,7 @@
       var caller = (string)context.Variables[&quot;caller&quot;];
       var invocation = new [] { __CALLERS__ };
       var op = context.Operation.Id;
-      if (new [] { &quot;operator-runs&quot;, &quot;operator-run-page&quot;, &quot;operator-run&quot; }.Contains(op)) {
+      if (new [] { &quot;operator-runs&quot;, &quot;operator-run-page&quot;, &quot;operator-run&quot;, &quot;operator-scenario-submit&quot; }.Contains(op)) {
         return &quot;__TARGET__&quot; == &quot;candidate-planner&quot; &amp;&amp; caller == &quot;operator-web&quot;;
       }
       if (op == &quot;findings-read&quot;) {
@@ -51,6 +51,7 @@
     </choose>
     <set-variable name="originPath" value="@{
       var op = context.Operation.Id;
+      if (op == &quot;operator-scenario-submit&quot;) { return &quot;/operator/scenarios&quot;; }
       if (op == &quot;operator-runs&quot;) { return &quot;/operator/runs&quot;; }
       if (op == &quot;operator-run-page&quot;) { return &quot;/operator/runs/page/&quot; + context.Request.MatchedParameters[&quot;cursor&quot;]; }
       if (op == &quot;operator-run&quot;) { return &quot;/operator/runs/&quot; + context.Request.MatchedParameters[&quot;runId&quot;]; }

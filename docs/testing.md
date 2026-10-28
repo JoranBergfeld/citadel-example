@@ -27,9 +27,8 @@ The explicit start directory matters: root `tests` discovery can report a
 misleading zero-test success for the older nested suites. Unit test modules are
 flat; `fixtures/` holds labelled, fictional reference rows and a canned model
 response, not downloaded source data or actual inference.
-The suite currently discovers 94 tests (75 migrated units plus 19 Operator
-landing-page units), including four in the `candidate_planner` focused example;
-later feature slices may add units. A zero-test result is not a successful gate.
+The suite includes four cases in the `candidate_planner` focused example;
+feature slices add focused units. A zero-test result is not a successful gate.
 
 These commands require only the already-installed project dependencies. No Azure
 deployment, credentials, Docker, real model, network, retained dataset,
@@ -43,6 +42,18 @@ the test step needs no network, Docker, credentials or Azure resource. No
 numerical timing benchmark or coverage target is required. Hosted workflow
 execution and branch-protection configuration are not established by local
 validation.
+
+Client-only refresh behavior has a dependency-free local gate, using Node 20+
+and its built-in test runner (no npm install, browser or network):
+
+```sh
+node --test tests/client/*.test.mjs
+```
+
+The same workflow runs it after the Python gate. Tests use controlled visibility
+and timers to cover selected-active-only scheduling, coalesced manual/automatic
+requests, hidden/history/terminal/unknown/exhausted stopping. Server-side tests
+own cross-tab physical-read coalescing, timestamps and stale projections.
 
 ## Boundaries and focused areas
 
@@ -59,6 +70,7 @@ validation.
 | `recovery`, `operator_quiescence` | Fencing, no replay/refund, restricted explicit retry, immutable deadlines and quiescent partial work staying incomplete. |
 | `gateway`, `startup` | Local ASGI authorization/signature/path denials and explicit workload configuration/capability validation. |
 | `operator_web*` | Actual protected HTTP handlers/server-rendered chooser, fake-time sessions/throttling, private login configuration and controlled deployment contracts; see [operator-web.md](operator-web.md). |
+| `submission`, `browser_scenarios`, `scenario_summary`, `observation` | Actual hosted Planner/HTTP dispatch, immutable intent before execution, duplicate/ambiguous refusal, shared CLI admission, fixed scenario bindings, saved summary privacy and shared observation/cache behavior. |
 
 Agent tests create **one runtime per case**. `agent_fixtures.py` supplies controlled
 peer-service responses, `MemoryLedger`, a fake clock and a real `GovernedModel`

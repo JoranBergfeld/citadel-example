@@ -29,8 +29,9 @@ rules. The teams share one subscription and one human administrator.
 
 ## A comparison from start to finish
 
-The operator starts a scenario through the CLI, which submits a task to Planner
-and polls until it can retrieve the JSON result.
+The Operator chooses a scenario in the [protected hosted application](docs/operator-web.md)
+and follows its actual saved result. The CLI remains available; both paths
+share the Planner's durable global admission.
 
 ![The comparison workflow, including replacement and exhaustion outcomes.](docs/images/user-flow.svg)
 

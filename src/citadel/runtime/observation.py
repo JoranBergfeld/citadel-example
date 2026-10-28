@@ -90,11 +90,20 @@ class RunIndex:
                 if entries[run_id]["binding"] != binding:
                     raise OperationError("conflict", "Retained run inputs are immutable")
                 return
+            self.require_resolved_dispatch(entries)
             if len(entries) >= self.capacity:
                 raise OperationError("exhausted", "Retained run index is full")
             entries[run_id] = {"binding": binding, "execution": "unknown",
                                "retained_at": self.clock(), "provenance": None}
             await self.ledger.commit(document, etag, deadline=read_deadline.get())
+
+    @staticmethod
+    def require_resolved_dispatch(entries):
+        for entry in entries.values():
+            submission = entry.get("submission", {})
+            if (entry["execution"] == "unknown" and submission
+                    and submission.get("reason") in ("unknown", "ambiguous_dispatch")):
+                raise OperationError("conflict", "Unresolved hosted dispatch blocks new UI and CLI runs")
 
     async def update(self, run_id, state, *, provenance=None):
         async with self.admission.request():
@@ -150,6 +159,10 @@ class RunIndex:
         result = {"run_id": binding["run_id"], "fixture": binding["fixture"],
                   "input_hash": binding["input_hash"], "execution": "unknown",
                   "state": "partial", "bindings": {"inputs": binding["input_hash"], "source": None}}
+        document, _ = await self._read()
+        submission = document["retained_runs"][run_id].get("submission")
+        if submission:
+            result["submission_reason"] = submission["reason"]
         try:
             document, _ = await operation_ledger.read()
         except OperationError as exc:
@@ -171,6 +184,16 @@ class RunIndex:
         product = record.get("product") or {}
         if product and (record.get("result") or {}).get("sha256") != sha256(product):
             raise OperationError("conflict", "Saved product differs from its exact immutable binding")
+        if product:
+            from .scenario_summary import scenario_summary
+            result["summary"] = scenario_summary(product)
+            if product.get("status") == "complete" and not product.get("brief"):
+                result["state"] = "partial"
+        elif record["state"] in ("indeterminate", "failed_no_commit"):
+            result["outcome"] = "incomplete_execution"
+            code = (record.get("result") or {}).get("code")
+            result["technical_failure"] = code if code in (
+                "unavailable", "deadline", "conflict", "exhausted", "forbidden") else "unknown"
         if product.get("provenance") is not None:
             result["bindings"]["source"] = provenance_projection(product["provenance"])
         else:
