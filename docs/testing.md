@@ -52,7 +52,7 @@ failures. The Operator CLI resolves deployment assets and source fingerprints
 from that invocation checkout, not from `site-packages`; deployment still needs
 the checkout's infrastructure/image inputs, which are not wheel resources.
 
-Client-only refresh behavior has a dependency-free local gate, using Node 20+
+Client-only refresh and retry-confirmation behavior has a dependency-free local gate, using Node 20+
 and its built-in test runner (no npm install, browser or network):
 
 ```sh
@@ -63,6 +63,8 @@ The same workflow runs it after the Python gate. Tests use controlled visibility
 and timers to cover selected-active-only scheduling, coalesced manual/automatic
 requests, hidden/history/terminal/unknown/exhausted stopping. Server-side tests
 own cross-tab physical-read coalescing, timestamps and stale projections.
+Retry client tests cover unchecked/cancelled confirmation and duplicate-submit
+denial; they never schedule execution or retry a lost response.
 
 ## Boundaries and focused areas
 
@@ -77,7 +79,8 @@ own cross-tab physical-read coalescing, timestamps and stale projections.
 | `accounting`, `read_tickets` | Finite inherited budgets/deadlines, charged retries, physical reads, shared-store concurrency/reconstruction/exhaustion and ambiguous marker admission refusing dispatch. |
 | `peer_reads` | Actual gateway-client exact-version/hash checks through controlled HTTP; a failed finding read spends its allowance and cannot dispatch again after exhaustion. |
 | `recovery`, `operator_quiescence` | Fencing, no replay/refund, restricted explicit retry, immutable deadlines and quiescent partial work staying incomplete. |
-| `operator_recovery*` | Real hosted control handlers/client, durable duplicate/lost-response reconciliation, bound child/private effects, proof-read charging, auth/CSRF denial and mutable-cache invalidation. No cloud calls or browser retry. |
+| `operator_recovery*` | Real hosted recovery handlers/client, durable duplicate/lost-response reconciliation, bound child/private effects, proof-read charging, auth/CSRF denial and mutable-cache invalidation. No cloud calls or automatic replay. |
+| `operator_retry*` | Separately confirmed real owner/backend/client retry; authoritative no-commit, original deadline/remaining accounting, stale fencing, admission blockers, duplicate/lost/ambiguous/restart safety and cache invalidation. Controlled model/peer responses, not a whole-flow or cloud test. |
 | `gateway`, `startup` | Local ASGI authorization/signature/path denials and explicit workload configuration/capability validation. |
 | `operator_checkout` | Relocated-package CLI uses invocation-checkout deployment resources and still denies unconfirmed paid actions. |
 | `operator_web*` | Actual protected HTTP handlers/server-rendered chooser, fake-time sessions/throttling, private login configuration and controlled deployment contracts; see [operator-web.md](operator-web.md). |

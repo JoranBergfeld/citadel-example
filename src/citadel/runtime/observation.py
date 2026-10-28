@@ -122,7 +122,8 @@ class RunIndex:
     async def recovered_in_scope(self, binding, outcome):
         """Only a persisted safe owner outcome resolves an ambiguous dispatch."""
         expected = {"released_no_commit": "failed_no_commit",
-                    "released_quiescent_partial": "indeterminate", "already_complete": "succeeded"}
+                    "released_quiescent_partial": "indeterminate", "already_complete": "succeeded",
+                    "retry_admitted": "running"}
         state = expected.get(outcome["state"])
         if state is None or outcome["execution"] != state:
             return
@@ -132,6 +133,10 @@ class RunIndex:
             raise OperationError("conflict", "Recovery differs from the original retained binding")
         entry["execution"] = state
         await self.ledger.commit(document, etag, deadline=read_deadline.get())
+
+    async def require_resolved_in_scope(self):
+        document, _ = await self._read()
+        self.require_resolved_dispatch(document["retained_runs"])
 
     async def assessed(self, run_id, airport_ident, provenance, *, complete=False):
         """Only Planner's completed assessment handoff can extend this context."""
@@ -227,6 +232,13 @@ class RunIndex:
         if record["input_hash"] != expected or record["run_id"] != binding["run_id"]:
             raise OperationError("conflict", "Historical operation differs from retained binding")
         result["execution"] = record["state"]
+        from .retry import require_retry
+        result["retryable"] = False
+        try:
+            require_retry(record, document["budgets"].get(binding["operation_id"]), self.clock())
+            result["retryable"] = True
+        except OperationError:
+            pass
         result["state"] = "ok"
         # Only known-safe summary fields leave the owning service. Products,
         # drafts, receipts and private paths are not generic Operator payloads.

@@ -8,6 +8,8 @@ The current run becomes the primary view; Earlier runs reopens retained Planner
 observations. CLI submissions enter the same durable Planner index and share
 global admission with browser submissions. **Check and recover** is available for
 retained UI/CLI runs.
+**Retry this run** is a separate, explicitly confirmed action offered only from a
+fresh observation of authoritative no-commit work; the owning service rechecks it.
 There is no simulated production mode or automatic submission after login.
 
 ## Explicit Check and recover
@@ -40,7 +42,7 @@ resolved or bound quiescent child/private effects, no outstanding model effect,
 and two unchanged owner snapshots. Its admission may then be released, but its
 execution remains **incomplete**, artifacts and accounting remain unchanged, and
 it is **not retryable**. Starting another run is separate. There is no Cancel,
-Reset, force unlock, artifact deletion or browser retry action.
+Reset, force unlock or artifact deletion.
 
 Missing ownership/bindings, absent child commits, unresolved models, changing
 snapshots, unavailable proof and exhausted allowance do not authorize release.
@@ -48,24 +50,79 @@ Infrastructure repair, credential administration and intrusive diagnostics remai
 CLI/manual operations, not recovery fallbacks. Each owner retains at most 1,024
 control intents in its bounded ledger; reaching that bound refuses new controls.
 
-For the later retry slice (#43): hosted entrypoint
+Hosted recovery entrypoint
 `operator.recovery.RecoveryClient.check(run_id, request_id)` calls Planner
 `POST /operator/runs/{run_id}/recover/{request_id}`.
 `runtime.recovery.Recovery.check_run` resolves `RunIndex` bindings and stores
 `operator_controls` beside operations. Child proof uses
 `GatewayPeers.recover_child` and `POST /operator/recovery/{operation_id}/{request_id}`.
-These are reconciliation interfaces, not execution/retry admissions. The original
-`failed_no_commit` state, deadline, budget, charges and admission generation remain
-available to the owning service; this slice deliberately reports `retryable: false`.
+These remain reconciliation interfaces, not execution/retry admissions.
+
+## Separately confirmed Retry this run
+
+After **Check and recover** proves `failed_no_commit`, reopen/refresh the retained
+or current run. If the owner projection reports eligible no-commit state, use
+**Retry this run**, check the confirmation box and choose **Confirm retry this run**.
+With JavaScript enabled, a separate confirmation dialog also guards submission;
+cancelling or a second submit does not send the form. Server confirmation is
+required independently of JavaScript. No action is replayed after login, refresh,
+history navigation or backend restart.
+
+`RecoveryClient.retry(run_id, request_id, confirmed=True)` uses a separately
+authorized `POST /candidate-planner/operator/runs/{run_id}/retry/{request_id}`
+with only `{"confirmed": true}`. Only the authenticated `operator-web` caller may
+use it, through APIM and signed/certificate-protected origin authorization.
+The browser supplies no fixture, owner, receipt, deadline, budget or storage path.
+
+Planner resolves its retained immutable input binding and rechecks authoritative
+no-commit state, matching original root budget, unexpired original deadline,
+no outstanding model/child or committed/ambiguous external effect, and global
+single-run admission. Previously visited candidates/delegated grants are refused,
+not resumed. Quiescent partial work is never retryable. An unresolved hosted
+dispatch also remains a blocker even if the global lease slot appears empty.
+
+Admission requires the remaining original allowance to fund the next root agent
+and model step (one agent, one model, 18,000 conservative tokens, one accounting
+read and an unused per-execution model attempt). One actual original workflow
+ledger read additionally proves/spends a remaining physical workflow ticket.
+This is **not a promise that enough allowance/time remains to finish the run**:
+every later model, child, candidate and read still checks/charges the existing
+bounded accounting. No pool is created/refilled, prior attempt counters/charges
+are retained, and the original deadline never moves. Proof/index/audit/protocol
+reads use the same separate finite recovery-proof allowance and 30-second bound.
+
+The owning ledger retains a run/input-bound retry intent **before admission**.
+Existing `Operations.retry`/claim and generation-specific global leases fence
+prior owners; an old generation cannot commit or release the new admission.
+The safe outcome is durably stored before any execution is scheduled or response
+reported. `retry_admitted` means admission was recorded, **not guaranteed
+dispatch/completion**. A process can stop between persistence and dispatch; its
+intent is deliberately not a restart queue. Duplicate/lost/ambiguous requests
+return the recorded outcome or unknown and never blindly schedule work. A lost
+outcome/admission leaves conservative retained state for an explicit later check;
+there is no automatic retry, unlock or resumption of partial workflow logic.
+The proposed admission generation is retained before lease acquisition, so a
+fresh explicit check can release that exact lease after proven no-commit even
+when the acquisition response was lost before the operation changed generation.
+It cannot release another run's lease or a newer owned execution.
+
+Reopen **Observe this run** for the existing bounded observation/active-run refresh.
+Control responses invalidate all composed mutable observations, including older
+in-flight refreshes. Historical control outcomes are not current execution or
+admission status. A separate new run remains a separate action.
 
 Offline checks:
 
 ```sh
 python -m unittest discover -s tests/unit -p 'test_operator_recovery*.py' -v
+python -m unittest discover -s tests/unit -p 'test_operator_retry*.py' -v
+python -m unittest tests.infra.test_operator_retry tests.infra.test_policies -v
+node --test tests/client/*.test.mjs
 ```
 
 These fixtures establish controlled handler, ownership, accounting and recovery
-behavior only. Azure/APIM enforcement, real model behavior and live-demo recovery
+behavior and checked-in APIM contracts only. Deployed Azure/APIM enforcement,
+real model behavior and live-demo recovery/retry
 have not been verified by these tests.
 
 ## Running and observing scenarios
@@ -163,7 +220,7 @@ Failed/ambiguous stop never permits replacement; reconcile explicitly.
   The distinct `operator-web` APIM caller can GET the Planner's narrow retained
   list/page/summary paths and the Assessor/Reviewer's run-bound Evidence Review
   projections and Reference Data assessed-run paths described below, and POST
-  its narrow scenario-submission and explicit run-bound recovery actions.
+  its narrow scenario-submission and explicit run-bound recovery/retry actions.
   It cannot use generic agent invocation, ordinary owner status, models or
   arbitrary URLs. It never copies the CLI Operator key.
 - Exactly one container/process (`python -m citadel.operator.web`, one Uvicorn
