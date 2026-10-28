@@ -11,6 +11,31 @@ Certificate generation declares `cryptography==50.0.2` directly; that exact vers
 and all its artifacts were already in the accepted lock. No resolved version,
 image/tool pin, requirement hash, or wheelhouse artifact changed.
 
+## Contributor testing versus real operation
+
+The development/merge gate is the offline unit suite, from the repository root
+in the installed pinned environment:
+
+```sh
+python -m unittest discover -s tests/unit -v
+python -m unittest discover -s tests/unit -p 'test_operator_quiescence.py' -v
+```
+
+Use the focused example while iterating and the full command before merging.
+See [testing.md](testing.md) for discovery behavior and other areas. Broader
+Operator/SDK/protocol/integration suites, external-data checks, live probes and
+legacy acceptance/reporting are **opt-in diagnostics**. The 278-check catalogue,
+two cloud passes, fresh-deployment proof and human narrative signoff are not
+development/merge obligations. Offline/fixture success does not prove Azure/
+APIM enforcement, real model quality, telemetry delivery, reproducibility or
+actual demo success; historical incomplete/blocked evidence remains so.
+
+This retirement does not bypass operational readiness: deployment plan
+verification, private configuration, authorization, exact resource ownership,
+explicit paid-action approval, rotation/recovery restrictions and manual
+inventory-scoped teardown still apply whenever operating the real demo.
+`azure.yaml` lifecycle hooks retain those safeguards; they are not merge tests.
+
 ## Approved manual gate: API Center plan verification
 
 The approved API Center `2024-03-01` specification exposes only
@@ -457,7 +482,13 @@ shared with evidence collection and never replenished. No business dispatch,
 deadline extension, budget refund or root replay is permitted after expiry.
 These implementations do not authorize deployment or live rotation by themselves.
 
-## Evidence, acceptance and manual teardown
+## Evidence, optional acceptance diagnostics and manual teardown
+
+Inventory and manual teardown remain operational responsibilities. Collection
+and legacy acceptance/reporting are explicitly selected diagnostics, not
+development/merge tests. Cloud acceptance can dispatch paid work and temporarily
+change revisions/configuration; use an authorized, ready deployment, private
+state and the existing quiescence/confirmation controls, never a presentation.
 
 ```sh
 python -m citadel.operator inventory --state-dir "$CITADEL_STATE_DIR"
@@ -471,9 +502,11 @@ query (no raw request bodies, prompt/message text, drafts or deliberation).
 Missing tables/query authority/oversized results fail instead of silently passing.
 Collection has a separate 600-second allowance. Empty/uncorrelated telemetry and
 missing checks **do not prove acceptance**. Repeated reports retain prior exports.
-The full task 20 oracle must still correlate identities/protocol/storage/model
-facts and collect every required check, followed by operator narrative signoff.
-Two complete consecutive cloud passes and fresh-deployment proof belong to task 21.
+For a complete **legacy diagnostic report**, the task 20 oracle still requires
+correlated identities/protocol/storage/model facts and its catalogue checks,
+followed by actual human narrative review. Its two-pass/fresh-deployment proof
+conditions are preserved as report semantics, not contributor obligations.
+Historical task-21 verification is not closed or marked passed.
 
 Task 20 interface: `citadel.acceptance.operator_hooks.run`, keyword
 arguments `lifecycle`, `check_id`, `run_id`. Fixed check IDs:
@@ -486,9 +519,10 @@ Before invoking any provider, task 19 rechecks the human plan proof against the
 current resource incarnation and requires deployed runtime. Trusted providers can
 call `lifecycle.require_plan_observation()` to obtain that validated private proof.
 The partial harness, collection-resume and explicit per-product human-review
-interfaces are documented in [acceptance.md](acceptance.md). Task 20 is not yet
-complete: missing deployed probes, assigned-MI ingestion and no-effect/correlation
-proof remain blocked. No canned acceptance provider or automatic prose approval
+interfaces are documented in [acceptance.md](acceptance.md). Historical incomplete
+deployed probes, assigned-MI ingestion and no-effect/correlation proof remain
+unverified; source providers and local tests do not supply those observations.
+No canned acceptance provider or automatic prose approval
 is included. `acceptance --collect-only` resumes evidence collection without
 replaying the run or resetting its 600-second collection allowance;
 `review-acceptance --review PRIVATE_FILE` records the human's explicit answers.

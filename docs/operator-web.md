@@ -98,11 +98,19 @@ hashes, cookies or CSRF tokens.
 
 ## Local checks and claim limits
 
-In the installed project environment, run:
+From the repository root in the installed pinned project environment, run the
+full development/merge gate or the focused landing-page checks while iterating:
 
 ```sh
+python -m unittest discover -s tests/unit -v
 python -m unittest discover -s tests/unit -p 'test_operator_web*.py' -v
 ```
+
+The full command is required before merging. See [testing.md](testing.md) for
+discovery and the optional diagnostic suites. Legacy catalogue completion,
+cloud passes, fresh-deployment proof and human narrative signoff are not
+development/merge obligations; real deployment/readiness and manual teardown
+safeguards above still apply when operating the app.
 
 These are real local HTTP handlers/server-rendered presentation, fake-time
 session/throttling checks, controlled cryptographic-concurrency checks, private
