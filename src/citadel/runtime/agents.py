@@ -35,12 +35,13 @@ class Runtime:
     def __init__(self, workload, ledger, *, model, peers, gateway_url,
                  artifacts=None, drafts=None, tokens_per_minute=120000, clock=time.time,
                  ticket_store=None, acceptance_hold=None, workflow_hold=None, run_index=None,
-                 observation_reads=None):
+                 recovery_admission=None, observation_reads=None):
         self.workload, self.model, self.peers, self.clock = workload, model, peers, clock
         self.ledger = ScopedLedger(ledger)
         self.acceptance_hold = acceptance_hold
         self.workflow_hold = workflow_hold
         self.run_index = run_index
+        self.recovery_admission = recovery_admission or (run_index.admission if run_index else None)
         self.observation_reads = observation_reads
         self.ops = Operations(self.ledger, workload=workload, clock=clock)
         self.accounting = Accounting(self.ledger, workload=workload, clock=clock,
@@ -490,6 +491,8 @@ def agent_application(runtime, trust):
         await runtime.shutdown()
 
     app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
+    from .recovery import install_recovery_routes
+    install_recovery_routes(app, runtime)
     if runtime.workload in ("evidence-assessor", "release-reviewer"):
         from .evidence_observation import install
         install(app, runtime)

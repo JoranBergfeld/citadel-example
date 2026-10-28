@@ -39,6 +39,23 @@ var observationOperations = [
   { name: 'operator-run-page', method: 'GET', path: '/operator/runs/page/{cursor}', parameters: [{ name: 'cursor', required: true, type: 'string' }] }
   { name: 'operator-run', method: 'GET', path: '/operator/runs/{runId}', parameters: [{ name: 'runId', required: true, type: 'string' }] }
 ]
+var recoveryOperations = target == 'candidate-planner' ? [{
+  name: 'operator-recover'
+  method: 'POST'
+  path: '/operator/runs/{runId}/recover/{requestId}'
+  parameters: [
+    { name: 'runId', required: true, type: 'string' }
+    { name: 'requestId', required: true, type: 'string' }
+  ]
+}] : [{
+  name: 'operator-recover-child'
+  method: 'POST'
+  path: '/operator/recovery/{operationId}/{requestId}'
+  parameters: [
+    { name: 'operationId', required: true, type: 'string' }
+    { name: 'requestId', required: true, type: 'string' }
+  ]
+}]
 var draftObservationOperations = [
   { name: 'operator-drafts', method: 'GET', path: '/operator/runs/{runId}/drafts', parameters: [{ name: 'runId', required: true, type: 'string' }] }
   { name: 'operator-draft-page', method: 'GET', path: '/operator/runs/{runId}/drafts/page/{cursor}', parameters: [{ name: 'runId', required: true, type: 'string' }, { name: 'cursor', required: true, type: 'string' }] }
@@ -58,7 +75,7 @@ var referenceObservationOperations = [{
 var operations = target == 'reference-data' ? concat(mcpOperations, referenceObservationOperations) : concat(agentOperations,
   target == 'release-reviewer' ? concat(findingOperations, releaseObservationOperations) : [],
   target == 'evidence-assessor' ? draftObservationOperations : [],
-  target == 'candidate-planner' ? observationOperations : [])
+  target == 'candidate-planner' ? observationOperations : [], recoveryOperations)
 resource routes 'Microsoft.ApiManagement/service/apis/operations@2024-05-01' = [for operation in operations: {
   parent: api
   name: operation.name

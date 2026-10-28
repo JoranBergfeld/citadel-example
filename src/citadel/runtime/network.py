@@ -212,3 +212,22 @@ class GatewayPeers:
         self.http.event_hooks["response"].remove(self._received)
         if self.owns_http:
             await self.http.aclose()
+
+    async def recover_child(self, target, operation_id, request_id, binding, deadline):
+        """Only explicit parent recovery uses this edge; no SendMessage or model work."""
+        if target not in EDGES[self.workload]:
+            raise OperationError("forbidden", "Recovery must follow the original child grant")
+
+        async def read():
+            response = await self.http.post(
+                f"{self.gateway}/{target}/operator/recovery/{operation_id}/{request_id}",
+                json=binding, headers={"x-citadel-recovery-deadline": str(deadline)},
+                timeout=max(0.001, deadline - self.clock()))
+            if response.status_code != 200:
+                raise OperationError("unavailable", "Child recovery proof unavailable; no release")
+            return response.json()
+
+        try:
+            return await self.exchange(target, deadline, read)
+        except (httpx.HTTPError, TimeoutError, ValueError, TypeError):
+            raise OperationError("unavailable", "Child recovery proof unavailable; no release") from None

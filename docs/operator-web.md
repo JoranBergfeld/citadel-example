@@ -6,8 +6,67 @@ linked Reference Data, Evidence Review and Exercise Planning perspectives. Choos
 one scenario and use **Run scenario** to start the actual deterministic workflow.
 The current run becomes the primary view; Earlier runs reopens retained Planner
 observations. CLI submissions enter the same durable Planner index and share
-global admission with browser submissions.
+global admission with browser submissions. **Check and recover** is available for
+retained UI/CLI runs.
 There is no simulated production mode or automatic submission after login.
+
+## Explicit Check and recover
+
+Open a retained run, then select **Check and recover**. This authenticated,
+same-origin CSRF-protected action resolves the original owner and immutable inputs
+inside Candidate Planner. It never accepts browser ownership, receipts or paths.
+Planner follows only the recorded child grants to their owning services; ordinary
+workload status/invocation ownership is unchanged.
+
+Each bounded request uses the deployment's separate **2,048 recovery-proof reads**
+for outgoing proof/control exchanges, index/operation/audit reads and private
+commit proof reads, including failures. All physical reads require confirmed
+unique spent markers. Admission and downstream work share one **30-second**
+deadline, with no automatic retries, refunds, refill or workflow-ticket spending.
+
+Run-bound intent, request identity, proof and outcome are retained in the owning
+operation ledger. Duplicate requests and lost responses reconcile that action;
+they never replay agents, models or unfinished workflow logic. Reopen/refresh to
+inspect the latest persisted outcome. An unconfirmed response remains **unknown**,
+not proof that nothing happened. Re-login never resubmits an interrupted action.
+Control actions invalidate mutable observations, including pre-control refreshes.
+Only a persisted safe recovery outcome updates the retained execution summary and
+resolves a hosted ambiguous-dispatch blocker. Missing/unknown proof never clears it.
+
+A live owner stays blocked until a later explicit check. Definite no-commit may
+release only the exact owned admission generation. Partial work requires the
+original deadline plus the existing 16-second storage-lease margin, fenced owners,
+resolved or bound quiescent child/private effects, no outstanding model effect,
+and two unchanged owner snapshots. Its admission may then be released, but its
+execution remains **incomplete**, artifacts and accounting remain unchanged, and
+it is **not retryable**. Starting another run is separate. There is no Cancel,
+Reset, force unlock, artifact deletion or browser retry action.
+
+Missing ownership/bindings, absent child commits, unresolved models, changing
+snapshots, unavailable proof and exhausted allowance do not authorize release.
+Infrastructure repair, credential administration and intrusive diagnostics remain
+CLI/manual operations, not recovery fallbacks. Each owner retains at most 1,024
+control intents in its bounded ledger; reaching that bound refuses new controls.
+
+For the later retry slice (#43): hosted entrypoint
+`operator.recovery.RecoveryClient.check(run_id, request_id)` calls Planner
+`POST /operator/runs/{run_id}/recover/{request_id}`.
+`runtime.recovery.Recovery.check_run` resolves `RunIndex` bindings and stores
+`operator_controls` beside operations. Child proof uses
+`GatewayPeers.recover_child` and `POST /operator/recovery/{operation_id}/{request_id}`.
+These are reconciliation interfaces, not execution/retry admissions. The original
+`failed_no_commit` state, deadline, budget, charges and admission generation remain
+available to the owning service; this slice deliberately reports `retryable: false`.
+
+Offline checks:
+
+```sh
+python -m unittest discover -s tests/unit -p 'test_operator_recovery*.py' -v
+```
+
+These fixtures establish controlled handler, ownership, accounting and recovery
+behavior only. Azure/APIM enforcement, real model behavior and live-demo recovery
+have not been verified by these tests.
 
 ## Running and observing scenarios
 
@@ -104,7 +163,7 @@ Failed/ambiguous stop never permits replacement; reconcile explicitly.
   The distinct `operator-web` APIM caller can GET the Planner's narrow retained
   list/page/summary paths and the Assessor/Reviewer's run-bound Evidence Review
   projections and Reference Data assessed-run paths described below, and POST
-  its narrow scenario-submission action.
+  its narrow scenario-submission and explicit run-bound recovery actions.
   It cannot use generic agent invocation, ordinary owner status, models or
   arbitrary URLs. It never copies the CLI Operator key.
 - Exactly one container/process (`python -m citadel.operator.web`, one Uvicorn

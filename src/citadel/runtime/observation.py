@@ -119,6 +119,20 @@ class RunIndex:
                 entry["provenance"] = deepcopy(provenance)
             await self.ledger.commit(document, etag, deadline=read_deadline.get())
 
+    async def recovered_in_scope(self, binding, outcome):
+        """Only a persisted safe owner outcome resolves an ambiguous dispatch."""
+        expected = {"released_no_commit": "failed_no_commit",
+                    "released_quiescent_partial": "indeterminate", "already_complete": "succeeded"}
+        state = expected.get(outcome["state"])
+        if state is None or outcome["execution"] != state:
+            return
+        document, etag = await self._read()
+        entry = document["retained_runs"].get(binding["run_id"])
+        if entry is None or entry["binding"] != binding:
+            raise OperationError("conflict", "Recovery differs from the original retained binding")
+        entry["execution"] = state
+        await self.ledger.commit(document, etag, deadline=read_deadline.get())
+
     async def assessed(self, run_id, airport_ident, provenance, *, complete=False):
         """Only Planner's completed assessment handoff can extend this context."""
         airport_ident = identity(airport_ident)
@@ -195,6 +209,17 @@ class RunIndex:
                 return result
             raise
         record = document["operations"].get(operation_key(binding["caller"], "invoke", binding["operation_id"]))
+        controls = [control for control in document.get("operator_controls", {}).values()
+                    if control["binding"]["run_id"] == binding["run_id"]
+                    and control["binding"]["operation"] == operation_key(
+                        binding["caller"], "invoke", binding["operation_id"])
+                    and control["binding"]["input_hash"] == binding["input_hash"]]
+        if controls:
+            latest = max(reversed(controls), key=lambda control: control["requested_at"])
+            outcome = latest.get("outcome")
+            result["recovery"] = ({key: outcome[key] for key in (
+                "run_id", "request_id", "state", "execution", "reason", "recorded_at", "retryable")}
+                if outcome else {"state": "unknown", "reason": "Control intent retained; outcome unknown."})
         if record is None:
             return result
         payload = binding["inputs"]

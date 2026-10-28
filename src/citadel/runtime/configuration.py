@@ -68,7 +68,7 @@ class Configuration:
             container = secret = model = quota = None
             deployment = observation_blob = None
             reference_context_blob = None
-            if target in ("candidate-planner", "evidence-assessor", "release-reviewer", "reference-data"):
+            if target in (*INSTRUCTIONS, "reference-data"):
                 deployment = env["CITADEL_DEPLOYMENT_ID"]
                 if not re.fullmatch(r"[a-z0-9]{3,12}", deployment):
                     raise ValueError("Trusted deployment identity required")

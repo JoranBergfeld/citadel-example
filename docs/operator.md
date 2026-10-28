@@ -7,9 +7,9 @@ directory and source fingerprints come from that checkout, not the wheel.
 Public entrypoint: **`python -m citadel.operator`**. Deployment uses native CLI/Bicep;
 one approved human Azure portal observation verifies the actual API Center plan.
 The [protected Operator application](operator-web.md) is the explicit hosted-UI
-exception: it reopens retained run summaries, including CLI-created and partial
-submissions, but currently cannot run or recover scenarios. Infrastructure
-administration stays CLI/manual. No human-user creation, silent region/model
+exception: it submits browser scenarios, reopens retained run summaries (including
+CLI-created and partial submissions), and explicitly checks and recovers incomplete
+runs. Infrastructure administration stays CLI/manual. No human-user creation, silent region/model
 replacement, or automatic cleanup.
 Certificate generation declares `cryptography==50.0.2` directly; that exact version
 and all its artifacts were already in the accepted lock. No resolved version,
@@ -390,10 +390,15 @@ exact owned admission lease. The private `<run-id>-quiescence.json` receipt bind
 those observations to the deployment/configuration and unchanged run; its digest
 is retained as `quiescenceProof`. Fresh runs and controls require that bound
 receipt. It never authorizes retry of the partial run or refunds its tickets.
-An exhausted workflow pool remains blocked. The deployment now provisions
-separate 16,384 observation and 2,048 recovery-proof reads; the hosted history
-path uses observation only. The proof pool is reserved for a later explicit
-owning-service recovery slice, not a workflow refill or implemented UI recovery.
+The CLI path above cannot escape an exhausted workflow pool. Hosted
+**Check and recover** uses the separately provisioned 2,048-read recovery-proof
+pool; the 16,384-read observation pool remains separate. It resolves original
+CLI/UI ownership server-side, persists intent/proof/outcomes in owner ledgers and
+checks bound downstream/private effects without replay. Hosted partial-quiescence
+proof is service-owned, not a copied CLI receipt or CLI state-directory mount.
+Missing proof, outstanding model effects and live owners stay blocked. There is
+no browser retry, reset or force release. See
+[hosted recovery and limitations](operator-web.md#explicit-check-and-recover).
 Audited source migrations that enlarge a child reservation must permanently
 disable the newly addressable marker positions in retained historical pools;
 the old grant must not gain new readable capacity.

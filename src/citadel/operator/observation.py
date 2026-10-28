@@ -106,7 +106,8 @@ class ObservationClient:
             observed = Observed(previous.data, previous.last_success, "unavailable", previous.data is not None)
         observed.last_attempt = self.clock()
         if epoch != self.epoch:
-            return Observed(observed.data, observed.last_success, "unknown", observed.data is not None)
+            return Observed(observed.data, observed.last_success, "unknown", observed.data is not None,
+                            observed.last_attempt)
         exact = key + (sha256((observed.data or {}).get("bindings", {})),)
         old = self.aliases.get(key)
         if old is not None and old != exact:
@@ -120,7 +121,7 @@ class ObservationClient:
         return observed
 
     def invalidate(self, run_id):
-        """Explicit future control actions invalidate mutable projections only."""
+        """A pre-control refresh may not repopulate invalidated mutable state."""
         self.epoch += 1
         for key in list(self.aliases):
             if key[1] == run_id or key[2] == "run-list":
