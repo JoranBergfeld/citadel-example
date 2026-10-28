@@ -41,6 +41,7 @@ class ScenarioSubmission:
                 raise OperationError("exhausted", "Retained run index is full")
             entry = {"binding": deepcopy(binding), "execution": "unknown",
                      "retained_at": self.index.clock(), "provenance": None,
+                     "assessed": [], "assessed_complete": False,
                      "submission": {"request_id": request_id, "dispatch": "intent", "reason": "unknown"}}
             entries[run_id] = entry
             # Only a confirmed conditional write authorizes this one dispatch.

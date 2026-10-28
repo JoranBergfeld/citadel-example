@@ -46,6 +46,7 @@ class ScenarioSummaryTests(unittest.IsolatedAsyncioTestCase):
         for value in ("synthetic_missing_width", "Saved fictional comparison.", "skipped",
                       "overlay", "unchanged", "finding1", "version 2"):
             self.assertIn(value, html)
+        self.assertIn('/teams/evidence/runs/saved1/findings/finding1/versions/2', html)
 
     async def test_exhaustion_and_missing_brief_are_not_manufactured_success(self):
         data = reference("no-alternative")

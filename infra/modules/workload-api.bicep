@@ -49,7 +49,13 @@ var releaseObservationOperations = [
   { name: 'operator-release-page', method: 'GET', path: '/operator/runs/{runId}/releases/page/{cursor}', parameters: [{ name: 'runId', required: true, type: 'string' }, { name: 'cursor', required: true, type: 'string' }] }
   { name: 'operator-finding', method: 'GET', path: '/operator/runs/{runId}/findings/{findingId}/versions/{version}', parameters: [{ name: 'runId', required: true, type: 'string' }, { name: 'findingId', required: true, type: 'string' }, { name: 'version', required: true, type: 'string' }] }
 ]
-var operations = target == 'reference-data' ? mcpOperations : concat(agentOperations,
+var referenceObservationOperations = [{
+  name: 'operator-reference'
+  method: 'GET'
+  path: '/operator/reference/runs/{runId}'
+  parameters: [{ name: 'runId', required: true, type: 'string' }]
+}]
+var operations = target == 'reference-data' ? concat(mcpOperations, referenceObservationOperations) : concat(agentOperations,
   target == 'release-reviewer' ? concat(findingOperations, releaseObservationOperations) : [],
   target == 'evidence-assessor' ? draftObservationOperations : [],
   target == 'candidate-planner' ? observationOperations : [])

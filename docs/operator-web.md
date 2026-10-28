@@ -103,7 +103,8 @@ Failed/ambiguous stop never permits replacement; reconcile explicitly.
   permission, Azure-management authority, CLI state mount or generic proxy.
   The distinct `operator-web` APIM caller can GET the Planner's narrow retained
   list/page/summary paths and the Assessor/Reviewer's run-bound Evidence Review
-  projections described below, and POST its narrow scenario-submission action.
+  projections and Reference Data assessed-run paths described below, and POST
+  its narrow scenario-submission action.
   It cannot use generic agent invocation, ordinary owner status, models or
   arbitrary URLs. It never copies the CLI Operator key.
 - Exactly one container/process (`python -m citadel.operator.web`, one Uvicorn
@@ -245,6 +246,48 @@ last-success time and stale warning; they are not an atomic snapshot. Manual
 Evidence Review refresh is origin/CSRF protected and preserves run selection.
 Ordinary workload draft/findings authorization and workflow pools are unchanged.
 
+## Inspecting assessed Reference Data
+
+Select a retained run, then **Reference Data**. Expand an assessed airport to see
+airport/country/region/runway raw values, parsed values and quality reasons;
+original-source values and labelled synthetic-overlay values are separate.
+Comparison-profile rules, exact source/profile/fixture hashes, source provenance
+and only the assessed candidates' overlay differences are expandable. Completeness
+is neither release approval nor accuracy, safety or operational suitability.
+The source dataset is never edited. There is no candidate search, export or
+arbitrary-path input.
+
+The browser sends only the opaque run ID. The backend's isolated APIM credential
+GETs `/reference-data/operator/reference/runs/{runId}`; the Reference Data owner
+resolves candidate membership and exact provenance from Planner's retained index.
+Planner saves this context after each returned assessment/release handoff, before
+brief writing, so later failures preserve assessed candidates. Failed or ambiguous
+handoffs do not invent candidate membership. Pre-slice history without saved
+assessed bindings stays partial; no candidate-pool scan or historical backfill.
+Until the last assessment binding is saved, the projection is explicitly partial,
+even when some exact candidates are inspectable. A projection-recording failure
+does not fail or replay execution; it leaves incomplete observation context.
+
+Reference Data has an inventoried **read-only, ABAC path-restricted** grant for
+`planner-operations/retained-runs-v1.json` only, with Blob listing explicitly denied.
+It cannot read Planner's operation ledger or write Planner state. Its existing
+reference-dataset role stays read-only, and its accounting role writes markers
+only. This adds no UI team-data role or agent-draft authority. The additional
+assignment appears in `operatorInventory.referenceContextAssignments` for manual
+ownership-checked teardown.
+
+The source is available only when the loaded, independently verified immutable
+bundle matches **all** saved source/profile/fixture bindings. Missing historical
+material is labelled unavailable/partial, never silently replaced with current
+data. Loaded exact immutable source is an in-memory cache: it incurs no fictional
+storage GET. Every actual supporting-index GET and backend protocol GET is
+separately prepaid, including failures. The same 30-second deadline covers both
+tiers, with no automatic retries or workflow-pool spending. All tabs share the
+Reference Data projection cache keyed by deployment/run/projection/exact bindings.
+Manual, origin/CSRF-protected refresh preserves selection and last-success data
+with stale/exhausted/denied warnings. Source inspection never executes models,
+creates artifacts or recovers runs.
+
 ## Local checks and claim limits
 
 From the repository root in the installed pinned project environment, run the
@@ -259,6 +302,7 @@ python -m unittest discover -s tests/unit -p 'test_browser_scenarios.py' -v
 python -m unittest discover -s tests/unit -p 'test_scenario_summary.py' -v
 node --test tests/client/*.test.mjs
 python -m unittest discover -s tests/unit -p 'test_evidence_observation.py' -v
+python -m unittest discover -s tests/unit -p 'test_reference_observation.py' -v
 ```
 
 The full command is required before merging. See [testing.md](testing.md) for

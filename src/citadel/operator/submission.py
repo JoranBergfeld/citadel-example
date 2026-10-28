@@ -9,8 +9,9 @@ from citadel.runtime.submission import SCENARIOS, submission_run
 
 
 class SubmissionClient:
-    def __init__(self, observation):
+    def __init__(self, observation, *, related=()):
         self.observation = observation
+        self.related = related
 
     async def submit(self, request_id, scenario):
         identity(request_id)
@@ -34,3 +35,5 @@ class SubmissionClient:
             return {"run_id": run_id, "execution": "unknown", "state": "unknown"}
         finally:
             observer.invalidate(run_id)
+            for projection in self.related:
+                projection.invalidate(run_id)

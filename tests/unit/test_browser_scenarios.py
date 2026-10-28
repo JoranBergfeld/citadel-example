@@ -6,6 +6,7 @@ import unittest
 import httpx
 
 from citadel.operator.observation import ObservationClient
+from citadel.operator.reference_observation import ReferenceObservationClient
 from citadel.operator.submission import SubmissionClient
 from citadel.operator.web import AuthConfig, create_app, hash_passphrase
 from citadel.operations.testing import MemoryLedger
@@ -14,7 +15,7 @@ from citadel.runtime.submission import submission_run
 
 
 class BrowserScenarioTests(unittest.IsolatedAsyncioTestCase):
-    async def test_current_run_refresh_composes_evidence_review_but_reopened_terminal_detail_is_manual(self):
+    async def current_team(self, team):
         requests, now, terminal = [], [1000], [False]
 
         async def service(request):
@@ -31,28 +32,39 @@ class BrowserScenarioTests(unittest.IsolatedAsyncioTestCase):
         async with httpx.AsyncClient(transport=httpx.MockTransport(service)) as downstream:
             observer = ObservationClient("https://gateway.test", "fixture-key", reads,
                                          client=downstream, clock=lambda: now[0])
+            reference = ReferenceObservationClient("https://gateway.test", "fixture-key", reads,
+                                                   client=downstream, clock=lambda: now[0])
             config = AuthConfig("operator", hash_passphrase("fixture only passphrase"), "https://operator.test")
             async with httpx.AsyncClient(transport=httpx.ASGITransport(
-                    app=create_app(config, observation=observer)), base_url=config.origin) as browser:
+                    app=create_app(config, observation=observer, reference_observation=reference)),
+                    base_url=config.origin) as browser:
                 await browser.post("/login", headers={"origin": config.origin},
                     data={"username": "operator", "password": "fixture only passphrase"})
                 await browser.get("/runs/run1")
-                path = "/teams/evidence/runs/run1"
+                path = f"/teams/{team}/runs/run1"
+                expected = "Private Operator inspection" if team == "evidence" else "Original source values are unchanged"
+                reads_per_refresh = 3 if team == "evidence" else 2
                 current = await browser.get(path)
                 self.assertIn('data-run-observation="run1"', current.text)
-                self.assertIn("Private Operator inspection", current.text)
-                self.assertEqual(len(requests), 3)
+                self.assertIn(expected, current.text)
+                self.assertEqual(len(requests), reads_per_refresh)
                 csrf = re.search(r'name="csrf" value="([^"]+)"', current.text)[1]
                 now[0] += 15
                 terminal[0] = True
                 completed = await browser.post(path + "/refresh", data={"csrf": csrf},
                     headers={"origin": config.origin, "x-citadel-refresh": "automatic"})
                 self.assertIn('data-execution="succeeded"', completed.text)
-                self.assertIn("Private Operator inspection", completed.text)
-                self.assertEqual(len(requests), 6)
+                self.assertIn(expected, completed.text)
+                self.assertEqual(len(requests), 2 * reads_per_refresh)
                 reopened = await browser.get(path)
                 self.assertNotIn('src="/scenario-client.mjs"', reopened.text)
-                self.assertEqual(len(requests), 6)
+                self.assertEqual(len(requests), 2 * reads_per_refresh)
+
+    async def test_current_run_refresh_composes_evidence_review_but_reopened_terminal_detail_is_manual(self):
+        await self.current_team("evidence")
+
+    async def test_current_run_refresh_composes_reference_data_but_reopened_terminal_detail_is_manual(self):
+        await self.current_team("reference")
 
     async def test_authenticated_run_uses_only_narrow_hosted_caller_and_lost_response_reopens_identity(self):
         requests = []

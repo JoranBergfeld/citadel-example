@@ -1,6 +1,7 @@
 """Current-run prose from saved service projections only."""
 
 from html import escape
+from .evidence_view import finding_link
 
 
 def scenario_content(data):
@@ -41,9 +42,13 @@ def scenario_content(data):
         content += "<h3>Actual saved fictional brief</h3>"
         content += (f'<p>{escape(brief["narrative"])}</p>' if brief.get("narrative") else
                     "<p>Saved brief prose unavailable; not reconstructed.</p>")
-        content += "<ul>" + "".join(
-            f'<li>Approved finding {escape(ref["artifact_id"])} · version {escape(str(ref["version"]))} · '
-            f'{escape(ref["sha256"])}</li>' for ref in brief["citations"]) + "</ul>"
+        content += "<ul>"
+        for ref in brief["citations"]:
+            label = (f'Approved finding {escape(ref["artifact_id"])} · version {escape(str(ref["version"]))}'
+                     f' · {escape(ref["sha256"])}')
+            content += (f'<li><a href="{escape(finding_link(data["run_id"], ref))}">{label}</a></li>'
+                        if data.get("run_id") else f"<li>{label}</li>")
+        content += "</ul>"
         content += "<p>Exact saved approved-finding references; never substitute a newer version.</p>"
         content += "".join(f'<p>{escape(caveat)}</p>' for caveat in brief.get("caveats", []))
     return content + "".join(f'<p>{escape(caveat)}</p>' for caveat in summary.get("caveats", []))

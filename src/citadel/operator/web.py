@@ -200,7 +200,8 @@ async def form(request):
         return {}
 
 
-def create_app(config, *, clock=time.monotonic, observation=None, submission=None, lifespan=None):
+def create_app(config, *, clock=time.monotonic, observation=None, submission=None,
+               reference_observation=None, lifespan=None):
     auth = Authentication(config, clock)
 
     def same_origin(request):
@@ -254,11 +255,30 @@ def create_app(config, *, clock=time.monotonic, observation=None, submission=Non
             observer = observation or getattr(request.app.state, "observation", None)
             automatic = request.headers.get("x-citadel-refresh") == "automatic"
             detail = None
-            if selected == "evidence":
+            active = observer and getattr(observer, "selected_active", lambda _: False)(run)
+            compose = observer and (active or request.headers.get("x-citadel-refresh") in ("automatic", "manual"))
+            if selected == "reference":
+                from .reference_observation import reference_content
+                reference = reference_observation or getattr(request.app.state, "reference_observation", None)
+                if not compose:
+                    observed = await reference.observe(run, refresh=request.method == "POST") if reference else None
+                    return page("Reference Data", header + reference_content(observed, csrf, run))
+                try:
+                    async with asyncio.timeout(30):
+                        if reference:
+                            observed, reference_result = await asyncio.gather(
+                                observer.observe(run, refresh=request.method == "POST", automatic=automatic),
+                                reference.observe(run, refresh=request.method == "POST", automatic=automatic))
+                        else:
+                            observed = await observer.observe(run, refresh=request.method == "POST", automatic=automatic)
+                            reference_result = None
+                    detail = reference_content(reference_result, csrf, run)
+                except TimeoutError:
+                    return Response("Observation unavailable; execution outcome remains unknown", status_code=503)
+            elif selected == "evidence":
                 from .evidence_view import render
                 try:
-                    active = observer and getattr(observer, "selected_active", lambda _: False)(run)
-                    if not active and request.headers.get("x-citadel-refresh") not in ("automatic", "manual"):
+                    if not compose:
                         return page("Evidence Review", header + await render(request, observer, run, csrf))
                     async with asyncio.timeout(30):
                         observed, detail = await asyncio.gather(
@@ -492,13 +512,17 @@ async def production_observation(app):
                 retry_status=0, connection_timeout=5, read_timeout=30) as container:
             reads = DeploymentReads(AzureTicketStore(container), os.environ["CITADEL_DEPLOYMENT_ID"])
             observer = ObservationClient(gateway, credential_value, reads)
+            from .reference_observation import ReferenceObservationClient
+            reference = ReferenceObservationClient(gateway, credential_value, reads)
             app.state.observation = observer
             from .submission import SubmissionClient
-            app.state.submission = SubmissionClient(observer)
+            app.state.submission = SubmissionClient(observer, related=(reference,))
+            app.state.reference_observation = reference
             try:
                 yield
             finally:
                 await observer.close()
+                await reference.close()
 
 
 if __name__ == "__main__":

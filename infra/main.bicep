@@ -126,6 +126,16 @@ module observation 'modules/observation.bicep' = {
       teams[2].outputs.observationPrincipalIds, [operatorFoundation.outputs.principalId])
   }
 }
+module referenceContext 'modules/reference-context.bicep' = {
+  name: 'reference-context-${deploymentId}'
+  scope: resourceGroup(groups.planning)
+  params: {
+    deploymentId: deploymentId
+    storageName: 'planning${suffix}'
+    referencePrincipalId: teams[0].outputs.observationPrincipalIds[0]
+  }
+  dependsOn: [teams]
+}
 module operatorApp 'modules/operator-app.bicep' = if (deployRuntime) {
   name: 'operator-web-${deploymentId}'
   scope: resourceGroup(groups.platform)
@@ -164,6 +174,7 @@ module apps 'modules/app.bicep' = [for (workload, i) in workloads: if (deployRun
     insightsName: platform.outputs.insightsName
     modelDeployment: platform.outputs.modelDeployment
     observationBlobUrl: observation.outputs.blobUrl
+    referenceContextBlobUrl: 'https://planning${suffix}.blob.${environment().suffixes.storage}'
   }
   dependsOn: [teams]
 }]
@@ -210,6 +221,7 @@ output teamInventory array = [for (team, i) in ['reference', 'evidence', 'planni
 }]
 output appInventory array = [for (workload, i) in workloads: deployRuntime ? apps[i]!.outputs.inventory : { pending: workload.name }]
 output operatorInventory object = {
+  referenceContextAssignments: referenceContext.outputs.assignments
   foundation: operatorFoundation.outputs.inventory
   application: deployRuntime ? operatorApp!.outputs.inventory : { pending: 'operator-web' }
   origin: deployRuntime ? operatorApp!.outputs.origin : ''

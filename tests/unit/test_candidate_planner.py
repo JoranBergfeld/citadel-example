@@ -5,6 +5,47 @@ from agent_fixtures import PeerResponses, reference
 
 
 class CandidatePlannerTests(AgentCase, unittest.IsolatedAsyncioTestCase):
+    async def test_unavailable_assessed_projection_writes_do_not_fail_or_replay_execution(self):
+        from citadel.operations.testing import MemoryLedger
+        from citadel.runtime.observation import DeploymentReads, RunIndex, empty_index
+        runtime = await self.agent("candidate-planner")
+        ledger = MemoryLedger(clock=self.clock)
+        ledger.document = empty_index()
+        reads = DeploymentReads(ledger.ticket_store, "fixture1", clock=self.clock)
+        reads.capacities = {"observation": 1, "recovery-proof": 1}
+        await ledger.ticket_store.open_pool(reads.scope("observation"))
+        runtime.run_index = RunIndex(ledger, reads, clock=self.clock)
+        status, product = await self.execute(runtime)
+        self.assertEqual(status["state"], "succeeded")
+        self.assertEqual(product["selected_identifiers"], ["EB01", "EB02", "EB03"])
+        self.assertEqual(len([c for c in self.peers.calls if c[0] == "evidence-assessor"]), 3)
+
+    async def test_saved_assessed_bindings_survive_later_author_failure_without_claiming_unassessed_pool(self):
+        from citadel.operations import OperationError
+        from citadel.operations.testing import MemoryLedger
+        from citadel.runtime.observation import DeploymentReads, RunIndex, empty_index
+        from citadel.runtime.reference_observation import ReferenceObservation
+        runtime = await self.agent("candidate-planner")
+        ledger = MemoryLedger(clock=self.clock)
+        ledger.document = empty_index()
+        reads = DeploymentReads(ledger.ticket_store, "fixture1", clock=self.clock)
+        await ledger.ticket_store.open_pool(reads.scope("observation"))
+        runtime.run_index = RunIndex(ledger, reads, clock=self.clock)
+        child = self.peers.child
+
+        async def fail_author(*args):
+            if args[3] == "briefing-author":
+                raise OperationError("unavailable", "Fixture author unavailable after assessments")
+            return await child(*args)
+
+        self.peers.child = fail_author
+        status, product = await self.execute(runtime)
+        self.assertEqual(status["state"], "indeterminate")
+        self.assertIsNone(product)
+        observed = await ReferenceObservation(ledger, reads, {"base-source": reference()}).observe("run1")
+        self.assertEqual(observed["state"], "ok")
+        self.assertEqual([x["airport_ident"] for x in observed["candidates"]], ["EB01", "EB02", "EB03"])
+
     async def test_complete_released_candidates_produce_a_saved_plan_and_exact_author_input(self):
         runtime = await self.agent("candidate-planner")
         status, product = await self.execute(runtime)

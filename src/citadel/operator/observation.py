@@ -41,9 +41,7 @@ class ObservationClient:
 
     async def observe(self, run_id=None, *, cursor=None, refresh=False, automatic=False):
         key = self.key(run_id, cursor)
-        path = ("/operator/runs/" + run_id if run_id is not None else
-                "/operator/runs/page/" + cursor if cursor else "/operator/runs")
-        return await self._observe_path(key, "/candidate-planner" + path, refresh, automatic=automatic)
+        return await self._observe_path(key, self.path(run_id, cursor), refresh, automatic=automatic)
 
     async def evidence(self, run_id, projection, *, cursor=None, artifact_id=None, version=None,
                        refresh=False, automatic=False):
@@ -77,6 +75,11 @@ class ObservationClient:
         self.inflight[key] = task
         task.add_done_callback(lambda completed: self.inflight.pop(key, None))
         return deepcopy(await asyncio.shield(task))
+
+    def path(self, run_id, cursor):
+        return "/candidate-planner" + (
+            "/operator/runs/" + run_id if run_id is not None else
+            "/operator/runs/page/" + cursor if cursor else "/operator/runs")
 
     async def _fetch(self, key, path, previous):
         epoch = self.epoch
