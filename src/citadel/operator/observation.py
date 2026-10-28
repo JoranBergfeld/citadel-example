@@ -53,13 +53,17 @@ class ObservationClient:
         task.add_done_callback(lambda completed: self.inflight.pop(key, None))
         return deepcopy(await asyncio.shield(task))
 
+    def path(self, run_id, cursor):
+        return "/candidate-planner" + (
+            "/operator/runs/" + run_id if run_id is not None else
+            "/operator/runs/page/" + cursor if cursor else "/operator/runs")
+
     async def _fetch(self, key, run_id, cursor, previous):
         try:
             async with self.admission.request():
-                path = ("/operator/runs/" + run_id if run_id is not None else
-                        "/operator/runs/page/" + cursor if cursor else "/operator/runs")
+                path = self.path(run_id, cursor)
                 await self.admission.charge()
-                response = await self.client.get(self.gateway + "/candidate-planner" + path,
+                response = await self.client.get(self.gateway + path,
                     headers={"Ocp-Apim-Subscription-Key": self.credential,
                              "X-Citadel-Observation-Deadline": str(read_deadline.get())},
                     timeout=max(0.001, read_deadline.get() - self.clock()))

@@ -181,6 +181,9 @@ class GatewayTrust:
     def _authorize(self, caller, method, path, body):
         target = self.configuration.target
         allowed = caller in INVOCATION_CALLERS[target]
+        if target == "reference-data" and caller == "operator-web" and method == "GET":
+            if re.fullmatch(r"/operator/reference/runs/[A-Za-z0-9_-]{1,64}", path):
+                return "operator-reference"
         if target == "candidate-planner" and caller == "operator-web" and method == "GET":
             if re.fullmatch(r"/operator/runs(?:/(?:page/)?[A-Za-z0-9_-]{1,64})?", path):
                 return "operator-observe"

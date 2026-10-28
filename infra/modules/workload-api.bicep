@@ -38,7 +38,13 @@ var observationOperations = [
   { name: 'operator-run-page', method: 'GET', path: '/operator/runs/page/{cursor}', parameters: [{ name: 'cursor', required: true, type: 'string' }] }
   { name: 'operator-run', method: 'GET', path: '/operator/runs/{runId}', parameters: [{ name: 'runId', required: true, type: 'string' }] }
 ]
-var operations = target == 'reference-data' ? mcpOperations : concat(agentOperations,
+var referenceObservationOperations = [{
+  name: 'operator-reference'
+  method: 'GET'
+  path: '/operator/reference/runs/{runId}'
+  parameters: [{ name: 'runId', required: true, type: 'string' }]
+}]
+var operations = target == 'reference-data' ? concat(mcpOperations, referenceObservationOperations) : concat(agentOperations,
   target == 'release-reviewer' ? findingOperations : [], target == 'candidate-planner' ? observationOperations : [])
 resource routes 'Microsoft.ApiManagement/service/apis/operations@2024-05-01' = [for operation in operations: {
   parent: api

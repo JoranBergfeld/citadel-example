@@ -232,13 +232,26 @@ class Runtime:
         commentary = await self._explain(payload, {"fixture": payload["fixture"], "target": 3, "pool_limit": 20})
         pool = await self.peers.reference(payload["fixture"], deadline)
         selected, assessed, references, read_scopes = [], [], [], []
-        for airport in pool["airports"]:
+        context_available = self.run_index is not None
+
+        async def save_assessed(ident, complete):
+            nonlocal context_available
+            if context_available:
+                try:
+                    await self.run_index.assessed(payload["run_id"], ident, pool["provenance"], complete=complete)
+                except (OperationError, TimeoutError):
+                    # Observation failure cannot fail/replay the admitted workflow.
+                    context_available = False
+                    logging.getLogger(__name__).warning("assessed_context_unavailable")
+
+        for number, airport in enumerate(pool["airports"]):
             ident = airport["ident"]["parsed"]
             await self.renew_if_needed(owner)
             await self.accounting.candidate(payload["operation_id"], ident)
             result = await self.peers.child(self, owner, payload, "evidence-assessor", {"airport_ident": ident},
                 {"agents": 2, "models": 2, "tokens": 36000, "reads": CAPACITY["evidence-assessor"]})
             if result["kind"] == "rejected":
+                await save_assessed(ident, number + 1 == len(pool["airports"]))
                 assessed.append({"airport_ident": ident, "classification": "release_rejected"})
                 continue
             ref = result["finding"]
@@ -252,6 +265,7 @@ class Runtime:
                 selected.append(ident)
                 references.append(ref)
                 read_scopes.append(result["read_scope"])
+            await save_assessed(ident, len(selected) == 3 or number + 1 == len(pool["airports"]))
             if len(selected) == 3:
                 break
         product = {

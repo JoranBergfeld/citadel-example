@@ -198,7 +198,7 @@ async def form(request):
         return {}
 
 
-def create_app(config, *, clock=time.monotonic, observation=None, lifespan=None):
+def create_app(config, *, clock=time.monotonic, observation=None, reference_observation=None, lifespan=None):
     auth = Authentication(config, clock)
 
     def same_origin(request):
@@ -249,6 +249,11 @@ def create_app(config, *, clock=time.monotonic, observation=None, lifespan=None)
                 if (not same_origin(request) or not hmac.compare_digest(
                         values.get("csrf", "").encode(), csrf.encode())):
                     return Response("Request denied", status_code=403)
+            if selected == "reference":
+                from .reference_observation import reference_content
+                observer = reference_observation or getattr(request.app.state, "reference_observation", None)
+                observed = await observer.observe(run, refresh=request.method == "POST") if observer else None
+                return page("Reference Data", header + reference_content(observed, csrf, run))
             observer = observation or getattr(request.app.state, "observation", None)
             observed = (await observer.observe(run, cursor=cursor, refresh=request.method == "POST")
                         if observer else None)
@@ -297,6 +302,7 @@ this page never plays back fixtures.</p></main>""")
 
     app = Starlette(lifespan=lifespan, routes=[Route("/", shell), Route("/teams/{team}", shell),
                            Route("/teams/{team}/runs/{run_id}", shell),
+                           Route("/teams/{team}/runs/{run_id}/refresh", shell, methods=["POST"]),
                            Route("/history", shell), Route("/history/refresh", shell, methods=["POST"]),
                            Route("/history/page/{cursor}", shell),
                            Route("/history/page/{cursor}/refresh", shell, methods=["POST"]),
@@ -407,11 +413,15 @@ async def production_observation(app):
                 retry_status=0, connection_timeout=5, read_timeout=30) as container:
             reads = DeploymentReads(AzureTicketStore(container), os.environ["CITADEL_DEPLOYMENT_ID"])
             observer = ObservationClient(gateway, credential_value, reads)
+            from .reference_observation import ReferenceObservationClient
+            reference = ReferenceObservationClient(gateway, credential_value, reads)
             app.state.observation = observer
+            app.state.reference_observation = reference
             try:
                 yield
             finally:
                 await observer.close()
+                await reference.close()
 
 
 if __name__ == "__main__":
