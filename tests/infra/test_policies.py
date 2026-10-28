@@ -43,7 +43,7 @@ class PolicyTests(unittest.TestCase):
         caller_expression = policy.find("./inbound/set-variable[@name='caller']").get("value")
         declaration = re.search(r"var known = new \[\] \{ ([^}]+) \}", caller_expression).group(1)
         self.assertEqual(set(re.findall(r'"([^"]+)"', declaration)), {
-            "operator", "candidate-planner", "evidence-assessor", "release-reviewer", "briefing-author",
+            "operator", "operator-web", "candidate-planner", "evidence-assessor", "release-reviewer", "briefing-author",
         })
         self.assertEqual(policy.find("./inbound/choose/when/return-response/set-status").get("code"), "403")
         self.assertEqual(policy.find("./inbound/set-header[@name='X-Citadel-Caller']").get("exists-action"), "override")

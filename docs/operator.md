@@ -3,8 +3,9 @@
 Run all commands from this checkout with the exact environment in [stack.md](stack.md).
 Public entrypoint: **`python -m citadel.operator`**. Deployment uses native CLI/Bicep;
 one approved human Azure portal observation verifies the actual API Center plan.
-The [protected Operator landing page](operator-web.md) is the explicit hosted-UI
-exception: it currently cannot run or recover scenarios. Infrastructure
+The [protected Operator application](operator-web.md) is the explicit hosted-UI
+exception: it reopens retained run summaries, including CLI-created and partial
+submissions, but currently cannot run or recover scenarios. Infrastructure
 administration stays CLI/manual. No human-user creation, silent region/model
 replacement, or automatic cleanup.
 Certificate generation declares `cryptography==50.0.2` directly; that exact version
@@ -386,8 +387,10 @@ exact owned admission lease. The private `<run-id>-quiescence.json` receipt bind
 those observations to the deployment/configuration and unchanged run; its digest
 is retained as `quiescenceProof`. Fresh runs and controls require that bound
 receipt. It never authorizes retry of the partial run or refunds its tickets.
-An exhausted pool needs a separately approved, bounded operator-only observation
-allowance for reconciliation; this never adds tickets to the workload pool.
+An exhausted workflow pool remains blocked. The deployment now provisions
+separate 16,384 observation and 2,048 recovery-proof reads; the hosted history
+path uses observation only. The proof pool is reserved for a later explicit
+owning-service recovery slice, not a workflow refill or implemented UI recovery.
 Audited source migrations that enlarge a child reservation must permanently
 disable the newly addressable marker positions in retained historical pools;
 the old grant must not gain new readable capacity.

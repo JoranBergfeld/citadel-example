@@ -66,8 +66,9 @@ service by resource group, with storage containers, identities and connections.
 
 Microsoft Agent Framework and FastAPI run in four Azure Container Apps, each
 with its own identity. A fifth app hosts Reference Data's MCP server.
-A separate [protected Operator landing page](docs/operator-web.md) provides the
-scenario chooser and linked team perspectives. Its Run action remains disabled
+A separate [protected Operator application](docs/operator-web.md) provides the
+scenario chooser, linked team perspectives and manual retained-run history,
+including newly indexed CLI submissions. Its Run action remains disabled
 until real browser execution is implemented; it never simulates a run.
 
 Agents communicate over A2A, query data over MCP, and read findings over REST.

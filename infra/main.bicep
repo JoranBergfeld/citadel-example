@@ -19,10 +19,11 @@ param applications object = {}
 @description('Privately prompted Operator username and Argon2id hash; never plaintext.')
 param operatorAuth object
 @secure()
-@description('Four agents plus operator: {caller: {primary: value, secondary: value}}. Both keys rotate explicitly.')
+@description('Four agents plus isolated operator and operator-web: {caller: {primary: value, secondary: value}}. Both keys rotate explicitly.')
 param callerKeys object
 param callerStates object = {
   operator: 'active'
+  'operator-web': 'active'
   'candidate-planner': 'active'
   'evidence-assessor': 'active'
   'release-reviewer': 'active'
@@ -111,6 +112,18 @@ module operatorFoundation 'modules/operator-foundation.bicep' = {
     vaultName: platform.outputs.vaultName
     registryName: platform.outputs.registryName
     operatorAuth: operatorAuth
+    callerKeys: callerKeys
+  }
+}
+module observation 'modules/observation.bicep' = {
+  name: 'observation-${deploymentId}'
+  scope: resourceGroup(groups.platform)
+  params: {
+    deploymentId: deploymentId
+    location: location
+    suffix: suffix
+    principalIds: concat(teams[0].outputs.observationPrincipalIds, teams[1].outputs.observationPrincipalIds,
+      teams[2].outputs.observationPrincipalIds, [operatorFoundation.outputs.principalId])
   }
 }
 module operatorApp 'modules/operator-app.bicep' = if (deployRuntime) {
@@ -125,6 +138,10 @@ module operatorApp 'modules/operator-app.bicep' = if (deployRuntime) {
     identityId: operatorFoundation.outputs.identityId
     usernameUrl: operatorFoundation.outputs.usernameUrl
     verifierUri: operatorFoundation.outputs.verifierUri
+    subscriptionUri: operatorFoundation.outputs.subscriptionUri
+    clientId: operatorFoundation.outputs.clientId
+    gatewayUrl: platform.outputs.gatewayUrl
+    observationBlobUrl: observation.outputs.blobUrl
     application: applications['operator-web']
   }
 }
@@ -146,6 +163,7 @@ module apps 'modules/app.bicep' = [for (workload, i) in workloads: if (deployRun
     gatewayCertificates: gatewayCertificates
     insightsName: platform.outputs.insightsName
     modelDeployment: platform.outputs.modelDeployment
+    observationBlobUrl: observation.outputs.blobUrl
   }
   dependsOn: [teams]
 }]
@@ -195,6 +213,8 @@ output operatorInventory object = {
   foundation: operatorFoundation.outputs.inventory
   application: deployRuntime ? operatorApp!.outputs.inventory : { pending: 'operator-web' }
   origin: deployRuntime ? operatorApp!.outputs.origin : ''
+  accounting: observation.outputs.inventory
+  accountingBlobUrl: observation.outputs.blobUrl
 }
 output inventory object = {
   deploymentId: deploymentId

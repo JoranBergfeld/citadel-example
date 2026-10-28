@@ -4,6 +4,8 @@ param vaultName string
 param registryName string
 @secure()
 param operatorAuth object
+@secure()
+param callerKeys object
 
 resource identity 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' = {
   name: '${deploymentId}-operator-web'
@@ -22,11 +24,17 @@ resource passwordHash 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
   name: 'operator-web-password-hash'
   properties: { value: operatorAuth.passwordHash }
 }
-resource allocatedSecrets 'Microsoft.KeyVault/vaults/secrets@2023-07-01' existing = [for name in ['operator-web-username', 'operator-web-password-hash']: {
+resource subscription 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
+  parent: vault
+  name: 'subscription-operator-web'
+  properties: { value: callerKeys['operator-web'].primary }
+}
+var secretNames = ['operator-web-username', 'operator-web-password-hash', 'subscription-operator-web']
+resource allocatedSecrets 'Microsoft.KeyVault/vaults/secrets@2023-07-01' existing = [for name in secretNames: {
   parent: vault
   name: name
 }]
-resource readers 'Microsoft.Authorization/roleAssignments@2022-04-01' = [for (name, i) in ['operator-web-username', 'operator-web-password-hash']: {
+resource readers 'Microsoft.Authorization/roleAssignments@2022-04-01' = [for (name, i) in secretNames: {
   name: guid(vault.id, name, identity.id, 'secret-reader')
   scope: allocatedSecrets[i]
   properties: {
@@ -34,7 +42,7 @@ resource readers 'Microsoft.Authorization/roleAssignments@2022-04-01' = [for (na
     principalType: 'ServicePrincipal'
     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '4633458b-17de-408a-b874-0445c86b69e6')
   }
-  dependsOn: [username, passwordHash]
+  dependsOn: [username, passwordHash, subscription]
 }]
 resource pull 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
   name: guid(registry.id, identity.id, 'acr-pull')
@@ -46,11 +54,15 @@ resource pull 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
   }
 }
 output identityId string = identity.id
+output principalId string = identity.properties.principalId
+output clientId string = identity.properties.clientId
+output subscriptionUri string = subscription.properties.secretUriWithVersion
 output usernameUrl string = username.properties.secretUriWithVersion
 output verifierUri string = passwordHash.properties.secretUriWithVersion
-var readerInventory = [for (name, i) in ['operator-web-username', 'operator-web-password-hash']: readers[i].id]
+var readerInventory = [for (name, i) in secretNames: readers[i].id]
 output inventory object = {
   identity: identity.id
-  secrets: [username.id, passwordHash.id]
+  clientId: identity.properties.clientId
+  secrets: [username.id, passwordHash.id, subscription.id]
   assignments: concat([pull.id], readerInventory)
 }

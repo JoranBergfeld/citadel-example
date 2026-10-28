@@ -156,9 +156,12 @@ class AdministrationTests(unittest.TestCase):
         image = "test.azurecr.io/runtime@sha256:" + "a" * 64
         value = read_private(self.state / "state.json")
         value["outputs"]["operatorInventory"].update({
-            "foundation": {"identity": identity},
+            "foundation": {"identity": identity, "clientId": "11111111-1111-4111-8111-111111111111"},
             "origin": "https://operator.test",
+            "accounting": {"resources": [], "assignments": []},
+            "accountingBlobUrl": "https://observe.blob.core.windows.net",
         })
+        value["outputs"]["gatewayUrl"] = "https://gateway.test"
         value["outputs"]["operatorInventory"]["application"]["image"] = image
         value["outputs"]["appInventory"] = [{"identity": GROUP + f"/team-{i}"} for i in range(5)]
         write_private(self.state / "state.json", value)
@@ -173,6 +176,11 @@ class AdministrationTests(unittest.TestCase):
                     "name": "operator-web", "image": image,
                     "command": ["python", "-m", "citadel.operator.web"], "args": [],
                     "env": [
+                        {"name": "AZURE_CLIENT_ID", "value": "11111111-1111-4111-8111-111111111111"},
+                        {"name": "CITADEL_DEPLOYMENT_ID", "value": "webtest"},
+                        {"name": "CITADEL_GATEWAY_URL", "value": "https://gateway.test"},
+                        {"name": "CITADEL_OBSERVATION_BLOB_URL", "value": "https://observe.blob.core.windows.net"},
+                        {"name": "CITADEL_OPERATOR_SUBSCRIPTION", "secretRef": "operator-subscription"},
                         {"name": "CITADEL_OPERATOR_USERNAME", "secretRef": "operator-username"},
                         {"name": "CITADEL_OPERATOR_PASSWORD_HASH", "secretRef": "operator-password-hash"},
                         {"name": "CITADEL_OPERATOR_ORIGIN", "value": "https://operator.test"},

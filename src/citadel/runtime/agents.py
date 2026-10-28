@@ -34,11 +34,12 @@ from .tickets import CAPACITY, TicketPool
 class Runtime:
     def __init__(self, workload, ledger, *, model, peers, gateway_url,
                  artifacts=None, drafts=None, tokens_per_minute=120000, clock=time.time,
-                 ticket_store=None, acceptance_hold=None, workflow_hold=None):
+                 ticket_store=None, acceptance_hold=None, workflow_hold=None, run_index=None):
         self.workload, self.model, self.peers, self.clock = workload, model, peers, clock
         self.ledger = ScopedLedger(ledger)
         self.acceptance_hold = acceptance_hold
         self.workflow_hold = workflow_hold
+        self.run_index = run_index
         self.ops = Operations(self.ledger, workload=workload, clock=clock)
         self.accounting = Accounting(self.ledger, workload=workload, clock=clock,
                                      tokens_per_minute=tokens_per_minute)
@@ -85,6 +86,8 @@ class Runtime:
             raise OperationError("invalid_input", "Child operation must be its authenticated grant")
         elif payload["grant"]["allowance"]["reads"] != CAPACITY[self.workload]:
             raise OperationError("invalid_input", "Child read grant does not match its finite pool")
+        if self.run_index is not None:
+            await self.run_index.register(caller, payload)
         async with asyncio.timeout(10):
             pool = self.pool(caller, operation_id)
             if recover or retry:
@@ -155,6 +158,7 @@ class Runtime:
 
     async def _run(self, caller, payload, ownership, deadline):
         started, monotonic_started = self.clock(), asyncio.get_running_loop().time()
+        indexed_state = "unknown"
         timer = asyncio.timeout(max(0, deadline - started))
         try:
             async with timer:
@@ -177,6 +181,7 @@ class Runtime:
                 await self.ops.complete(ownership, product=product, finding=finding,
                                         rejection=rejection, receipt=receipt,
                                         read_scope=result.get("read_scope") if product is None else None)
+                indexed_state = "succeeded"
                 if self.workload == "candidate-planner":
                     await self.ticket_store.release_run(self.pool(caller, payload["operation_id"]).scope,
                         generation=0 if ownership.generation == 1 else ownership.generation)
@@ -197,10 +202,16 @@ class Runtime:
                                                 self.workload, code)
             try:
                 await self.ops.mark_incomplete(ownership, code)
+                indexed_state = "indeterminate"
             except OperationError:
                 # Expired/fenced/unavailable state remains incomplete, never success.
                 pass
         finally:
+            if self.run_index is not None:
+                try:
+                    await self.run_index.update(payload["run_id"], indexed_state)
+                except (OperationError, TimeoutError):
+                    logging.getLogger(__name__).warning("run_index_update_unavailable")
             self.renew_at.pop(ownership.key, None)
             event = self.events.pop(payload["operation_id"], None)
             if event is not None:
@@ -477,6 +488,36 @@ def agent_application(runtime, trust):
             return JSONResponse({"error": exc.code}, status_code=429 if exc.code == "exhausted" else 409)
         except TimeoutError:
             return JSONResponse({"error": "unavailable"}, status_code=504)
+
+    if runtime.workload == "candidate-planner":
+        async def observation(request, *, run_id=None, cursor=None):
+            try:
+                if runtime.run_index is None:
+                    raise OperationError("unavailable", "Retained-run index unavailable")
+                end = float(request.headers.get("x-citadel-observation-deadline", runtime.clock() + 30))
+                async with runtime.run_index.admission.request(deadline=end):
+                    result = (await runtime.run_index.observe(run_id, runtime.ledger) if run_id is not None
+                              else await runtime.run_index.page_in_scope(cursor))
+                    return JSONResponse(result)
+            except OperationError as exc:
+                state = {"forbidden": "denied", "missing": "missing", "exhausted": "exhausted"}.get(
+                    exc.code, "unavailable")
+                return JSONResponse({"state": state, "execution": "unknown"}, status_code={
+                    "denied": 403, "missing": 404, "exhausted": 429}.get(state, 503))
+            except (TimeoutError, ValueError, KeyError, TypeError):
+                return JSONResponse({"state": "unavailable", "execution": "unknown"}, status_code=503)
+
+        @app.get("/operator/runs")
+        async def retained_runs(request: Request):
+            return await observation(request)
+
+        @app.get("/operator/runs/page/{cursor}")
+        async def retained_page(cursor: str, request: Request):
+            return await observation(request, cursor=identity(cursor))
+
+        @app.get("/operator/runs/{run_id}")
+        async def retained_run(run_id: str, request: Request):
+            return await observation(request, run_id=identity(run_id))
 
     if runtime.workload == "release-reviewer":
         @app.get("/findings/{finding_id}/versions/{version}")

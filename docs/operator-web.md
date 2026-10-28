@@ -1,10 +1,11 @@
-# Protected Operator landing page
+# Protected Operator application and retained runs
 
-The hosted Operator application is a **shell**, not a scenario playback. It opens
+The hosted Operator application is not a scenario playback. It opens
 on Comparison, Replacement and Exhaustion descriptions with expected outcomes and
 linked Reference Data, Evidence Review and Exercise Planning perspectives. **Run
-scenario is disabled**. No execution, observation, recovery, model calls, history
-or team-data reads are implemented here. Continue using the CLI for actual runs.
+scenario is disabled**. Earlier runs lists and reopens retained Planner observations.
+No browser execution, recovery or model calls are implemented here. Continue using
+the CLI for actual runs; its submissions enter the same durable Planner index.
 There is no simulated production mode or automatic submission after login.
 
 ## Private setup and replacement
@@ -51,18 +52,23 @@ Failed/ambiguous stop never permits replacement; reconcile explicitly.
 - One additional **platform-owned Operator Container App**, not a sixth team
   workload/API Center capability or another agent identity. It shares the existing
   managed environment and locked image, serving assets/backend on its HTTPS origin.
-- Its own managed identity has only ACR Pull and secret-scoped readers for its two
-  login secrets. No team Blob roles, agent/context/CLI subscription secrets, model
+- Its own managed identity has ACR Pull, secret-scoped readers for its two
+  login secrets and isolated `subscription-operator-web`, and write-only admission
+  to the platform accounting container. No team Blob roles, agent/context/CLI subscription secrets, model
   permission, Azure-management authority, CLI state mount or generic proxy.
-  It has no APIM caller credential/actions yet; later observation/control slices
-  must allocate distinct narrow authority rather than copy the CLI Operator key.
+  The distinct `operator-web` APIM caller can only GET the Planner's narrow retained
+  list/page/summary paths. It cannot invoke agents, owner status, findings, models,
+  arbitrary URLs or recovery. It never copies the CLI Operator key.
 - Exactly one container/process (`python -m citadel.operator.web`, one Uvicorn
   worker, no reload) and `minReplicas=maxReplicas=1`. The deployment verifier rejects
   extra environment authority, mounts, worker commands and scaling.
-- `operatorInventory` records the app, separate identity, two secrets, scoped role
+- `operatorInventory` records the app, separate identity, three secrets, scoped role
   assignments, immutable image and HTTPS origin. It joins the existing recursive
   private lifecycle inventory and deliberately manual, ownership-checked teardown.
-  No new authentication database/supporting service is provisioned. The additional
+  Manual teardown removes the exact accounting assignments before their custom
+  role and platform group; it never broadens deletion to foreign roles.
+  It also inventories accounting-only StorageV2 state, descriptors and marker roles.
+  No new authentication database/service is provisioned. The additional
   warm 0.5-vCPU/1-GiB app, secrets and retained resources are billable; no automatic
   cleanup or spending cap is introduced.
 
@@ -96,6 +102,46 @@ workflow dispatch path. Do not expose the container port outside HTTPS ingress.
 Only fixed authentication outcomes are logged, never usernames, passwords,
 hashes, cookies or CSRF tokens.
 
+## Reopening retained runs
+
+Use **Earlier runs**, then select a run. Pages contain at most 20 summaries;
+team links preserve selection. Initial loading observes once; subsequent reads
+use the shared server cache. **Refresh observation** is explicit, origin/CSRF
+protected and coalesced across tabs, with one request in flight per selection.
+History/completed views never poll. No JavaScript, client storage, submission,
+model work or recovery is involved.
+
+Planner persists the index before admission, including partial/ambiguous CLI
+submissions, and updates it during execution, never during observation.
+The example index holds at most **256 runs**; reaching capacity blocks new
+submissions rather than evicting unresolved history. It is not a scan of all
+storage and does not backfill pre-index runs. Original owner/input bindings are
+server-resolved. Missing source/profile/overlay/product bindings remain partial,
+not inferred from a current bundle. Private products, receipts and paths never
+leave the service through this summary surface.
+
+Each projection shows its last-successful observation time, not an artifact
+modification time or an atomic cross-team snapshot. Refresh failure preserves
+previous data with a **stale** warning. Denied, confirmed empty/missing, partial
+history, unavailable source, exhausted allowance and unknown execution differ.
+A saved running label is not fresh activity; no pulses are fabricated.
+
+The connected deployment shares **16,384 observation** and **2,048 recovery-proof**
+physical reads across runs/tabs/logins/restarts. Recovery is not exposed yet.
+Protocol GETs and every actual supporting/team storage GET are separately prepaid
+by confirmed conditional markers, including failed attempts. Descriptor checks
+use leases, not recursive meter GETs. SDK/read retries are disabled; the whole
+observation, including admission/downstream work, has a **30-second** deadline.
+No refund, daily reset, refill, workflow-ticket use or privileged fallback exists.
+Losing the in-memory cache restores no allowance or authority.
+
+Bootstrap creates/leases the two accounting-only descriptors explicitly and
+initializes `planner-operations/retained-runs-v1.json`. Missing recorded state
+blocks repair; never delete markers, descriptors or index to obtain more reads.
+Reference Data and the four agents receive marker-write-only roles on the
+accounting container for subsequent projections, not reference-dataset writes.
+Later team slices must use the same physical admission path for their own reads.
+
 ## Local checks and claim limits
 
 From the repository root in the installed pinned project environment, run the
@@ -104,6 +150,7 @@ full development/merge gate or the focused landing-page checks while iterating:
 ```sh
 python -m unittest discover -s tests/unit -v
 python -m unittest discover -s tests/unit -p 'test_operator_web*.py' -v
+python -m unittest discover -s tests/unit -p 'test_observation.py' -v
 ```
 
 The full command is required before merging. See [testing.md](testing.md) for

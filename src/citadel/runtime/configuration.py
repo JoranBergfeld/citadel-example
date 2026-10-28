@@ -1,6 +1,7 @@
 """Fail-closed environment contract shared by the five standalone processes."""
 
 import json
+import re
 from dataclasses import dataclass
 from urllib.parse import urlsplit
 from uuid import UUID
@@ -45,6 +46,8 @@ class Configuration:
     subscription_secret: str | None
     model_deployment: str | None
     tokens_per_minute: int | None
+    deployment_id: str | None
+    observation_blob: str | None
 
     @classmethod
     def from_environment(cls, env):
@@ -62,6 +65,12 @@ class Configuration:
             trust = TrustConfiguration.from_json(target, env["CITADEL_GATEWAY_CERTIFICATES"],
                                                    env["CITADEL_CONTEXT_KEYS"])
             container = secret = model = quota = None
+            deployment = observation_blob = None
+            if target == "candidate-planner":
+                deployment = env["CITADEL_DEPLOYMENT_ID"]
+                if not re.fullmatch(r"[a-z0-9]{3,12}", deployment):
+                    raise ValueError("Trusted deployment identity required")
+                observation_blob = endpoint(env["CITADEL_OBSERVATION_BLOB_URL"], ".blob.core.windows.net")
             if target == "reference-data":
                 if env["CITADEL_REFERENCE_CONTAINER"] != "reference":
                     raise ValueError("Reference Data may read only its allocated container")
@@ -77,6 +86,6 @@ class Configuration:
             return cls(target, client_id, endpoint(env["CITADEL_GATEWAY_URL"]),
                        endpoint(env["CITADEL_BLOB_URL"], ".blob.core.windows.net"),
                        endpoint(env["CITADEL_VAULT_URL"], ".vault.azure.net"), trust,
-                       container, secret, model, quota)
+                       container, secret, model, quota, deployment, observation_blob)
         except (KeyError, TypeError, OverflowError) as exc:
             raise ValueError("Required allocated runtime configuration is missing or invalid") from exc

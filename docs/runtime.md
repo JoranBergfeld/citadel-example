@@ -52,6 +52,11 @@ arguments or logged configuration. HTTPS origins reject credentials, queries,
 fragments, nonstandard paths and ports. Azure endpoints additionally require
 their service DNS suffix.
 
+The deployed Planner also requires trusted `CITADEL_DEPLOYMENT_ID` and
+`CITADEL_OBSERVATION_BLOB_URL` (the inventoried platform accounting account).
+The infrastructure supplies these to all workloads for later team projections;
+they never select a workflow pool or authorize data access.
+
 Agents additionally require:
 
 | Variable | Contract |
@@ -72,8 +77,9 @@ bundle objects from that container, via the pinned Azure Blob SDK and assigned
 managed identity. Each object has a bounded single GET, 30-second deadline and
 hidden-download-retry guard. The existing `ReferenceData.from_bundle` validates
 the independent source-row pin and all source/profile/fixture manifests.
-Changed cached bytes fail instead of silently refreshing. No runtime Blob
-write is available to Reference Data.
+Changed cached bytes fail instead of silently refreshing. No reference-dataset
+write is available to Reference Data; its separate accounting-only marker role
+cannot modify that dataset.
 
 The lifecycle must prepare/upload that bundle and preinitialize six
 `ledger-v1.json` blobs: the four operations containers plus Evidence Review's
@@ -88,6 +94,41 @@ root completion; crashes/ambiguity never trigger automatic replay or release.
 Missing admission storage fails closed. Runtime creates immutable ticket/pool
 objects only inside its already allocated operations container; no new identity,
 container, permission, or HTTP proxy is needed.
+
+### Retained-run observations
+
+Planner's deployed `RunIndex` records immutable original owner/run/operation/input
+bindings **before** root admission (also for CLI submissions), with a hard
+256-run bound. Execution updates summary state. Refresh never creates records or
+backfills old storage. Bootstrap initializes `retained-runs-v1.json` in
+`planner-operations` using `empty_index()`; missing binding collections and
+unavailable historical state remain unavailable, never confirmed empty.
+
+Only the separate `operator-web` caller can GET `/operator/runs`,
+`/operator/runs/page/{cursor}` and `/operator/runs/{run_id}` through Planner APIM.
+The certificate/signed context remains required at the origin. Existing
+workload status/GetTask ownership and 512 workflow reads are unchanged.
+
+Reusable implementation seams:
+
+- `runtime.observation.DeploymentReads.request(purpose, deadline=...)` opens a
+  trusted deployment observation/proof context; `charge()` prepays a protocol
+  dispatch. Capacities are 16,384/2,048, not supplied by requests.
+- `runtime.state.ScopedLedger` prepays each actual storage GET; its request-local
+  snapshots are free, not fictional physical reads. Do not use
+  `control_plane=True` for observation/supporting reads.
+- `RunIndex.resolve_in_scope(run_id)` returns the original internal binding to
+  owning-service code. `observe` projects only safe summary/binding fields,
+  never generic operation results, private drafts, receipts or paths.
+- `operator.observation.ObservationClient` coalesces manual work and keys cached
+  projections by deployment/run/projection/exact bindings. `invalidate(run_id)`
+  is the seam for later explicit control actions.
+
+Provisioning owns the two infinitely leased accounting descriptors; runtime
+only renews their leases and creates conditional spent markers. No recursive
+meter reads, read retries, refill, deadline extension, recovery or execution is
+authorized by observation. The complete observation has a 30-second ceiling.
+These paths are locally tested; deployed APIM/Azure enforcement remains unverified.
 
 Only explicit `ManagedIdentityCredential(client_id=...)` is used. Secret
 acquisition reads the allocated subscription secret with the assigned identity,

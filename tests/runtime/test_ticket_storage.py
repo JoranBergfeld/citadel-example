@@ -4,6 +4,7 @@ import time
 import unittest
 from email.utils import formatdate
 from urllib.parse import unquote, urlsplit
+import httpx
 
 from azure.core.exceptions import ServiceResponseError
 from azure.core.pipeline.transport import AsyncHttpTransport
@@ -14,6 +15,10 @@ from citadel.operations import OperationError, empty_ledger
 from citadel.operations.blob import AzureBlobLedger
 from citadel.runtime.state import ScopedLedger, read_scope
 from citadel.runtime.tickets import AzureTicketStore, TicketPool
+from citadel.runtime.observation import DeploymentReads, RunIndex, empty_index
+from citadel.operator.observation import ObservationClient
+from citadel.runtime.agents import Runtime, agent_application
+from tests.unit.gateway_fixtures import signed, trust
 from test_storage import BlobResponse, FixtureCredential
 from tests.unit import test_read_tickets as owner_tests
 from tests.unit import test_recovery as recovery_tests
@@ -101,6 +106,74 @@ class TicketSDKTests(unittest.IsolatedAsyncioTestCase):
         return ContainerClient("https://unit.blob.core.windows.net", "workload",
             credential=FixtureCredential(), transport=wire, api_version="2026-10-06",
             retry_total=0, retry_connect=0, retry_read=0, retry_status=0)
+
+    async def test_deployment_index_physical_gets_are_prepaid_and_restart_cannot_refill(self):
+        wire = TicketWire()
+        wire.blobs["/workload/ledger-v1.json"] = canonical_bytes(empty_index())
+        async with self.container(wire) as container:
+            store = AzureTicketStore(container)
+            admission = DeploymentReads(store, "fixture1", clock=lambda: 1000)
+            admission.capacities = {"observation": 3, "recovery-proof": 1}
+            await store.open_pool(admission.scope("observation"))
+            await store.open_pool(admission.scope("recovery-proof"))
+            index = RunIndex(AzureBlobLedger(container.get_blob_client("ledger-v1.json"),
+                                             clock=lambda: 1000), admission, clock=lambda: 1000)
+            await index.register("operator", {
+                "run_id": "run1", "operation_id": "run1", "fixture": "base-source"})
+            self.assertEqual((await index.page())["runs"][0]["run_id"], "run1")
+            restarted = DeploymentReads(AzureTicketStore(container), "fixture1", clock=lambda: 1000)
+            restarted.capacities = admission.capacities
+            other = RunIndex(AzureBlobLedger(container.get_blob_client("ledger-v1.json"),
+                                             clock=lambda: 1000), restarted, clock=lambda: 1000)
+            self.assertEqual((await other.resolve("run1"))["fixture"], "base-source")
+            before = len(wire.requests)
+            with self.assertRaises(OperationError) as caught:
+                await other.page()
+            self.assertEqual(caught.exception.code, "exhausted")
+            self.assertFalse(any(request.method == "GET" for request in wire.requests[before:]))
+            async with restarted.request("recovery-proof"):
+                await restarted.charge()
+        self.assertEqual(sum(r.method == "GET" for r in wire.requests), 3)
+        self.assertFalse(any("operator/invoke" in urlsplit(r.url).path for r in wire.requests))
+
+    async def test_hosted_protocol_and_both_supporting_storage_gets_are_separately_charged(self):
+        wire = TicketWire()
+        wire.blobs["/workload/index.json"] = canonical_bytes(empty_index())
+        async with self.container(wire) as container:
+            store = AzureTicketStore(container)
+            admission = DeploymentReads(store, "fixture1", clock=lambda: 1000)
+            await store.open_pool(admission.scope("observation"))
+            index = RunIndex(AzureBlobLedger(container.get_blob_client("index.json"),
+                                             clock=lambda: 1000), admission, clock=lambda: 1000)
+            await index.register("operator", {
+                "run_id": "run1", "operation_id": "run1", "fixture": "base-source"})
+            runtime = Runtime("candidate-planner",
+                AzureBlobLedger(container.get_blob_client("ledger-v1.json"), clock=lambda: 1000),
+                model=None, peers=None, gateway_url="https://gateway.test", ticket_store=store,
+                run_index=index, clock=lambda: 1000)
+
+            async def gateway(request):
+                request.url = request.url.copy_with(
+                    path=request.url.path.removeprefix("/candidate-planner"))
+                request.headers.update(signed(
+                    b"", "candidate-planner", request.url.path, "operator-web", "GET"))
+
+            async with httpx.AsyncClient(transport=httpx.ASGITransport(
+                    app=agent_application(runtime, trust("candidate-planner"))),
+                    event_hooks={"request": [gateway]}) as client:
+                observer = ObservationClient("https://gateway.test", "fixture-key", admission,
+                                             client=client, clock=lambda: 1000)
+                before = len(wire.requests)
+                markers = sum("/read-tickets/" in p for p in wire.blobs)
+                result = await observer.observe("run1")
+                self.assertEqual((result.state, result.data["execution"]), ("partial", "unknown"))
+                self.assertEqual(sum(r.method == "GET" for r in wire.requests[before:]), 2)
+                self.assertEqual(sum("/read-tickets/" in p for p in wire.blobs) - markers, 3)
+                del wire.blobs["/workload/index.json"]
+                failed = await observer.observe("run1", refresh=True)
+                self.assertEqual((failed.state, failed.stale), ("unavailable", True))
+                self.assertEqual(failed.last_success, result.last_success)
+                self.assertEqual(runtime.tasks, set())
 
     async def test_reset_cursors_and_concurrent_processes_cannot_reuse_conditional_tickets(self):
         wire = TicketWire()

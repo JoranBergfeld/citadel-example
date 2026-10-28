@@ -37,6 +37,25 @@ class TemplateTests(unittest.TestCase):
             self.assertIn(self.template["parameters"][key]["type"].lower(), {"secureobject", "securestring"})
         self.assertEqual(self.template["parameters"]["location"]["allowedValues"], ["westeurope"])
 
+    def test_operator_accounting_roles_cannot_read_or_delete_team_or_supporting_data(self):
+        accounting = self.module("observation-")
+        role = next(r for r in accounting["resources"] if r["type"] == "Microsoft.Authorization/roleDefinitions")
+        self.assertEqual(role["properties"]["permissions"], [{
+            "actions": [], "notActions": [],
+            "dataActions": ["Microsoft.Storage/storageAccounts/blobServices/containers/blobs/write"],
+            "notDataActions": [],
+        }])
+        assignment = next(r for r in accounting["resources"] if r["type"] == "Microsoft.Authorization/roleAssignments")
+        self.assertIn("read-accounting", assignment["scope"])
+        self.assertNotIn("team", assignment["scope"])
+        gateway = self.module("gateway-")
+        self.assertIn("operator-web", gateway["variables"]["callers"])
+        operator = self.module("operator-web-")
+        app = next(r for r in operator["resources"] if r["type"] == "Microsoft.App/containerApps")
+        env = app["properties"]["template"]["containers"][0]["env"]
+        self.assertIn("CITADEL_OBSERVATION_BLOB_URL", {entry["name"] for entry in env})
+        self.assertFalse(any(entry["name"] in ("CITADEL_BLOB_URL", "CITADEL_MODEL_DEPLOYMENT") for entry in env))
+
     def module(self, name):
         for resource in self.template["resources"]:
             if resource["type"] == "Microsoft.Resources/deployments" and resource["name"].startswith(f"[format('{name}"):

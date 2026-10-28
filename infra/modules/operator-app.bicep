@@ -6,6 +6,10 @@ param registryName string
 param identityId string
 param usernameUrl string
 param verifierUri string
+param subscriptionUri string
+param clientId string
+param gatewayUrl string
+param observationBlobUrl string
 param application object
 
 resource appEnvironment 'Microsoft.App/managedEnvironments@2025-01-01' existing = { name: environmentName }
@@ -22,6 +26,7 @@ resource app 'Microsoft.App/containerApps@2025-01-01' = {
       ingress: { external: true, targetPort: 8000, transport: 'http', allowInsecure: false }
       registries: [{ server: '${registryName}.azurecr.io', identity: identityId }]
       secrets: [
+        { name: 'operator-subscription', identity: identityId, keyVaultUrl: subscriptionUri }
         {
           name: 'operator-username'
           identity: identityId
@@ -42,6 +47,11 @@ resource app 'Microsoft.App/containerApps@2025-01-01' = {
         args: []
         resources: { cpu: json('0.5'), memory: '1Gi' }
         env: [
+          { name: 'AZURE_CLIENT_ID', value: clientId }
+          { name: 'CITADEL_DEPLOYMENT_ID', value: deploymentId }
+          { name: 'CITADEL_GATEWAY_URL', value: gatewayUrl }
+          { name: 'CITADEL_OBSERVATION_BLOB_URL', value: observationBlobUrl }
+          { name: 'CITADEL_OPERATOR_SUBSCRIPTION', secretRef: 'operator-subscription' }
           { name: 'CITADEL_OPERATOR_USERNAME', secretRef: 'operator-username' }
           { name: 'CITADEL_OPERATOR_PASSWORD_HASH', secretRef: 'operator-password-hash' }
           { name: 'CITADEL_OPERATOR_ORIGIN', value: 'https://${deploymentId}-operator-web.${appEnvironment.properties.defaultDomain}' }
