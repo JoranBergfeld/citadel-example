@@ -41,8 +41,9 @@ async def render(request, observer, run_id, csrf):
     if any(key in request.path_params for key in ("projection", "artifact_id", "collection")):
         raise OperationError("invalid_input", "Select an Exercise Planning run")
     kinds = ("decisions", "brief")
+    automatic = request.headers.get("x-citadel-refresh") == "automatic"
     observations = (await asyncio.gather(*(
-        observer.planning(run_id, kind, refresh=request.method == "POST") for kind in kinds))
+        observer.planning(run_id, kind, refresh=request.method == "POST", automatic=automatic) for kind in kinds))
         if observer and hasattr(observer, "planning") else [Observed(state="unavailable") for _ in kinds])
     content = f"""<main><h2>Exercise Planning · {escape(run_id)}</h2>
 <p>Planning uses approved findings only, never private draft previews.
@@ -84,7 +85,9 @@ is a separate authority: unpublished drafts are not planning evidence.</p>
                 content += provenance_content(data["provenance"], data["caveats"])
         elif data.get("brief"):
             brief = data["brief"]
-            content += f'<article><h4>Actual saved fictional brief</h4><p>{escape(brief["narrative"])}</p>'
+            content += (f'<article><h4>Actual saved fictional brief</h4>'
+                        f'<p>Author product: {ref_text(data["bindings"]["brief"])}</p>'
+                        f'<p>{escape(brief["narrative"])}</p>')
             content += "<h4>Exact saved approved-finding citations</h4><ul>"
             content += "".join(f"<li>{citation(run_id, ref)}</li>" for ref in brief["citations"]) + "</ul>"
             content += provenance_content(brief["provenance"], brief["caveats"]) + "</article>"

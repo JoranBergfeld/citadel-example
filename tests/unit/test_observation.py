@@ -17,6 +17,73 @@ from tests.unit.gateway_fixtures import signed, trust
 
 
 class ObservationTests(unittest.IsolatedAsyncioTestCase):
+    async def test_auto_refresh_across_tabs_shares_recent_manual_work_and_stops_at_exhaustion(self):
+        now, calls = [1000], []
+
+        async def service(request):
+            calls.append(request)
+            if len(calls) == 3:
+                return httpx.Response(429)
+            return httpx.Response(200, json={"state": "ok", "execution": "running", "bindings": {}})
+
+        async with httpx.AsyncClient(transport=httpx.MockTransport(service)) as client:
+            observer = ObservationClient("https://gateway.test", "fixture-key", self.reads,
+                                         client=client, clock=lambda: now[0])
+            await observer.observe("run1")
+            await observer.observe("run1", refresh=True, automatic=True)
+            self.assertEqual(len(calls), 1)
+            now[0] += 15
+            await observer.observe("run1", refresh=True)
+            await observer.observe("run1", refresh=True, automatic=True)
+            self.assertEqual(len(calls), 2)
+            now[0] += 15
+            result = await observer.observe("run1", refresh=True, automatic=True)
+            self.assertEqual((result.state, result.stale), ("exhausted", True))
+            now[0] += 15
+            await observer.observe("run1", refresh=True)
+            self.assertEqual(len(calls), 3)
+
+    async def test_failed_automatic_refresh_is_coalesced_across_tabs_without_losing_last_success(self):
+        now, calls = [1000], []
+
+        async def service(request):
+            calls.append(request)
+            return (httpx.Response(200, json={"state": "ok", "execution": "running", "bindings": {}})
+                    if len(calls) == 1 else httpx.Response(503))
+
+        async with httpx.AsyncClient(transport=httpx.MockTransport(service)) as client:
+            observer = ObservationClient("https://gateway.test", "fixture-key", self.reads,
+                                         client=client, clock=lambda: now[0])
+            await observer.observe("run1")
+            now[0] += 15
+            first = await observer.observe("run1", refresh=True, automatic=True)
+            second = await observer.observe("run1", refresh=True, automatic=True)
+            self.assertEqual((first.state, second.state, second.last_success), ("unavailable", "unavailable", 1000))
+            self.assertEqual((second.stale, second.data["execution"]), (True, "running"))
+            self.assertEqual(len(calls), 2)
+
+    async def test_control_invalidation_cannot_repopulate_cache_from_an_older_inflight_read(self):
+        entered, release = asyncio.Event(), asyncio.Event()
+        calls = []
+
+        async def service(request):
+            calls.append(request)
+            entered.set()
+            await release.wait()
+            return httpx.Response(200, json={"state": "ok", "execution": "running", "bindings": {}})
+
+        async with httpx.AsyncClient(transport=httpx.MockTransport(service)) as client:
+            observer = ObservationClient("https://gateway.test", "fixture-key", self.reads,
+                                         client=client, clock=lambda: 1000)
+            pending = asyncio.create_task(observer.observe("run1"))
+            await entered.wait()
+            observer.invalidate("run1")
+            release.set()
+            old = await pending
+            self.assertTrue(old.stale)
+            await observer.observe("run1")
+            self.assertEqual(len(calls), 2)
+
     async def asyncSetUp(self):
         self.ledger = MemoryLedger(clock=lambda: 1000)
         self.ledger.document = empty_index()

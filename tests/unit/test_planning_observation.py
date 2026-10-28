@@ -102,12 +102,21 @@ class PlanningObservationTests(AgentCase, unittest.IsolatedAsyncioTestCase):
 
     async def test_authenticated_planning_page_uses_real_owners_exact_links_and_independent_stale_times(self):
         planner = await self.planner("missing-width-replacement")
+        child = self.peers.child
+
+        async def copied_brief(*args):
+            product = await child(*args)
+            if args[3] == "briefing-author":
+                product["narrative"] = "DO NOT DISPLAY PLANNER COPY"
+            return product
+
+        self.peers.child = copied_brief
         await self.execute(planner)
         self.ledger = MemoryLedger(clock=self.clock)
         author = await self.agent("briefing-author", fixture="missing-width-replacement",
             findings=self.peers.references[1:4], read_scopes=self.peers.scopes[1:4])
         author.observation_reads = self.reads
-        await self.execute(author)
+        _, saved_brief = await self.execute(author)
         owners = {}
         for owner in (planner, author):
             owners[owner.workload] = await self.stack.enter_async_context(httpx.AsyncClient(
@@ -138,15 +147,20 @@ class PlanningObservationTests(AgentCase, unittest.IsolatedAsyncioTestCase):
             before = len(self.reads.store.markers)
             pages = await asyncio.gather(browser.get(path), browser.get(path))
             page = pages[0]
-            self.assertEqual(len(calls), 2)
-            self.assertEqual(len(self.reads.store.markers) - before, 5)
+            self.assertEqual(len(calls), 3)
+            self.assertEqual(len(self.reads.store.markers) - before, 8)
             self.assertIn("replacement_after_skipped_candidate", page.text)
             self.assertIn("synthetic_missing_width", page.text)
             self.assertIn("Fictional unit-fixture prose", page.text)
             self.assertIn("Saved brief", page.text)
+            self.assertIn(sha256(saved_brief), page.text)
             self.assertIn("Profile: fictional-airport-comparison · version 1", page.text)
             self.assertIn("Labelled synthetic overlay: missing-width-replacement · version 1", page.text)
             self.assertIn("Operator-only Evidence Review", page.text)
+            self.assertIn("Check and recover", page.text)
+            self.assertIn('data-run-observation="run1"', page.text)
+            self.assertIn('data-execution="succeeded"', page.text)
+            self.assertNotIn("DO NOT DISPLAY PLANNER COPY", page.text)
             citation = "/teams/evidence/runs/run1/findings/finding4/versions/1"
             self.assertIn(citation, page.text)
             self.assertIn(self.peers.references[3]["sha256"], page.text)
@@ -161,7 +175,10 @@ class PlanningObservationTests(AgentCase, unittest.IsolatedAsyncioTestCase):
             self.assertIn("1970-01-01T00:17:40", refreshed.text)
             self.assertIn(citation, refreshed.text)
             self.assertIn("Fictional unit-fixture prose", refreshed.text)
-            self.assertEqual(len(calls), 4)
+            self.assertEqual(len(calls), 6)
+            await browser.post(path + "/refresh", data={"csrf": csrf},
+                headers={"origin": config.origin, "x-citadel-refresh": "automatic"})
+            self.assertEqual(len(calls), 6)
 
     async def test_legacy_completed_plan_uses_saved_product_not_current_reference_or_index_backfill(self):
         runtime = await self.planner("missing-width-replacement")

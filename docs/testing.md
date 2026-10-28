@@ -27,9 +27,10 @@ The explicit start directory matters: root `tests` discovery can report a
 misleading zero-test success for the older nested suites. Unit test modules are
 flat; `fixtures/` holds labelled, fictional reference rows and a canned model
 response, not downloaded source data or actual inference.
-The suite currently discovers 94 tests (75 migrated units plus 19 Operator
-landing-page units), including four in the `candidate_planner` focused example;
-later feature slices may add units. A zero-test result is not a successful gate.
+The gate began with 75 migrated units; subsequent feature slices add tests.
+Focused commands select matching flat test modules. Use the runner's reported
+count for the current total; a zero-test result is not a successful gate.
+The `candidate_planner` focused example includes four cases.
 
 These commands require only the already-installed project dependencies. No Azure
 deployment, credentials, Docker, real model, network, retained dataset,
@@ -43,6 +44,25 @@ the test step needs no network, Docker, credentials or Azure resource. No
 numerical timing benchmark or coverage target is required. Hosted workflow
 execution and branch-protection configuration are not established by local
 validation.
+
+Validate packaging changes with a non-editable wheel installation and
+`PYTHONPATH` unset, then run these same commands from the checkout root.
+Source-path overrides or editable installs alone can mask installation-layout
+failures. The Operator CLI resolves deployment assets and source fingerprints
+from that invocation checkout, not from `site-packages`; deployment still needs
+the checkout's infrastructure/image inputs, which are not wheel resources.
+
+Client-only refresh behavior has a dependency-free local gate, using Node 20+
+and its built-in test runner (no npm install, browser or network):
+
+```sh
+node --test tests/client/*.test.mjs
+```
+
+The same workflow runs it after the Python gate. Tests use controlled visibility
+and timers to cover selected-active-only scheduling, coalesced manual/automatic
+requests, hidden/history/terminal/unknown/exhausted stopping. Server-side tests
+own cross-tab physical-read coalescing, timestamps and stale projections.
 
 ## Boundaries and focused areas
 
@@ -58,8 +78,11 @@ validation.
 | `accounting`, `read_tickets` | Finite inherited budgets/deadlines, charged retries, physical reads, shared-store concurrency/reconstruction/exhaustion and ambiguous marker admission refusing dispatch. |
 | `peer_reads` | Actual gateway-client exact-version/hash checks through controlled HTTP; a failed finding read spends its allowance and cannot dispatch again after exhaustion. |
 | `recovery`, `operator_quiescence` | Fencing, no replay/refund, restricted explicit retry, immutable deadlines and quiescent partial work staying incomplete. |
+| `operator_recovery*` | Real hosted control handlers/client, durable duplicate/lost-response reconciliation, bound child/private effects, proof-read charging, auth/CSRF denial and mutable-cache invalidation. No cloud calls or browser retry. |
 | `gateway`, `startup` | Local ASGI authorization/signature/path denials and explicit workload configuration/capability validation. |
+| `operator_checkout` | Relocated-package CLI uses invocation-checkout deployment resources and still denies unconfirmed paid actions. |
 | `operator_web*` | Actual protected HTTP handlers/server-rendered chooser, fake-time sessions/throttling, private login configuration and controlled deployment contracts; see [operator-web.md](operator-web.md). |
+| `submission`, `browser_scenarios`, `scenario_summary`, `observation` | Actual hosted Planner/HTTP dispatch, immutable intent before execution, duplicate/ambiguous refusal, shared CLI admission, fixed scenario bindings, saved summary privacy and shared observation/cache behavior. |
 
 Agent behavior tests execute **one runtime per independently exercised agent**.
 Observation HTTP cases may compose independently seeded owner services; peer
