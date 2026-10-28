@@ -352,6 +352,10 @@ use leases, not recursive meter GETs. SDK/read retries are disabled; the whole
 observation, including admission/downstream work, has a **30-second** deadline.
 No refund, daily reset, refill, workflow-ticket use or privileged fallback exists.
 Losing the in-memory cache restores no allowance or authority.
+Execution/index persistence is independent: Planner funds index GETs from its
+own finite 64-read per-run pool in `planner-operations`, not the browsing/proof
+allowances or the unchanged 512-read workflow pool. Exhausted browsing cannot
+prevent a new UI or CLI execution from being admitted.
 
 Bootstrap creates/leases the two accounting-only descriptors explicitly and
 initializes `planner-operations/retained-runs-v1.json`. Missing recorded state
@@ -474,6 +478,12 @@ The backend uses only these Operator-only APIM GET capabilities:
 Planner resolves its immutable original submission and exact committed product.
 During execution it saves public decision summaries alongside assessed membership
 before requesting a brief, so Author failure does not hide completed assessments.
+The trusted assessed-candidate/exact-finding handoff is saved **before** retrieving
+finding details. If that read fails, the candidate and approved reference remain
+visible, with unknown completeness/selection and `finding_details_unavailable`;
+no missing fields or successful plan are inferred. Duplicate recovery outcomes
+remain historical actions: index reconciliation requires the owning operation's
+current state/generation to match, even if the index missed a generation update.
 A complete saved Planner product remains independently inspectable if that
 supporting context is incomplete. Older partial history without saved decisions
 shows unknown decisions, never current-reference reassessment or index backfill.

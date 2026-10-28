@@ -158,6 +158,27 @@ class SubmissionTests(unittest.IsolatedAsyncioTestCase):
 
 
 class HostedPlannerTests(AgentCase, unittest.IsolatedAsyncioTestCase):
+    async def test_spent_browsing_pool_cannot_prevent_hosted_execution_or_saved_outcome(self):
+        run = submission_run("no-browsing")
+        for scope in self.peers.scopes:
+            scope["run_id"] = run
+        runtime = await self.agent("candidate-planner")
+        ledger = MemoryLedger(clock=self.clock)
+        ledger.document = empty_index()
+        reads = DeploymentReads(ledger.ticket_store, "fixture1", clock=self.clock)
+        reads.capacities = {"observation": 1, "recovery-proof": 1}
+        await reads.store.open_pool(reads.scope("observation"))
+        await reads.store.create_marker(reads.scope("observation"), 0, "spent")
+        runtime.run_index = RunIndex(ledger, reads, clock=self.clock)
+        result = await ScenarioSubmission(runtime.run_index, runtime.accept).submit("no-browsing", "comparison")
+        self.assertEqual(result["reason"], "accepted")
+        await asyncio.gather(*runtime.tasks)
+        self.assertEqual((await runtime.status("operator", run))["state"], "succeeded")
+        self.assertEqual(ledger.document["retained_runs"][run]["execution"], "succeeded")
+        duplicate = await ScenarioSubmission(runtime.run_index, runtime.accept).submit("no-browsing", "comparison")
+        self.assertEqual(duplicate["execution"], "succeeded")
+        self.assertEqual(len([s for s, _ in reads.store.markers if s == reads.scope("observation")]), 1)
+
     async def run_hosted(self, scenario, fixture):
         self.peers = PeerResponses(reference(fixture))
         for scope in self.peers.scopes:

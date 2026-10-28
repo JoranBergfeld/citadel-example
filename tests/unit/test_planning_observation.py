@@ -369,10 +369,10 @@ class PlanningObservationTests(AgentCase, unittest.IsolatedAsyncioTestCase):
         self.assertTrue(all(item["finding"] is None for item in partial["candidates"]))
         missing = await self.get(runtime, "decisions", run="not-retained")
         self.assertEqual((missing.status_code, missing.json()["state"]), (404, "missing"))
-        spent = len(self.reads.store.markers)
+        observation_markers = lambda: {marker for marker in self.reads.store.markers
+                                      if marker[0] == self.reads.scope("observation")}
+        spent = len(observation_markers())
         self.reads.capacities = {"observation": spent + 1, "recovery-proof": 1}
         exhausted = await self.get(runtime, "decisions")
         self.assertEqual((exhausted.status_code, exhausted.json()["state"]), (429, "exhausted"))
-        self.assertEqual(len(self.reads.store.markers), spent + 1)
-        self.assertTrue(all(scope == self.reads.scope("observation")
-                            for scope, _ in self.reads.store.markers))
+        self.assertEqual(len(observation_markers()), spent + 1)

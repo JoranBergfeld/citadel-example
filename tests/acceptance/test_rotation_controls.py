@@ -19,10 +19,35 @@ from citadel.acceptance.reports import sanitize
 from citadel.evidence.manifests import sha256
 
 
+def maintenance_transport(test, lifecycle):
+    from contextlib import nullcontext
+    account = "/owned/providers/Microsoft.Storage/storageAccounts/planning"
+    lifecycle.value["inventory"] += [account, account + "/blobServices/default/containers/planner-operations"]
+    lifecycle.inventory = lambda: None
+    lifecycle.native.blob = lambda *args: nullcontext(object())
+    active = []
+
+    class Lease:
+        def __init__(self, client, lease_id):
+            self.id = lease_id
+
+        def acquire(self, **kwargs):
+            test.assertEqual(active, [])
+            active.append(self.id)
+
+        def release(self, **kwargs):
+            test.assertEqual(active, [self.id])
+            active.clear()
+
+    test.enterContext(patch("azure.storage.blob.BlobLeaseClient", Lease))
+
+
 def proof_fixture(kind="subscription", *, actor="candidate-planner", backend="evidence-assessor"):
     run = "rotation-control"
     identities = dict(zip(("candidate-planner", "evidence-assessor", "release-reviewer",
         "briefing-author", "reference-data"), (value * 64 for value in "abcde")))
+    if actor == "operator-web":
+        identities["operator-web"] = "9" * 64
     target, observer = "7" * 64, "f" * 64
     rows, evidence = [], []
     check_id = "rotation." + kind + "-allowed-and-revoked"
@@ -41,7 +66,9 @@ def proof_fixture(kind="subscription", *, actor="candidate-planner", backend="ev
         evidence.append(row | {"source": "application", "method": "rotation.probe",
             "observed": row["finished"], "facts": {"sha256": sha256(row), "probe_id": check_id}})
         if status == 200:
-            evidence.append(row | {"source": "application", "method": "findings-read" if actor == "briefing-author" else "discovery",
+            evidence.append(row | {"source": "application", "method": (
+                "findings-read" if actor == "briefing-author" else
+                "operator-observe" if actor == "operator-web" else "discovery"),
                 "runtime_identity": identities[backend], "observed": row["finished"]})
         elif kind != "subscription":
             evidence.append(row | {"source": "application", "method": "authorization.denied",
@@ -72,6 +99,18 @@ def proof_fixture(kind="subscription", *, actor="candidate-planner", backend="ev
 
 
 class RotationControlTests(unittest.TestCase):
+    def test_operator_subscription_proof_requires_allocated_observation_not_agent_invocation(self):
+        check, report = proof_fixture(actor="operator-web", backend="candidate-planner")
+        for row in check["actual"]["observations"]:
+            row.pop("runtime_identity")
+        report["evidence"] = [row for row in report["evidence"] if row.get("method") != "rotation.probe"]
+        report["runtime_identities"].pop("operator-web")
+        self.assertEqual(evaluate_check(sanitize(check), sanitize(report))["status"], "pass")
+        for row in report["evidence"]:
+            if row.get("method") == "operator-observe":
+                row["method"] = "discovery"
+        self.assertEqual(evaluate_check(sanitize(check), sanitize(report))["status"], "blocked")
+
     def test_exported_author_rotation_requires_real_finding_reads_not_forbidden_discovery(self):
         check, report = proof_fixture(actor="briefing-author", backend="release-reviewer")
         self.assertEqual(evaluate_check(sanitize(check), sanitize(report))["status"], "pass")
@@ -106,6 +145,7 @@ class RotationControlTests(unittest.TestCase):
         lifecycle = SimpleNamespace(native=Native(), state=SimpleNamespace(directory=directory, save=lambda: None),
             value={"runs": {}, "acceptance_attempts": {"suite": parent}, "rotation_controls": {},
                 "inventory": ["/owned/providers/Microsoft.OperationalInsights/workspaces/owned"]})
+        maintenance_transport(self, lifecycle)
         try:
             with patch("time.time", lambda: clock[0]):
                 for run in ("subscription", "certificate", "context"):
@@ -137,6 +177,7 @@ class RotationControlTests(unittest.TestCase):
         lifecycle = SimpleNamespace(native=SimpleNamespace(), state=SimpleNamespace(
             directory=directory, save=lambda: None), value={"runs": {"owned": {"state": "control_intent"}},
                 "rotation_controls": {"owned": record}, "inventory": []})
+        maintenance_transport(self, lifecycle)
         try:
             with self.assertRaises(Blocked) as caught:
                 RotationAcceptance(lifecycle).control("new", "owned", fingerprints={"fingerprint": "a" * 64},
@@ -186,6 +227,7 @@ class RotationControlTests(unittest.TestCase):
         self.assertEqual(capture_retired_secret(lifecycle, "certificate", None, {}), identifier)
 
     def test_prepare_captures_actual_owned_secret_version_before_existing_lifecycle_reconciliation(self):
+        from contextlib import nullcontext
         from citadel.operator.rotation import rotate_command
         from citadel.operator.state import read_private
         directory = Path(".build") / ("rotation-prepare-" + uuid4().hex)
@@ -194,8 +236,14 @@ class RotationControlTests(unittest.TestCase):
         credentials = {"callerKeys": {"candidate-planner": {"primary": "allocated-original-key",
             "secondary": "allocated-secondary-key"}}, "callerStates": {"candidate-planner": "active"}}
         app = "/subscriptions/fixture/resourceGroups/planning/providers/Microsoft.App/containerApps/sample-candidate-planner"
+        account = "/subscriptions/fixture/resourceGroups/planning/providers/Microsoft.Storage/storageAccounts/planning"
 
         class Native:
+            def blob(self, allocated, container, name):
+                self_test.assertEqual((allocated, container, name), (
+                    "https://planning.blob.core.windows.net", "planner-operations", "active-run-slot.json"))
+                return nullcontext(object())
+
             def rest(self, method, resource, api, body=None):
                 calls.append((method, resource))
                 if (method, resource) == ("get", app):
@@ -218,13 +266,18 @@ class RotationControlTests(unittest.TestCase):
 
         self_test = self
         lifecycle = SimpleNamespace(id="sample", native=Native(), config={"subscriptionId": "allocated"},
-            value={"phase": "deployed_unverified", "runs": {}, "outputs": {"appInventory": [{"app": app}]}},
+            value={"phase": "deployed_unverified", "runs": {},
+                   "inventory": [account, account + "/blobServices/default/containers/planner-operations"],
+                   "outputs": {"appInventory": [{"app": app}]}},
             credentials=lambda: copy.deepcopy(credentials), inventory=lambda: None,
-            state=SimpleNamespace(directory=directory, event=lambda *args: None),
+            state=SimpleNamespace(directory=directory, event=lambda *args: None, save=lambda: None),
             arm=lambda *args, **kwargs: {}, capture_outputs=lambda *args: None)
         try:
-            result = rotate_command(lifecycle, SimpleNamespace(command="rotate", kind="subscription",
-                                                              target="candidate-planner", stage="prepare"))
+            with patch("azure.storage.blob.BlobLeaseClient") as leases:
+                result = rotate_command(lifecycle, SimpleNamespace(command="rotate", kind="subscription",
+                                                                  target="candidate-planner", stage="prepare"))
+                leases.return_value.acquire.assert_called_once_with(lease_duration=-1, timeout=5)
+                leases.return_value.release.assert_called_once_with(timeout=5)
             self.assertEqual(result["status"], "rotation_staged")
             pending = read_private(directory / "rotation.json")
             self.assertTrue(pending["old_secret_id"].endswith("/" + "1" * 32))

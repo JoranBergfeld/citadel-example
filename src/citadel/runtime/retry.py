@@ -90,7 +90,8 @@ class Retry(Recovery):
             document, etag = await self.ledger.read()
             document["operator_controls"][request_id]["outcome"] = outcome
             await self.ledger.commit(document, etag, deadline=read_deadline.get())
-            await self.runtime.run_index.recovered_in_scope(binding, outcome)
+            current = await self.ops.status(binding["caller"], "invoke", binding["operation_id"])
+            await self.runtime.run_index.recovered_in_scope(binding, outcome, current)
         except OperationError as exc:
             outcome = self.outcome(run_id, request_id,
                 "unknown" if exc.code in ("indeterminate", "unavailable") else "blocked",

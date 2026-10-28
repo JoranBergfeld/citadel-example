@@ -70,6 +70,15 @@ class RetryTests(unittest.IsolatedAsyncioTestCase):
         duplicate = await self.retry()
         self.assertEqual(duplicate.json(), response.json())
         self.assertEqual(len(requests), 1)
+        historical = await self.check()
+        self.assertEqual(historical.json()["state"], "released_no_commit")
+        self.assertEqual((await self.index.page())["runs"][0]["execution"], "running")
+        self.assertEqual((await self.ops.status("operator", "invoke", "run1"))["state"], "running")
+        self.assertEqual(self.ledger.ticket_store.active_generation, status["generation"])
+        # An older retained index need not have recorded the retry generation.
+        self.index.ledger.ledger.document["retained_runs"]["run1"].pop("generation")
+        self.assertEqual((await self.check()).json(), historical.json())
+        self.assertEqual((await self.index.page())["runs"][0]["execution"], "running")
         release.set()
         await asyncio.gather(*self.runtime.tasks)
         product = await self.ops.completed_result("operator", "invoke", "run1")
@@ -79,6 +88,8 @@ class RetryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await self.index.resolve("run1"))["inputs"], self.payload)
         self.assertIsNone(self.ledger.ticket_store.active)
         self.assertEqual((await self.retry()).json(), response.json())
+        self.assertEqual((await self.check()).json(), historical.json())
+        self.assertEqual((await self.index.page())["runs"][0]["execution"], "succeeded")
         self.assertEqual(len(requests), 1)
 
     async def test_confirmation_is_strict_and_agents_cannot_spend_or_retry(self):

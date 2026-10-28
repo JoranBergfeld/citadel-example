@@ -19,6 +19,35 @@ from tests.unit.gateway_fixtures import signed, trust
 
 
 class ObservationTests(unittest.IsolatedAsyncioTestCase):
+    async def test_execution_index_lost_marker_and_restarted_exhaustion_never_dispatch_unpaid_reads(self):
+        payload = {"run_id": "index1", "operation_id": "index1", "fixture": "base-source"}
+        physical_reads = []
+        original_read, original_marker = self.ledger.read, self.store.create_marker
+
+        async def counted():
+            physical_reads.append(1)
+            return await original_read()
+
+        async def lost(*args):
+            await original_marker(*args)
+            raise OperationError("indeterminate", "Fixture spent-marker response lost")
+
+        self.ledger.read, self.store.create_marker = counted, lost
+        self.index.execution_read_capacity = 1
+        with self.assertRaises(OperationError) as ambiguous:
+            await self.index.register("operator", payload)
+        self.assertEqual(ambiguous.exception.code, "indeterminate")
+        self.store.create_marker = original_marker
+        self.store.cursors.clear()
+        restarted = RunIndex(self.ledger, self.reads, clock=lambda: 1000)
+        restarted.execution_read_capacity = 1
+        with self.assertRaises(OperationError) as exhausted:
+            await restarted.register("operator", payload)
+        self.assertEqual(exhausted.exception.code, "exhausted")
+        self.assertEqual(physical_reads, [])
+        self.assertEqual((await restarted.page())["state"], "empty")
+        self.assertEqual(physical_reads, [1])
+
     async def test_waiting_for_model_admission_is_not_evidence_of_a_dispatched_route(self):
         waiting, release = asyncio.Event(), asyncio.Event()
         calls = []

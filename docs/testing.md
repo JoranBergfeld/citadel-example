@@ -82,6 +82,7 @@ denial; they never schedule execution or retry a lost response.
 | `accounting`, `read_tickets` | Finite inherited budgets/deadlines, charged retries, physical reads, shared-store concurrency/reconstruction/exhaustion and ambiguous marker admission refusing dispatch. |
 | `peer_reads` | Actual gateway-client exact-version/hash checks through controlled HTTP; a failed finding read spends its allowance and cannot dispatch again after exhaustion. |
 | `recovery`, `operator_quiescence` | Fencing, no replay/refund, restricted explicit retry, immutable deadlines and quiescent partial work staying incomplete. |
+| `maintenance`, `operator_rotation` | Administrative exclusion against UI/CLI/retry admission, ambiguous lease refusal, separate Operator secret inventory, stop-before-start and restricted subscription controls. |
 | `operator_recovery*` | Real hosted recovery handlers/client, durable duplicate/lost-response reconciliation, bound child/private effects, proof-read charging, auth/CSRF denial and mutable-cache invalidation. No cloud calls or automatic replay. |
 | `operator_retry*` | Separately confirmed real owner/backend/client retry; authoritative no-commit, original deadline/remaining accounting, stale fencing, admission blockers, duplicate/lost/ambiguous/restart safety and cache invalidation. Controlled model/peer responses, not a whole-flow or cloud test. |
 | `gateway`, `startup` | Local ASGI authorization/signature/path denials and explicit workload configuration/capability validation. |

@@ -33,7 +33,8 @@ class Recovery:
         binding = await self.resolve_run(run_id)
         outcome = await self.check(binding["caller"], binding["operation_id"], run_id,
                                    request_id, inputs=binding["inputs"])
-        await self.runtime.run_index.recovered_in_scope(binding, outcome)
+        current = await self.ops.status(binding["caller"], "invoke", binding["operation_id"])
+        await self.runtime.run_index.recovered_in_scope(binding, outcome, current)
         return outcome
 
     async def resolve_run(self, run_id):
@@ -151,6 +152,7 @@ class Recovery:
                 if state["state"] == "succeeded" else "Definite no-commit; exact owned admission released.")
             if child:
                 outcome["proof"] = proof
+            outcome["generation"] = state["generation"]
         except OperationError as exc:
             outcome = self.outcome(run_id, request_id,
                 "unknown" if exc.code in ("indeterminate", "unavailable") else "blocked",
