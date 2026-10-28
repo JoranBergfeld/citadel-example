@@ -9,6 +9,23 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 class PolicyTests(unittest.TestCase):
+    def test_planning_observation_routes_have_operator_only_owner_authority_and_exact_origin_paths(self):
+        source = (ROOT / "infra/modules/workload-api.bicep").read_text()
+        policy = ET.parse(ROOT / "infra/policies/workload.xml")
+        authority = policy.find("./inbound/set-variable[@name='authorized']").get("value")
+        paths = policy.find("./inbound/set-variable[@name='originPath']").get("value")
+        for operation, owner, suffix in (("operator-decisions", "candidate-planner", "decisions"),
+                                         ("operator-brief", "briefing-author", "brief")):
+            self.assertIn(f"name: '{operation}', method: 'GET', path: '/operator/runs/{{runId}}/{suffix}'", source)
+            branch = re.search(r'if \(op == "' + operation + r'"\) \{(.*?)\}', authority).group(1)
+            self.assertIn(f'"__TARGET__" == "{owner}"', branch)
+            self.assertEqual(re.findall(r'caller == "([^"]+)"', branch), ["operator-web"])
+            path = re.search(r'if \(op == "' + operation + r'"\) \{(.*?)\}', paths).group(1)
+            self.assertIn('"/operator/runs/"', path)
+            self.assertIn(f'"/{suffix}"', path)
+        self.assertIn('30)', policy.find("./inbound/set-variable[@name='exchangeTimeout']").get("value"))
+        self.assertEqual(policy.findall(".//retry"), [])
+
     def test_workload_policy_contains_only_exact_caller_graph_and_separate_read_authority(self):
         source = (ROOT / "infra/policies/workload.xml").read_text()
         callers = {

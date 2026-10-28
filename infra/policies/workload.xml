@@ -8,6 +8,12 @@
       if (op == &quot;operator-retry&quot;) {
         return &quot;__TARGET__&quot; == &quot;candidate-planner&quot; &amp;&amp; caller == &quot;operator-web&quot;;
       }
+      if (op == &quot;operator-decisions&quot;) {
+        return &quot;__TARGET__&quot; == &quot;candidate-planner&quot; &amp;&amp; caller == &quot;operator-web&quot;;
+      }
+      if (op == &quot;operator-brief&quot;) {
+        return &quot;__TARGET__&quot; == &quot;briefing-author&quot; &amp;&amp; caller == &quot;operator-web&quot;;
+      }
       if (op == &quot;operator-recover&quot;) {
         return &quot;__TARGET__&quot; == &quot;candidate-planner&quot; &amp;&amp; caller == &quot;operator-web&quot;;
       }
@@ -70,6 +76,12 @@
     <set-variable name="originPath" value="@{
       var op = context.Operation.Id;
       if (op == &quot;operator-retry&quot;) { return &quot;/operator/runs/&quot; + context.Request.MatchedParameters[&quot;runId&quot;] + &quot;/retry/&quot; + context.Request.MatchedParameters[&quot;requestId&quot;]; }
+      if (op == &quot;operator-decisions&quot;) {
+        return &quot;/operator/runs/&quot; + context.Request.MatchedParameters[&quot;runId&quot;] + &quot;/decisions&quot;;
+      }
+      if (op == &quot;operator-brief&quot;) {
+        return &quot;/operator/runs/&quot; + context.Request.MatchedParameters[&quot;runId&quot;] + &quot;/brief&quot;;
+      }
       if (op == &quot;operator-recover&quot;) { return &quot;/operator/runs/&quot; + context.Request.MatchedParameters[&quot;runId&quot;] + &quot;/recover/&quot; + context.Request.MatchedParameters[&quot;requestId&quot;]; }
       if (op == &quot;operator-recover-child&quot;) { return &quot;/operator/recovery/&quot; + context.Request.MatchedParameters[&quot;operationId&quot;] + &quot;/&quot; + context.Request.MatchedParameters[&quot;requestId&quot;]; }
       if (op == &quot;operator-scenario-submit&quot;) { return &quot;/operator/scenarios&quot;; }

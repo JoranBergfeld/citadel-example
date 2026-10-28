@@ -404,6 +404,55 @@ Manual, origin/CSRF-protected refresh preserves selection and last-success data
 with stale/exhausted/denied warnings. Source inspection never executes models,
 creates artifacts or recovers runs.
 
+## Exercise Planning: decisions and actual saved briefs
+
+Select **Exercise Planning** for any retained run, including CLI-created runs:
+`/teams/planning/runs/{run_id}`. Expand each saved candidate's evidence summary
+for completeness, missing-field reasons, release outcome, selection/skipping
+reason, original caveats and exact approved-finding reference. A replacement is
+labelled separately from the original three candidates. Labelled overlays and
+original source/profile/fixture versions and hashes are preserved.
+
+The backend uses only these Operator-only APIM GET capabilities:
+
+| Owner | Owner-relative path |
+| --- | --- |
+| Candidate Planner | `/operator/runs/{run_id}/decisions` |
+| Briefing Author | `/operator/runs/{run_id}/brief` |
+
+Planner resolves its immutable original submission and exact committed product.
+During execution it saves public decision summaries alongside assessed membership
+before requesting a brief, so Author failure does not hide completed assessments.
+A complete saved Planner product remains independently inspectable if that
+supporting context is incomplete. Older partial history without saved decisions
+shows unknown decisions, never current-reference reassessment or index backfill.
+
+Only Author's hash-bound saved product supplies the brief and **its exact saved
+citations**. Planner commentary, a copied Planner brief, current findings and
+private assessment drafts are never substitutes. Missing or ambiguous Author
+history shows no brief. Citation links use the existing exact-version
+[Evidence Review interface](#evidence-review-private-drafts-and-exact-releases);
+deleted versions remain missing even if a newer release exists. The separately
+labelled **Operator-only Evidence Review** link grants no draft authority to
+Planning workloads.
+
+Owner services allowlist public fields before HTTP serialization; no private
+draft previews/prose, notes, prompts, hidden reasoning, credentials, workflow
+receipts or private paths appear in Planning projections. Responses contain at
+most 20 candidates and three brief citations, with a 256-KiB serialized limit.
+The backend bounds streaming responses before caching. Owner reads and protocol
+GETs spend the shared deployment observation pool, never workflow tickets.
+Admission and downstream work share the 30-second ceiling with zero retries.
+Each panel retains its own last-success time and stale warning.
+The current-run execution header, visible-active refresh and explicit **Check and
+recover** control remain available. Planning detail suppresses the generic
+Planner brief copy: only the independently observed Author product is displayed.
+
+Insufficient evidence is not an airport-safety judgment. Successful bounded-pool
+exhaustion explains why no brief was requested; technical interruption remains
+incomplete with unknown effects. Inspection never generates missing history,
+submits work, refills allowances or establishes deployed enforcement.
+
 ## Local checks and claim limits
 
 From the repository root in the installed pinned project environment, run the
@@ -419,6 +468,7 @@ python -m unittest discover -s tests/unit -p 'test_scenario_summary.py' -v
 node --test tests/client/*.test.mjs
 python -m unittest discover -s tests/unit -p 'test_evidence_observation.py' -v
 python -m unittest discover -s tests/unit -p 'test_reference_observation.py' -v
+python -m unittest discover -s tests/unit -p 'test_planning_observation.py' -v
 ```
 
 The full command is required before merging. See [testing.md](testing.md) for

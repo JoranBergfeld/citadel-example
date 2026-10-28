@@ -74,6 +74,7 @@ denial; they never schedule execution or retry a lost response.
 | `evidence_assessor` | Actual private draft persistence and exact reviewer input, rejection propagation and failure before draft/release. |
 | `release_reviewer` | Exact requested immutable version rather than latest draft, hash denial, independent recheck rejection and private-field exclusion from actual saved findings. |
 | `briefing_author` | Actual saved narrative/citations/caveats, duplicate-reference denial and approved-but-incomplete evidence denial before inference. |
+| `planning_observation` | Actual Planner/Author owner services and authenticated HTTP presentation: all saved decisions/replacements, exact original released citations, filtered private fields, incomplete/exhausted/legacy history, bounded responses, physical admission, total deadlines and independently stale panels. |
 | `evidence` | Pure completeness, raw/parsed values, source/overlay provenance, bounded candidates and shareable-projection rules. |
 | `operations`, `completion` | Conditional immutable approval, exact versions, privacy, ownership, lost-response reconciliation, atomic product/result publication and closed receipts. |
 | `accounting`, `read_tickets` | Finite inherited budgets/deadlines, charged retries, physical reads, shared-store concurrency/reconstruction/exhaustion and ambiguous marker admission refusing dispatch. |
@@ -86,7 +87,10 @@ denial; they never schedule execution or retry a lost response.
 | `operator_web*` | Actual protected HTTP handlers/server-rendered chooser, fake-time sessions/throttling, private login configuration and controlled deployment contracts; see [operator-web.md](operator-web.md). |
 | `submission`, `browser_scenarios`, `scenario_summary`, `observation` | Actual hosted Planner/HTTP dispatch, immutable intent before execution, duplicate/ambiguous refusal, shared CLI admission, fixed scenario bindings, saved summary privacy and shared observation/cache behavior. |
 
-Agent tests create **one runtime per case**. `agent_fixtures.py` supplies controlled
+Agent behavior tests execute **one runtime per independently exercised agent**.
+Observation HTTP cases may compose independently seeded owner services; peer
+responses never execute another agent or a whole-flow harness.
+`agent_fixtures.py` supplies controlled
 peer-service responses, `MemoryLedger`, a fake clock and a real `GovernedModel`
 with HTTPX2's `MockTransport`. Assertions concern the agent's decisions,
 saved products and denied boundary calls, not just fixture responses. Peer

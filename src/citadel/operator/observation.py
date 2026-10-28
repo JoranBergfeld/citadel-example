@@ -1,6 +1,7 @@
 """Server-only, read-only owner clients and single-process shared view cache."""
 
 import asyncio
+import json
 from collections import OrderedDict
 from copy import deepcopy
 from dataclasses import dataclass
@@ -50,6 +51,12 @@ class ObservationClient:
         key = (self.admission.deployment, run_id, "evidence-" + projection, cursor, artifact_id, version)
         return await self._observe_path(key, path, refresh, automatic=automatic)
 
+    async def planning(self, run_id, projection, *, refresh=False, automatic=False):
+        from .planning_view import observation_path
+        path = observation_path(run_id, projection)
+        key = (self.admission.deployment, run_id, "planning-" + projection)
+        return await self._observe_path(key, path, refresh, automatic=automatic)
+
     def selected_active(self, run_id):
         observed = self.cache.get(self.aliases.get(self.key(run_id, None)))
         return bool(observed and observed.state != "exhausted"
@@ -86,14 +93,20 @@ class ObservationClient:
         try:
             async with self.admission.request():
                 await self.admission.charge()
-                response = await self.client.get(self.gateway + path,
-                    headers={"Ocp-Apim-Subscription-Key": self.credential,
-                             "X-Citadel-Observation-Deadline": str(read_deadline.get())},
-                    timeout=max(0.001, read_deadline.get() - self.clock()))
-                state = {403: "denied", 404: "missing", 429: "exhausted"}.get(response.status_code)
-                if response.status_code != 200:
-                    raise OperationError(state or "unavailable", "Observation did not succeed")
-                data = response.json()
+                async with self.client.stream("GET", self.gateway + path,
+                        headers={"Ocp-Apim-Subscription-Key": self.credential,
+                                 "X-Citadel-Observation-Deadline": str(read_deadline.get())},
+                        timeout=max(0.001, read_deadline.get() - self.clock())) as response:
+                    state = {403: "denied", 404: "missing", 429: "exhausted"}.get(response.status_code)
+                    if response.status_code != 200:
+                        raise OperationError(state or "unavailable", "Observation did not succeed")
+                    limit = 262144 if key[2].startswith("planning-") else None
+                    body = bytearray()
+                    async for chunk in response.aiter_bytes():
+                        if limit is not None and len(body) + len(chunk) > limit:
+                            raise OperationError("unavailable", "Observation exceeds response bound")
+                        body.extend(chunk)
+                data = json.loads(body)
                 if not isinstance(data, dict) or data.get("state") not in ("ok", "empty", "partial"):
                     raise OperationError("unavailable", "Unknown observation result")
                 observed = Observed(data, self.clock(), data["state"], False)
