@@ -31,7 +31,7 @@ def parser():
     review.add_argument("--state-dir", required=True)
     review.add_argument("--run-id", required=True)
     review.add_argument("--review", required=True)
-    for name in ("check", "preflight", "deploy", "inventory", "collect", "teardown", "acceptance"):
+    for name in ("check", "preflight", "deploy", "inventory", "collect", "teardown", "acceptance", "configure-web-login"):
         command = commands.add_parser(name)
         command.add_argument("--state-dir", required=True)
         if name == "deploy":

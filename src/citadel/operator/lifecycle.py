@@ -67,6 +67,9 @@ class Lifecycle:
         self.groups = {team: f"citadel-{self.id}-{team}" for team in TEAMS}
 
     def command(self, args):
+        if args.command == "configure-web-login":
+            from .web_admin import configure
+            return configure(self)
         if args.command == "record-plan-observation":
             from .plan import record_observation
             return record_observation(self, args.observation, args.evidence)
@@ -186,6 +189,8 @@ class Lifecycle:
                 raise Blocked("existing_api_center_configuration_conflict")
         result["createApiCenter"] = not centers
         result.update(self.credentials())
+        from .web_admin import authentication
+        result["operatorAuth"] = authentication(self)
         result["deployRuntime"] = runtime
         result["applications"] = self.value.get("applications", {}) if runtime else {}
         validate_deployment_inputs(result)
@@ -194,6 +199,9 @@ class Lifecycle:
     def arm(self, action, *, runtime=False):
         if runtime:
             self.require_plan_observation()
+        if action == "create":
+            from .web_admin import stop
+            stop(self)
         parameters = {"parameters": {key: {"value": value} for key, value in self.parameters(runtime).items()}}
         with self.native.document(parameters) as path:
             result = self.native.az(
@@ -204,6 +212,11 @@ class Lifecycle:
                 *(["--validation-level", "Provider"] if action == "validate" else []), timeout=7200)
         if not isinstance(result, dict) or result.get("properties", {}).get("provisioningState") != "Succeeded":
             raise Blocked("arm_deployment_not_succeeded")
+        if action == "create" and runtime:
+            # Use the just-returned inventory, including initial creation.
+            self.capture_outputs(result)
+            from .web_admin import start
+            start(self)
         return result
 
     def preflight(self):
@@ -288,7 +301,7 @@ class Lifecycle:
 
     def capture_outputs(self, result):
         outputs = result["properties"].get("outputs", {})
-        for required in ("inventory", "teamInventory", "appInventory", "gatewayUrl"):
+        for required in ("inventory", "teamInventory", "appInventory", "gatewayUrl", "operatorInventory"):
             if required not in outputs:
                 raise Blocked("deployment_inventory_outputs_missing")
         resolved = {k: v["value"] for k, v in outputs.items()}
@@ -459,6 +472,9 @@ class Lifecycle:
         self.value["applications"] = {w["name"]: {"image": image,
             "command": ["python", "-m", "citadel.runtime"], "args": [],
             "modelTokensPerMinute": self.config["modelTokensPerMinute"]} for w in WORKLOADS}
+        self.value["applications"]["operator-web"] = {
+            "image": image, "command": ["python", "-m", "citadel.operator.web"], "args": [],
+        }
         self.parameters(runtime=True)
         self.lock_image(registry, repository, image_digest)
         self.state.save()
@@ -556,6 +572,8 @@ class Lifecycle:
     def verify_inventory(self):
         self.inventory()
         self.verify_vault_configuration()
+        from .web_admin import verify
+        verify(self)
         capabilities = self.value["outputs"]["inventory"]["capabilities"]
         center = self.native.rest("get", capabilities["service"], "2024-03-01")
         if center.get("properties", {}).get("provisioningState") != "Succeeded":
@@ -657,7 +675,7 @@ class Lifecycle:
                       "rotation_proof", "operator_prose_signoff", "two_consecutive_passes",
                       "fresh_deployment", "manual_teardown"],
                   "costInputs": ["APIM BasicV2", "ACR Basic and image operations",
-                      "five warm 0.5vCPU/1GiB apps and rolling revisions", "regional Standard model tokens",
+                      "five warm team apps plus one 0.5vCPU/1GiB Operator app; Operator stop-before-start downtime", "regional Standard model tokens",
                       "storage and vault operations", "unsampled ingestion and retention",
                       "all acceptance/failed runs and probes", "residual/delayed charges"],
                   "monetaryCeiling": None, "automaticDeletion": False}
