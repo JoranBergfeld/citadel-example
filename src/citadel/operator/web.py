@@ -233,7 +233,9 @@ def create_app(config, *, clock=time.monotonic, observation=None, submission=Non
             return Response("Not found", status_code=404)
         run = request.path_params.get("run_id")
         suffix = f'/runs/{escape(run)}' if run else ''
-        nav = '<nav aria-label="Team perspectives"><a href="/">Choose a scenario</a><a href="/history">Earlier runs</a>' + "".join(
+        nav = ('<nav aria-label="Team perspectives"><a href="/">Choose a scenario</a>'
+               + (f'<a href="/runs/{escape(run)}">Follow selected run</a>' if run else "")
+               + '<a href="/history">Earlier runs</a>') + "".join(
             f'<a href="/teams/{key}{suffix}"' + (' aria-current="page"' if key == selected else '') +
             f'>{value}</a>' for key, value in perspectives.items()) + "</nav>"
         header = f"""<header><h1>Citadel · Operator</h1><form method="post" action="/logout">

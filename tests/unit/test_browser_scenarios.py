@@ -60,6 +60,7 @@ class BrowserScenarioTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIn("Current activity unknown", stale.text)
                 detail = await browser.get("/teams/evidence/runs/run1/findings/finding1/versions/2")
                 self.assertIn('data-current-run="run1"', detail.text)
+                self.assertIn('href="/runs/run1">Follow selected run</a>', detail.text)
                 self.assertIn("Exact approved finding", detail.text)
                 self.assertIn("Private Operator inspection", detail.text)
                 self.assertEqual(requests[-1].url.path,

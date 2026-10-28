@@ -4,12 +4,13 @@ import asyncio
 import unittest
 
 import httpx
+import httpx2
 
 from agent_fixtures import AgentCase
-from citadel.operations import OperationError
 from citadel.operations.testing import MemoryLedger
 from citadel.runtime.agents import agent_application
 from citadel.runtime.observation import DeploymentReads
+from citadel.runtime.model import GovernedModel
 from tests.unit.gateway_fixtures import signed, trust
 
 
@@ -27,13 +28,16 @@ class FlowActivityTests(AgentCase, unittest.IsolatedAsyncioTestCase):
                 runtime = await self.agent(role, **inputs)
                 entered, release = asyncio.Event(), asyncio.Event()
 
-                class Model:
-                    async def explain(self, *args):
-                        entered.set()
-                        await release.wait()
-                        raise OperationError("unavailable", "Labelled controlled pending I/O")
+                async def model_response(request):
+                    entered.set()
+                    await release.wait()
+                    return httpx2.Response(503, json={"error": {"message": "Labelled controlled pending I/O"}})
 
-                runtime.model = Model()
+                model_http = await self.stack.enter_async_context(
+                    httpx2.AsyncClient(transport=httpx2.MockTransport(model_response)))
+                runtime.model = GovernedModel(role, "https://gateway.test", "fixture-key", "fixture-model",
+                                              http_client=model_http, clock=self.clock)
+                self.stack.push_async_callback(runtime.model.close)
                 reads = DeploymentReads(runtime.ticket_store, "fixture1", clock=self.clock)
                 await reads.store.open_pool(reads.scope("observation"))
                 runtime.observation_reads = reads

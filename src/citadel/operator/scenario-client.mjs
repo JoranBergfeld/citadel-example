@@ -1,4 +1,6 @@
 // Execution is server-owned. Client refresh never submits or recovers a run.
+import "./retry-client.mjs";
+
 const routes = {
   "candidate-planner": ["model", "reference", "evidence-assessor", "findings", "briefing-author"],
   "evidence-assessor": ["model", "reference", "release-reviewer"],
@@ -105,6 +107,11 @@ if (typeof document !== "undefined") {
     if (button) {
       button.setAttribute("aria-pressed", String(paused));
       button.textContent = paused ? "Resume animation" : "Pause animation";
+    }
+    if (globalThis.location.hash.startsWith("#architecture-")) {
+      const target = document.getElementById(globalThis.location.hash.slice(1));
+      const detail = target?.closest("details");
+      if (detail) detail.open = true;
     }
     if (Number.isFinite(until)) expiry = setTimeout(present, Math.max(1, (until - now) * 1000));
   };

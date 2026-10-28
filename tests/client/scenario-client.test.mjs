@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { createRefresh, activityState, inspectionPath } from "../../src/citadel/operator/scenario-client.mjs";
 
 function fixture() {
@@ -117,4 +118,31 @@ test("node inspection preserves run and exact citations without creating executi
   }
   assert.throws(() => inspectionPath("../run", "drafts"));
   assert.throws(() => inspectionPath("run1", "findings", { artifact_id: "finding1", version: 0 }));
+});
+
+test("current-run client protects retry controls inserted by a later observation", () => {
+  const module = new URL("../../src/citadel/operator/scenario-client.mjs", import.meta.url).href;
+  const result = spawnSync(process.execPath, ["--input-type=module", "-e", `
+    import assert from "node:assert/strict";
+    const listeners = [];
+    globalThis.document = {
+      visibilityState: "visible", querySelector: () => null,
+      addEventListener: (name, handler) => { if (name === "submit") listeners.push(handler); },
+    };
+    globalThis.matchMedia = () => ({ matches: false, addEventListener() {} });
+    globalThis.addEventListener = () => {};
+    globalThis.fetch = () => { throw new Error("Observation/presentation must not execute work"); };
+    await import(${JSON.stringify(module)});
+    let asked = 0, prevented = false;
+    globalThis.confirm = () => { asked++; return false; };
+    const form = {
+      dataset: {}, elements: { namedItem: () => ({ checked: true }) },
+      matches: selector => selector === "form[data-retry-run]",
+    };
+    listeners.forEach(handler => handler({ target: form, preventDefault: () => { prevented = true; } }));
+    assert.equal(asked, 1);
+    assert.equal(prevented, true);
+    assert.equal(form.dataset.retryPending, undefined);
+  `], { encoding: "utf8" });
+  assert.equal(result.status, 0, result.stderr);
 });

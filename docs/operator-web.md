@@ -189,11 +189,13 @@ agent or route. Services attach a small allowlisted, run-bound activity projecti
 to their existing summary/draft/release/brief responses. It reports an awaiting
 reference, child, finding or model call, not downstream execution or model output.
 It is ephemeral, bounded to 32 concurrent local task entries, and absent after the
-call ends, cancellation or process restart. A persisted running label, lease,
-expected sequence or saved artifact is never used to invent activity.
+call ends, cancellation or process restart. Evidence begins only at the outgoing
+HTTP boundary after confirmed protocol/model admission; waiting for admission
+does not light a route. A persisted running label, lease, expected sequence or
+saved artifact is never used to invent activity.
 
-Each snapshot expires within **15 seconds** (and before its original execution
-deadline). The browser removes pulses and changes descriptions to unknown/last
+Dispatch evidence expires within **15 seconds** (and before its original execution
+deadline). Reading a projection never renews that evidence. The browser removes pulses and changes descriptions to unknown/last
 observed on expiry or failed/stale observation, even if a refresh is still pending.
 Independent owner observations may disagree in age; they are not an atomic
 cross-team snapshot. Calls between observations may be missed; unknown does not
@@ -211,7 +213,9 @@ requires no new persistence, gateway capability, model call or storage read.
 
 **Pause animation** and system **reduced motion** leave a static diagram without
 stopping observation or changing execution, recovery or retry controls. With no
-JavaScript there is no animation. The pinned throwaway prototype supplied only
+JavaScript there is no animation. Retry controls appearing in a later observation
+retain the separately confirmed retry client; refresh never submits them.
+The pinned throwaway prototype supplied only
 interaction reference: its synthetic playback code/data is not a production mode
 and is not evidence that agents or deployed Azure routes ran. Offline handler and
 Node tests do not establish live service, Azure/APIM enforcement or model quality.
