@@ -35,13 +35,14 @@ class Runtime:
     def __init__(self, workload, ledger, *, model, peers, gateway_url,
                  artifacts=None, drafts=None, tokens_per_minute=120000, clock=time.time,
                  ticket_store=None, acceptance_hold=None, workflow_hold=None, run_index=None,
-                 recovery_admission=None):
+                 recovery_admission=None, observation_reads=None):
         self.workload, self.model, self.peers, self.clock = workload, model, peers, clock
         self.ledger = ScopedLedger(ledger)
         self.acceptance_hold = acceptance_hold
         self.workflow_hold = workflow_hold
         self.run_index = run_index
         self.recovery_admission = recovery_admission or (run_index.admission if run_index else None)
+        self.observation_reads = observation_reads
         self.ops = Operations(self.ledger, workload=workload, clock=clock)
         self.accounting = Accounting(self.ledger, workload=workload, clock=clock,
                                      tokens_per_minute=tokens_per_minute)
@@ -143,7 +144,8 @@ class Runtime:
                         await self.accounting.adopt(grant, authenticated_issuer=caller)
                         deadline = grant["deadline"]
                     accepted = await self.ops.accept(caller, "invoke", operation_id, payload,
-                                                     run_id=run_id, deadline=deadline)
+                        run_id=run_id, deadline=deadline, retained_bindings=(
+                            {"draft": payload["draft"]} if self.workload == "release-reviewer" else None))
                 with read_scope(pool, deadline=deadline, cache=snapshots.get()):
                     ownership = await self.ops.claim(caller, "invoke", operation_id,
                                                      worker=uuid4().hex, lease_seconds=180)
@@ -234,13 +236,26 @@ class Runtime:
         commentary = await self._explain(payload, {"fixture": payload["fixture"], "target": 3, "pool_limit": 20})
         pool = await self.peers.reference(payload["fixture"], deadline)
         selected, assessed, references, read_scopes = [], [], [], []
-        for airport in pool["airports"]:
+        context_available = self.run_index is not None
+
+        async def save_assessed(ident, complete):
+            nonlocal context_available
+            if context_available:
+                try:
+                    await self.run_index.assessed(payload["run_id"], ident, pool["provenance"], complete=complete)
+                except (OperationError, TimeoutError):
+                    # Observation failure cannot fail/replay the admitted workflow.
+                    context_available = False
+                    logging.getLogger(__name__).warning("assessed_context_unavailable")
+
+        for number, airport in enumerate(pool["airports"]):
             ident = airport["ident"]["parsed"]
             await self.renew_if_needed(owner)
             await self.accounting.candidate(payload["operation_id"], ident)
             result = await self.peers.child(self, owner, payload, "evidence-assessor", {"airport_ident": ident},
                 {"agents": 2, "models": 2, "tokens": 36000, "reads": CAPACITY["evidence-assessor"]})
             if result["kind"] == "rejected":
+                await save_assessed(ident, number + 1 == len(pool["airports"]))
                 assessed.append({"airport_ident": ident, "classification": "release_rejected"})
                 continue
             ref = result["finding"]
@@ -254,6 +269,7 @@ class Runtime:
                 selected.append(ident)
                 references.append(ref)
                 read_scopes.append(result["read_scope"])
+            await save_assessed(ident, len(selected) == 3 or number + 1 == len(pool["airports"]))
             if len(selected) == 3:
                 break
         product = {
@@ -276,7 +292,7 @@ class Runtime:
         draft = {
             "artifact_id": sha256({"run": payload["run_id"], "airport": ident}), "version": 1,
             "schema_version": 1, "run_id": payload["run_id"], "operation_id": operation_id,
-            "airport_ident": ident, **assessment, "private_notes": notes,
+            "airport_ident": ident, **assessment, "assessment_prose": notes,
         }
         inputs = {"draft": draft, "expected_version": 0}
         await self.ops.begin_external(owner, operation_id,
@@ -477,6 +493,9 @@ def agent_application(runtime, trust):
     app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
     from .recovery import install_recovery_routes
     install_recovery_routes(app, runtime)
+    if runtime.workload in ("evidence-assessor", "release-reviewer"):
+        from .evidence_observation import install
+        install(app, runtime)
     add_a2a_routes_to_fastapi(app, jsonrpc_routes=create_jsonrpc_routes(
         DurableHandler(runtime), "/a2a", context_builder=TrustedContext(), enable_v0_3_compat=False))
 

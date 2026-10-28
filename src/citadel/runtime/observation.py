@@ -93,7 +93,8 @@ class RunIndex:
             if len(entries) >= self.capacity:
                 raise OperationError("exhausted", "Retained run index is full")
             entries[run_id] = {"binding": binding, "execution": "unknown",
-                               "retained_at": self.clock(), "provenance": None}
+                               "retained_at": self.clock(), "provenance": None, "assessed": [],
+                               "assessed_complete": False}
             await self.ledger.commit(document, etag, deadline=read_deadline.get())
 
     async def update(self, run_id, state, *, provenance=None):
@@ -107,6 +108,29 @@ class RunIndex:
                 if entry["provenance"] not in (None, provenance):
                     raise OperationError("conflict", "Original source binding cannot change")
                 entry["provenance"] = deepcopy(provenance)
+            await self.ledger.commit(document, etag, deadline=read_deadline.get())
+
+    async def assessed(self, run_id, airport_ident, provenance, *, complete=False):
+        """Only Planner's completed assessment handoff can extend this context."""
+        airport_ident = identity(airport_ident)
+        async with self.admission.request(deadline=read_deadline.get()):
+            document, etag = await self._read()
+            entry = document["retained_runs"].get(identity(run_id))
+            if entry is None:
+                raise OperationError("missing", "No retained binding")
+            if (provenance["fixture"]["id"] != entry["binding"]["fixture"]
+                    or entry["provenance"] not in (None, provenance)):
+                raise OperationError("conflict", "Assessment source differs from retained inputs")
+            candidates = entry.setdefault("assessed", [])
+            if airport_ident in candidates:
+                return
+            if entry.get("assessed_complete"):
+                raise OperationError("conflict", "Completed assessed context cannot be extended")
+            if len(candidates) >= 20:
+                raise OperationError("result_limit", "Assessed candidate bound exceeded")
+            entry["provenance"] = deepcopy(provenance)
+            candidates.append(airport_ident)
+            entry["assessed_complete"] = complete
             await self.ledger.commit(document, etag, deadline=read_deadline.get())
 
     @staticmethod

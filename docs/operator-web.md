@@ -114,9 +114,11 @@ Failed/ambiguous stop never permits replacement; reconcile explicitly.
   to the platform accounting container. No team Blob roles, agent/context/CLI subscription secrets, model
   permission, Azure-management authority, CLI state mount or generic proxy.
   The distinct `operator-web` APIM caller can GET the Planner's narrow retained
-  list/page/summary paths and POST its explicit run-bound recovery action. It cannot
-  invoke agents, ordinary owner status, findings, models or arbitrary URLs.
-  It never copies the CLI Operator key.
+  list/page/summary paths and the Assessor/Reviewer's run-bound Evidence Review
+  projections and Reference Data assessed-run paths described below. It can POST
+  the Planner's explicit run-bound recovery action.
+  It cannot invoke agents, ordinary owner status, models,
+  or arbitrary URLs. It never copies the CLI Operator key.
 - Exactly one container/process (`python -m citadel.operator.web`, one Uvicorn
   worker, no reload) and `minReplicas=maxReplicas=1`. The deployment verifier rejects
   extra environment authority, mounts, worker commands and scaling.
@@ -200,6 +202,101 @@ Reference Data and the four agents receive marker-write-only roles on the
 accounting container for subsequent projections, not reference-dataset writes.
 Later team slices must use the same physical admission path for their own reads.
 
+## Evidence Review: private drafts and exact releases
+
+Select a retained run, then **Evidence Review**. The authenticated view
+`/teams/evidence/runs/{run_id}` reads actual saved owner-service records,
+including CLI-created runs. It shows exact draft versions, saved assessment
+prose, completeness/gaps, provenance, original caveats and release outcomes.
+Release Reviewer remains the approving agent: there is no human release gate.
+Rejected release, unknown/incomplete reviewer execution and approved finding
+are separate. Approval permits sharing, not completeness or airport safety;
+an approved finding may report insufficient evidence.
+
+Drafts remain **private Operator inspection**, not planning-workload authority.
+The owner services allowlist fields before returning HTTP responses. Private
+notes, prompts/model exchanges, reasoning, credentials, receipts and private
+paths are never returned. New drafts save an explicit `assessment_prose`;
+legacy drafts containing only private notes show unavailable prose, never
+reinterpret those notes as an explanation.
+
+Releases link their original exact draft and approved-finding versions.
+An exact finding opens at
+`/teams/evidence/runs/{run_id}/findings/{artifact_id}/versions/{version}`.
+The view is an allowlisted projection with the original artifact reference/hash,
+not rewritten artifact bytes. Exact private-draft links use the same pattern
+with `drafts` in place of `findings`. Multi-record pages contain at most 20
+entries with explicit next-page navigation. Correction versions are not
+silently substituted. Original private draft hashes can legitimately differ
+from the hash of the filtered projection.
+
+Owner endpoints, reached only by the backend through APIM:
+
+| Owner | Operator-only GET |
+| --- | --- |
+| Evidence Assessor | `/operator/runs/{run_id}/drafts` and `/drafts/page/{cursor}` |
+| Evidence Assessor | `/operator/runs/{run_id}/drafts/{artifact_id}/versions/{version}` |
+| Release Reviewer | `/operator/runs/{run_id}/releases` and `/releases/page/{cursor}` |
+| Release Reviewer | `/operator/runs/{run_id}/findings/{artifact_id}/versions/{version}` |
+
+Page suffixes are relative to `/operator/runs/{run_id}`. These endpoints
+accept opaque identities only, never browser owner/source/path/receipt claims.
+The owner verifies committed exact artifact and release linkages. New reviewer
+admissions retain their exact draft binding; older rejected/incomplete reviews
+without that binding stay partial. Missing records or storage remain explicitly
+missing/partial/unavailable. Inspection neither regenerates products nor
+submits/reviews work. A saved finding remains inspectable even if reviewer
+execution did not finish; it does not manufacture run success or a brief.
+
+Evidence projections use the same server-shared cache, in-flight coalescing,
+deployment observation pool, separately charged protocol and physical storage
+reads, zero retries and 30-second ceiling. Each owner panel has its own
+last-success time and stale warning; they are not an atomic snapshot. Manual
+Evidence Review refresh is origin/CSRF protected and preserves run selection.
+Ordinary workload draft/findings authorization and workflow pools are unchanged.
+
+## Inspecting assessed Reference Data
+
+Select a retained run, then **Reference Data**. Expand an assessed airport to see
+airport/country/region/runway raw values, parsed values and quality reasons;
+original-source values and labelled synthetic-overlay values are separate.
+Comparison-profile rules, exact source/profile/fixture hashes, source provenance
+and only the assessed candidates' overlay differences are expandable. Completeness
+is neither release approval nor accuracy, safety or operational suitability.
+The source dataset is never edited. There is no candidate search, export or
+arbitrary-path input.
+
+The browser sends only the opaque run ID. The backend's isolated APIM credential
+GETs `/reference-data/operator/reference/runs/{runId}`; the Reference Data owner
+resolves candidate membership and exact provenance from Planner's retained index.
+Planner saves this context after each returned assessment/release handoff, before
+brief writing, so later failures preserve assessed candidates. Failed or ambiguous
+handoffs do not invent candidate membership. Pre-slice history without saved
+assessed bindings stays partial; no candidate-pool scan or historical backfill.
+Until the last assessment binding is saved, the projection is explicitly partial,
+even when some exact candidates are inspectable. A projection-recording failure
+does not fail or replay execution; it leaves incomplete observation context.
+
+Reference Data has an inventoried **read-only, ABAC path-restricted** grant for
+`planner-operations/retained-runs-v1.json` only, with Blob listing explicitly denied.
+It cannot read Planner's operation ledger or write Planner state. Its existing
+reference-dataset role stays read-only, and its accounting role writes markers
+only. This adds no UI team-data role or agent-draft authority. The additional
+assignment appears in `operatorInventory.referenceContextAssignments` for manual
+ownership-checked teardown.
+
+The source is available only when the loaded, independently verified immutable
+bundle matches **all** saved source/profile/fixture bindings. Missing historical
+material is labelled unavailable/partial, never silently replaced with current
+data. Loaded exact immutable source is an in-memory cache: it incurs no fictional
+storage GET. Every actual supporting-index GET and backend protocol GET is
+separately prepaid, including failures. The same 30-second deadline covers both
+tiers, with no automatic retries or workflow-pool spending. All tabs share the
+Reference Data projection cache keyed by deployment/run/projection/exact bindings.
+Manual, origin/CSRF-protected refresh preserves selection and last-success data
+with stale/exhausted/denied warnings. Source inspection never executes models,
+creates artifacts or recovers runs.
+
 ## Local checks and claim limits
 
 From the repository root in the installed pinned project environment, run the
@@ -209,6 +306,8 @@ full development/merge gate or the focused landing-page checks while iterating:
 python -m unittest discover -s tests/unit -v
 python -m unittest discover -s tests/unit -p 'test_operator_web*.py' -v
 python -m unittest discover -s tests/unit -p 'test_observation.py' -v
+python -m unittest discover -s tests/unit -p 'test_evidence_observation.py' -v
+python -m unittest discover -s tests/unit -p 'test_reference_observation.py' -v
 ```
 
 The full command is required before merging. See [testing.md](testing.md) for

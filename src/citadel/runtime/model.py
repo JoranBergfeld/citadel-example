@@ -23,7 +23,8 @@ INSTRUCTIONS = {
     ),
     "evidence-assessor": (
         "You are Evidence Assessor for Evidence Review. Explain the supplied deterministic "
-        "completeness result privately. Missing reference evidence is not a negative airport "
+        "completeness result in saved assessment prose for private Operator inspection. "
+        "Do not include private notes, prompts or hidden reasoning. Missing reference evidence is not a negative airport "
         "judgment. You cannot publish findings; an exact draft requires Release Reviewer."
     ),
     "release-reviewer": (

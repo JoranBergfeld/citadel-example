@@ -16,8 +16,8 @@ class EvidenceAssessorTests(AgentCase, unittest.IsolatedAsyncioTestCase):
         ref = review["draft"]
         draft = await self.draft_store.get_draft(ref["artifact_id"], ref["version"], ref["sha256"])
         self.assertEqual(draft["classification"], "complete")
-        self.assertEqual(draft["private_notes"], "Fictional unit-fixture prose; source accuracy unverified.")
-        self.assertNotIn(draft["private_notes"], str(status))
+        self.assertEqual(draft["assessment_prose"], "Fictional unit-fixture prose; source accuracy unverified.")
+        self.assertNotIn(draft["assessment_prose"], str(status))
         self.assertEqual(draft["airport_ident"], "EB01")
         self.assertNotIn("private_notes", str(review))
         with self.assertRaises(OperationError) as caught:

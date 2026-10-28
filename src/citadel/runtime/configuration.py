@@ -48,6 +48,7 @@ class Configuration:
     tokens_per_minute: int | None
     deployment_id: str | None
     observation_blob: str | None
+    reference_context_blob: str | None = None
 
     @classmethod
     def from_environment(cls, env):
@@ -66,7 +67,8 @@ class Configuration:
                                                    env["CITADEL_CONTEXT_KEYS"])
             container = secret = model = quota = None
             deployment = observation_blob = None
-            if target != "reference-data":
+            reference_context_blob = None
+            if target in (*INSTRUCTIONS, "reference-data"):
                 deployment = env["CITADEL_DEPLOYMENT_ID"]
                 if not re.fullmatch(r"[a-z0-9]{3,12}", deployment):
                     raise ValueError("Trusted deployment identity required")
@@ -74,6 +76,8 @@ class Configuration:
             if target == "reference-data":
                 if env["CITADEL_REFERENCE_CONTAINER"] != "reference":
                     raise ValueError("Reference Data may read only its allocated container")
+                reference_context_blob = endpoint(
+                    env["CITADEL_REFERENCE_CONTEXT_BLOB_URL"], ".blob.core.windows.net")
             else:
                 container = env["CITADEL_OPERATIONS_CONTAINER"]
                 secret = env["CITADEL_SUBSCRIPTION_SECRET_NAME"]
@@ -86,6 +90,6 @@ class Configuration:
             return cls(target, client_id, endpoint(env["CITADEL_GATEWAY_URL"]),
                        endpoint(env["CITADEL_BLOB_URL"], ".blob.core.windows.net"),
                        endpoint(env["CITADEL_VAULT_URL"], ".vault.azure.net"), trust,
-                       container, secret, model, quota, deployment, observation_blob)
+                       container, secret, model, quota, deployment, observation_blob, reference_context_blob)
         except (KeyError, TypeError, OverflowError) as exc:
             raise ValueError("Required allocated runtime configuration is missing or invalid") from exc

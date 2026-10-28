@@ -146,10 +146,14 @@ class EvidenceAssessment:
         allowed = {
             "artifact_id", "version", "schema_version", "run_id", "operation_id", "airport_ident",
             "evidence", "classification", "gap_reasons", "caveats", "provenance",
+            "assessment_prose",
             "private_notes", "prompts", "reviewer_deliberation", "credentials", "storage_path",
         }
         if draft.keys() - allowed:
             raise EvidenceError("data_integrity", "Unsupported structured draft fields or claims")
+        if "assessment_prose" in draft and (not isinstance(draft["assessment_prose"], str)
+                                           or len(draft["assessment_prose"]) > 32000):
+            raise EvidenceError("data_integrity", "Invalid saved assessment prose")
         try:
             for field in ("evidence", "classification", "gap_reasons", "caveats", "provenance"):
                 if field not in draft or canonical_bytes(draft[field]) != canonical_bytes(actual[field]):

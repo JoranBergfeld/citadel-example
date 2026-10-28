@@ -7,6 +7,7 @@ import unittest
 import httpx
 
 from citadel.operator.observation import ObservationClient
+from citadel.operator.reference_observation import ReferenceObservationClient
 from citadel.operator.recovery import RecoveryClient
 from citadel.operator.web import AuthConfig, create_app, hash_passphrase
 from citadel.operations.testing import MemoryLedger
@@ -14,6 +15,32 @@ from citadel.runtime.observation import DeploymentReads
 
 
 class RecoveryWebTests(unittest.IsolatedAsyncioTestCase):
+    async def test_control_invalidates_composed_evidence_and_reference_observations(self):
+        store = MemoryLedger().ticket_store
+        reads = DeploymentReads(store, "fixture1", clock=lambda: 1000)
+        await store.open_pool(reads.scope("observation"))
+        await store.open_pool(reads.scope("recovery-proof"))
+        calls = []
+
+        async def service(request):
+            calls.append(request)
+            if request.method == "POST":
+                return httpx.Response(200, json={"state": "blocked", "run_id": "run1",
+                    "request_id": "check1", "reason": "Live owner", "execution": "unknown"})
+            return httpx.Response(200, json={"state": "empty", "bindings": {}})
+
+        async with httpx.AsyncClient(transport=httpx.MockTransport(service)) as remote:
+            observer = ObservationClient("https://gateway.test", "fixture-key", reads, client=remote,
+                                         clock=lambda: 1000)
+            reference = ReferenceObservationClient("https://gateway.test", "fixture-key", reads,
+                                                   client=remote, clock=lambda: 1000)
+            await observer.evidence("run1", "drafts")
+            await reference.observe("run1")
+            await RecoveryClient(observer, observations=(reference,)).check("run1", "check1")
+            await observer.evidence("run1", "drafts")
+            await reference.observe("run1")
+            self.assertEqual(len(calls), 5)
+
     async def test_control_does_not_allow_inflight_pre_control_observation_to_repopulate_cache(self):
         store = MemoryLedger().ticket_store
         reads = DeploymentReads(store, "fixture1", clock=lambda: 1000)

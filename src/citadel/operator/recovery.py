@@ -10,8 +10,9 @@ from citadel.runtime.state import read_deadline
 
 
 class RecoveryClient:
-    def __init__(self, observation):
+    def __init__(self, observation, *, observations=()):
         self.observation = observation
+        self.observations = (observation, *observations)
 
     async def check(self, run_id, request_id):
         identity(run_id)
@@ -37,7 +38,8 @@ class RecoveryClient:
         except (OperationError, httpx.HTTPError, TimeoutError, ValueError, TypeError):
             reason = "Recovery proof unavailable or exhausted. No replay; check explicitly later."
         finally:
-            observer.invalidate(run_id)
+            for projection in self.observations:
+                projection.invalidate(run_id)
         return {"run_id": run_id, "request_id": request_id, "state": "unknown",
                 "execution": "unknown", "reason": reason, "retryable": False}
 
