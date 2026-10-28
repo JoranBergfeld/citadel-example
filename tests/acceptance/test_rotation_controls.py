@@ -428,7 +428,7 @@ class RotationWorkerTests(unittest.IsolatedAsyncioTestCase):
         from citadel.acceptance.worker import run_gateway_matrix
         from citadel.acceptance.telemetry import Telemetry
         from citadel.runtime.configuration import Configuration
-        from tests.runtime.test_startup import environment
+        from tests.unit.test_startup import environment
         from tests.runtime.test_storage import FixtureCredential
         from tests.runtime.test_ticket_storage import TicketWire
         env = environment() | {"CITADEL_ACCEPTANCE_ENABLED": "true",

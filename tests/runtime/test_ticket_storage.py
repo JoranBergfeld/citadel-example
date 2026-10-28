@@ -15,8 +15,8 @@ from citadel.operations.blob import AzureBlobLedger
 from citadel.runtime.state import ScopedLedger, read_scope
 from citadel.runtime.tickets import AzureTicketStore, TicketPool
 from test_storage import BlobResponse, FixtureCredential
-import test_read_tickets as owner_tests
-import test_recovery as recovery_tests
+from tests.unit import test_read_tickets as owner_tests
+from tests.unit import test_recovery as recovery_tests
 
 
 class TicketWire(AsyncHttpTransport):

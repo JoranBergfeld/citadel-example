@@ -16,7 +16,7 @@ from citadel.runtime.model import GovernedModel
 from citadel.runtime.network import GatewayPeers
 from citadel.runtime.reference import reference_application
 from test_reference import reference, signed, trust
-from test_read_tickets import CountingLedger
+from tests.unit.test_read_tickets import CountingLedger
 
 
 class FixtureGateway(httpx.AsyncBaseTransport):
