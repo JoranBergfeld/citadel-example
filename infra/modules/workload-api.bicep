@@ -38,8 +38,20 @@ var observationOperations = [
   { name: 'operator-run-page', method: 'GET', path: '/operator/runs/page/{cursor}', parameters: [{ name: 'cursor', required: true, type: 'string' }] }
   { name: 'operator-run', method: 'GET', path: '/operator/runs/{runId}', parameters: [{ name: 'runId', required: true, type: 'string' }] }
 ]
+var draftObservationOperations = [
+  { name: 'operator-drafts', method: 'GET', path: '/operator/runs/{runId}/drafts', parameters: [{ name: 'runId', required: true, type: 'string' }] }
+  { name: 'operator-draft-page', method: 'GET', path: '/operator/runs/{runId}/drafts/page/{cursor}', parameters: [{ name: 'runId', required: true, type: 'string' }, { name: 'cursor', required: true, type: 'string' }] }
+  { name: 'operator-draft', method: 'GET', path: '/operator/runs/{runId}/drafts/{draftId}/versions/{version}', parameters: [{ name: 'runId', required: true, type: 'string' }, { name: 'draftId', required: true, type: 'string' }, { name: 'version', required: true, type: 'string' }] }
+]
+var releaseObservationOperations = [
+  { name: 'operator-releases', method: 'GET', path: '/operator/runs/{runId}/releases', parameters: [{ name: 'runId', required: true, type: 'string' }] }
+  { name: 'operator-release-page', method: 'GET', path: '/operator/runs/{runId}/releases/page/{cursor}', parameters: [{ name: 'runId', required: true, type: 'string' }, { name: 'cursor', required: true, type: 'string' }] }
+  { name: 'operator-finding', method: 'GET', path: '/operator/runs/{runId}/findings/{findingId}/versions/{version}', parameters: [{ name: 'runId', required: true, type: 'string' }, { name: 'findingId', required: true, type: 'string' }, { name: 'version', required: true, type: 'string' }] }
+]
 var operations = target == 'reference-data' ? mcpOperations : concat(agentOperations,
-  target == 'release-reviewer' ? findingOperations : [], target == 'candidate-planner' ? observationOperations : [])
+  target == 'release-reviewer' ? concat(findingOperations, releaseObservationOperations) : [],
+  target == 'evidence-assessor' ? draftObservationOperations : [],
+  target == 'candidate-planner' ? observationOperations : [])
 resource routes 'Microsoft.ApiManagement/service/apis/operations@2024-05-01' = [for operation in operations: {
   parent: api
   name: operation.name

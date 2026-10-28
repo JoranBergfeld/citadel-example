@@ -52,7 +52,7 @@ arguments or logged configuration. HTTPS origins reject credentials, queries,
 fragments, nonstandard paths and ports. Azure endpoints additionally require
 their service DNS suffix.
 
-The deployed Planner also requires trusted `CITADEL_DEPLOYMENT_ID` and
+The deployed Planner, Evidence Assessor and Release Reviewer also require trusted `CITADEL_DEPLOYMENT_ID` and
 `CITADEL_OBSERVATION_BLOB_URL` (the inventoried platform accounting account).
 The infrastructure supplies these to all workloads for later team projections;
 they never select a workflow pool or authorize data access.
@@ -128,6 +128,18 @@ Provisioning owns the two infinitely leased accounting descriptors; runtime
 only renews their leases and creates conditional spent markers. No recursive
 meter reads, read retries, refill, deadline extension, recovery or execution is
 authorized by observation. The complete observation has a 30-second ceiling.
+
+Evidence Review's owner implementation lives in
+`runtime.evidence_observation.EvidenceObservations`; `agent_application`
+installs its narrow Operator-only HTTP routes. It reads scoped owner ledgers,
+verifies exact committed draft/release references and filters before HTTP
+serialization. It never uses a workflow pool or private storage fallback.
+Reviewer invocation admission retains an exact draft binding alongside the
+original immutable input hash; observation never backfills old bindings.
+New assessments persist `assessment_prose` separately from filtered private
+notes. The release projection still excludes that prose from workload findings.
+See [Operator Evidence Review](operator-web.md#evidence-review-private-drafts-and-exact-releases)
+for routes, citation links and historical limitations.
 These paths are locally tested; deployed APIM/Azure enforcement remains unverified.
 
 Only explicit `ManagedIdentityCredential(client_id=...)` is used. Secret

@@ -1,4 +1,4 @@
-"""Server-only, read-only Planner client and single-process shared view cache."""
+"""Server-only, read-only owner clients and single-process shared view cache."""
 
 import asyncio
 from collections import OrderedDict
@@ -39,6 +39,17 @@ class ObservationClient:
 
     async def observe(self, run_id=None, *, cursor=None, refresh=False):
         key = self.key(run_id, cursor)
+        path = ("/operator/runs/" + run_id if run_id is not None else
+                "/operator/runs/page/" + cursor if cursor else "/operator/runs")
+        return await self._observe_path(key, "/candidate-planner" + path, refresh)
+
+    async def evidence(self, run_id, projection, *, cursor=None, artifact_id=None, version=None, refresh=False):
+        from .evidence_view import observation_path
+        path = observation_path(run_id, projection, cursor, artifact_id, version)
+        key = (self.admission.deployment, run_id, "evidence-" + projection, cursor, artifact_id, version)
+        return await self._observe_path(key, path, refresh)
+
+    async def _observe_path(self, key, path, refresh):
         if key in self.inflight:
             return deepcopy(await asyncio.shield(self.inflight[key]))
         exact_key = self.aliases.get(key)
@@ -48,18 +59,16 @@ class ObservationClient:
         if len(self.inflight) >= 32:
             return Observed(previous.data, previous.last_success, "unavailable", previous.data is not None)
         # No await between checking and publishing: all tabs share this task.
-        task = asyncio.create_task(self._fetch(key, run_id, cursor, previous))
+        task = asyncio.create_task(self._fetch(key, path, previous))
         self.inflight[key] = task
         task.add_done_callback(lambda completed: self.inflight.pop(key, None))
         return deepcopy(await asyncio.shield(task))
 
-    async def _fetch(self, key, run_id, cursor, previous):
+    async def _fetch(self, key, path, previous):
         try:
             async with self.admission.request():
-                path = ("/operator/runs/" + run_id if run_id is not None else
-                        "/operator/runs/page/" + cursor if cursor else "/operator/runs")
                 await self.admission.charge()
-                response = await self.client.get(self.gateway + "/candidate-planner" + path,
+                response = await self.client.get(self.gateway + path,
                     headers={"Ocp-Apim-Subscription-Key": self.credential,
                              "X-Citadel-Observation-Deadline": str(read_deadline.get())},
                     timeout=max(0.001, read_deadline.get() - self.clock()))

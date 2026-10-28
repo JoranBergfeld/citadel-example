@@ -250,6 +250,12 @@ def create_app(config, *, clock=time.monotonic, observation=None, lifespan=None)
                         values.get("csrf", "").encode(), csrf.encode())):
                     return Response("Request denied", status_code=403)
             observer = observation or getattr(request.app.state, "observation", None)
+            if selected == "evidence":
+                from .evidence_view import render
+                try:
+                    return page("Evidence Review", header + await render(request, observer, run, csrf))
+                except OperationError:
+                    return Response("Invalid Evidence Review selection", status_code=400)
             observed = (await observer.observe(run, cursor=cursor, refresh=request.method == "POST")
                         if observer else None)
             content = history_content(observed, csrf, run, cursor)
@@ -297,6 +303,17 @@ this page never plays back fixtures.</p></main>""")
 
     app = Starlette(lifespan=lifespan, routes=[Route("/", shell), Route("/teams/{team}", shell),
                            Route("/teams/{team}/runs/{run_id}", shell),
+                           Route("/teams/{team}/runs/{run_id}/refresh", shell, methods=["POST"]),
+                           Route("/teams/{team}/runs/{run_id}/{projection}/page/{detail_cursor}", shell),
+                           Route("/teams/{team}/runs/{run_id}/{projection}/page/{detail_cursor}/refresh",
+                                 shell, methods=["POST"]),
+                           Route("/teams/{team}/runs/{run_id}/findings/{artifact_id}/versions/{version}", shell),
+                           Route("/teams/{team}/runs/{run_id}/findings/{artifact_id}/versions/{version}/refresh",
+                                 shell, methods=["POST"]),
+                           Route("/teams/{team}/runs/{run_id}/{collection}/" +
+                                 "{artifact_id}/versions/{version}", shell),
+                           Route("/teams/{team}/runs/{run_id}/{collection}/" +
+                                 "{artifact_id}/versions/{version}/refresh", shell, methods=["POST"]),
                            Route("/history", shell), Route("/history/refresh", shell, methods=["POST"]),
                            Route("/history/page/{cursor}", shell),
                            Route("/history/page/{cursor}/refresh", shell, methods=["POST"]),

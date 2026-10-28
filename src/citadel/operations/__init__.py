@@ -63,7 +63,8 @@ class Operations:
         )} | ({"admission_generation": record["admission_generation"]}
                if "admission_generation" in record else {}))
 
-    async def accept(self, caller, action, operation_id, inputs, *, run_id, deadline):
+    async def accept(self, caller, action, operation_id, inputs, *, run_id, deadline,
+                     retained_bindings=None):
         key = operation_key(caller, action, operation_id)
         identity(run_id)
         binding = sha256({"inputs": inputs, "run_id": run_id, "deadline": deadline})
@@ -83,6 +84,8 @@ class Operations:
             "worker": None, "lease_until": None,
             "external": {},
         }
+        if retained_bindings is not None:
+            record["retained_bindings"] = deepcopy(retained_bindings)
         document["operations"][key] = record
         try:
             await self.ledger.commit(document, etag, deadline=deadline)
