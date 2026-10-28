@@ -109,6 +109,15 @@ Only the separate `operator-web` caller can GET `/operator/runs`,
 The certificate/signed context remains required at the origin. Existing
 workload status/GetTask ownership and 512 workflow reads are unchanged.
 
+Execution-path index writes use a separate, finite **64-read per-run** pool,
+`retained-index/{run_id}`, in Planner's existing `planner-operations` container.
+Its descriptor and conditional spent markers are retained alongside workflow
+accounting and included in that container's manual teardown. Registration,
+submission outcomes, assessed handoffs and execution updates prepay their actual
+index GETs there; they neither spend browsing/proof reads nor reduce the 512-read
+workflow pool. Reconstructing the pool cannot refill it. Operator observation
+and recovery still fund index reads from their respective deployment pools.
+
 Reusable implementation seams:
 
 - `runtime.observation.DeploymentReads.request(purpose, deadline=...)` opens a

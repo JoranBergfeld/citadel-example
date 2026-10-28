@@ -49,6 +49,10 @@ def restart(lifecycle, target=None):
         for revision in active:
             lifecycle.native.az("containerapp", "revision", "restart", "--revision", revision["name"],
                 "--resource-group", group, "--subscription", lifecycle.config["subscriptionId"])
+    if target in (None, "operator-web"):
+        from .web_admin import stop, start
+        stop(lifecycle)
+        start(lifecycle)
 
 
 def reconcile(lifecycle, credentials):
@@ -68,10 +72,15 @@ def rotate_command(lifecycle, args):
         and bool(control) and all(control.get(stage, {}).get("state") in (None, "observed", "verified")
         for stage in ("new", "old"))
         and pending.get("selector_intent", {}).get("state") in (None, "restored"))
-    from .quiescence import runs_quiescent
-    if not runs_quiescent(lifecycle, exclude=pending.get("run_id") if collectible else None):
-        raise Blocked("credential_change_requires_quiescent_runs")
-    lifecycle.inventory()
+    from .quiescence import maintenance
+    owner = {"command": args.command, "caller": getattr(args, "caller", None),
+             "kind": getattr(args, "kind", None), "target": getattr(args, "target", None),
+             "stage": getattr(args, "stage", None)}
+    with maintenance(lifecycle, exclude=pending.get("run_id") if collectible else None, owner=owner) as held:
+        return _rotate_quiescent(lifecycle, args, path, held)
+
+
+def _rotate_quiescent(lifecycle, args, path, held):
     credentials = lifecycle.credentials()
     if args.command == "revoke":
         if args.caller not in credentials["callerStates"]:
@@ -80,6 +89,8 @@ def rotate_command(lifecycle, args):
                            if r.endswith("/" + args.caller)), None)
         if not identifier:
             raise Blocked("owned_subscription_inventory_missing")
+        held["changed"] = True
+        lifecycle.state.save()
         credentials["callerStates"][args.caller] = "suspended"
         write_private(lifecycle.state.directory / "credentials.json", credentials)
         lifecycle.native.rest("patch", identifier, "2024-05-01", {"properties": {"state": "suspended"}})
@@ -115,6 +126,8 @@ def rotate_command(lifecycle, args):
             write_private(path, pending)
         if pending["phase"] != "prepared":
             return {"status": "rotation_staged", "liveProof": "required_before_retirement"}
+        held["changed"] = True
+        lifecycle.state.save()
         credentials = copy.deepcopy(pending["old"])
         if args.kind == "certificate":
             # Install dual trust with the old gateway certificate still selected.
@@ -146,6 +159,8 @@ def rotate_command(lifecycle, args):
     pending = read_private(path)
     if (pending["kind"], pending["target"]) != (args.kind, target) or pending["phase"] not in ("staged", "retired"):
         raise Blocked("matching_staged_rotation_required")
+    held["changed"] = True
+    lifecycle.state.save()
     acceptance_hook(lifecycle, "rotation-new-material-allowed", pending["run_id"])
     if pending["phase"] == "staged":
         if args.kind == "certificate":

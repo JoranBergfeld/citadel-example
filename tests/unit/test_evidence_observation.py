@@ -18,6 +18,30 @@ from tests.unit.gateway_fixtures import signed, trust
 
 
 class EvidenceObservationTests(unittest.IsolatedAsyncioTestCase):
+    async def test_saved_private_prose_cannot_exceed_the_bounded_response_envelope(self):
+        for version in range(1, 10):
+            await self.draft(version, assessment_prose="Labelled fixture prose. " * 1300)
+        runtime = self.runtime("evidence-assessor")
+        response = await self.get(runtime, "/operator/runs/run1/drafts")
+        self.assertEqual((response.status_code, response.json()["state"]), (503, "unavailable"))
+        self.assertEqual(len(self.reads.store.markers), 2)
+
+    async def test_owner_rejects_projection_completed_after_its_total_deadline(self):
+        now = [1000]
+        self.clock = self.reads.clock = lambda: now[0]
+        await self.draft(assessment_prose="Saved fixture prose")
+        runtime = self.runtime("evidence-assessor")
+        read = self.invocations.read
+
+        async def late():
+            result = await read()
+            now[0] += 31
+            return result
+
+        self.invocations.read = late
+        response = await self.get(runtime, "/operator/runs/run1/drafts")
+        self.assertEqual((response.status_code, response.json()["state"]), (503, "unavailable"))
+
     async def asyncSetUp(self):
         self.clock = lambda: 1000
         self.drafts, self.findings, self.invocations = [MemoryLedger(clock=self.clock) for _ in range(3)]

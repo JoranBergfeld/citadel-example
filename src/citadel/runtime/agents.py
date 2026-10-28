@@ -218,7 +218,8 @@ class Runtime:
         finally:
             if self.run_index is not None:
                 try:
-                    await self.run_index.update(payload["run_id"], indexed_state)
+                    await self.run_index.update(payload["run_id"], indexed_state,
+                                                generation=ownership.generation)
                 except (OperationError, TimeoutError):
                     logging.getLogger(__name__).warning("run_index_update_unavailable")
             self.renew_at.pop(ownership.key, None)
@@ -256,12 +257,13 @@ class Runtime:
         selected, assessed, references, read_scopes = [], [], [], []
         context_available = self.run_index is not None
 
-        async def save_assessed(ident, complete, finding=None):
+        async def save_assessed(ident, complete, finding=None, *, pending=False):
             nonlocal context_available
             if context_available:
                 try:
                     from .planning_observation import candidate_decision
-                    decision = candidate_decision(assessed[-1], finding,
+                    decision = candidate_decision(
+                        {"airport_ident": ident, "classification": "unknown"} if pending else assessed[-1], finding,
                         replacement=(len(assessed) > 3 and
                                      any(item["classification"] != "complete" for item in assessed[:-1])))
                     await self.run_index.assessed(payload["run_id"], ident, pool["provenance"],
@@ -284,6 +286,7 @@ class Runtime:
             ref = result["finding"]
             if result["read_scope"]["run_id"] != payload["run_id"]:
                 raise OperationError("conflict", "Finding read pool differs from admitted run")
+            await save_assessed(ident, False, ref, pending=True)
             finding = await self._finding(payload, ref, deadline, result["read_scope"])
             if finding["airport_ident"] != ident or finding["provenance"] != pool["provenance"]:
                 raise OperationError("conflict", "Finding does not belong to this candidate/source/fixture")

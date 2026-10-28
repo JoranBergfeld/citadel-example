@@ -18,18 +18,23 @@ LEDGERS = ("planner-operations", "assessor-operations", "reviewer-operations",
            "author-operations", "drafts", "findings")
 TARGETS = {"candidate-planner": "evidence-assessor", "evidence-assessor": "release-reviewer",
            "release-reviewer": "reference-data", "operator": "candidate-planner",
-           "briefing-author": "release-reviewer"}
+           "briefing-author": "release-reviewer", "operator-web": "candidate-planner"}
 
 
 def validate_rotation(value, workload):
     keys = {"kind", "target", "credential_sha256", "secret_version"}
+    operator_read = workload == "operator-web"
+    if operator_read:
+        keys.add("projection")
     finding_read = workload == "briefing-author" and isinstance(value, dict) and value.get("kind") == "subscription"
     if finding_read:
         keys |= {"finding", "read_scope"}
     if (not isinstance(value, dict) or set(value) != keys or value["kind"] not in KINDS
             or value["target"] not in INVOCATION_CALLERS
-            or (value["target"] != "release-reviewer" if finding_read
-                else workload not in INVOCATION_CALLERS[value["target"]])
+            or operator_read and (value["kind"] != "subscription" or value["target"] != "candidate-planner"
+                                  or value["projection"] != "run-list")
+            or not operator_read and (value["target"] != "release-reviewer" if finding_read
+                                      else workload not in INVOCATION_CALLERS[value["target"]])
             or not hash_value(value["credential_sha256"])
             or value["secret_version"] is not None and (
                 value["kind"] != "subscription" or not isinstance(value["secret_version"], str)
@@ -48,12 +53,16 @@ def validate_rotation(value, workload):
 
 
 def rotation_path(control):
+    if control.get("projection") == "run-list":
+        return "/operator/runs"
     if "finding" in control:
         return f"/findings/{control['finding']['artifact_id']}/versions/{control['finding']['version']}"
     return "/mcp" if control["target"] == "reference-data" else "/.well-known/agent-card.json"
 
 
 def rotation_method(actor, target):
+    if actor == "operator-web":
+        return "operator-observe"
     return "findings-read" if actor == "briefing-author" else "initialize" if target == "reference-data" else "discovery"
 
 
@@ -88,6 +97,9 @@ async def rotation_read(*, workload, gateway, key, request, client, admit, princ
                 and body.get("result", {}).get("protocolVersion") == "2025-11-25" and "error" not in body)
         elif "finding" in control:
             allowed = sha256(body) == control["finding"]["sha256"]
+        elif workload == "operator-web":
+            allowed = (body.get("state") in ("ok", "empty") and isinstance(body.get("runs"), list)
+                       and len(body["runs"]) <= 20 and "next_cursor" in body)
         else:
             interfaces = body.get("supportedInterfaces", [])
             allowed = (len(interfaces) == 1 and interfaces[0].get("url") == gateway + "/" + target + "/a2a"
@@ -121,7 +133,9 @@ def evaluate_rotation(check, report):
         rows = value["observations"]
         if (kind not in KINDS
                 or not (actor in INVOCATION_CALLERS[target]
-                        or kind == "subscription" and actor == "briefing-author" and target == "release-reviewer")
+                        or kind == "subscription" and (
+                            actor == "briefing-author" and target == "release-reviewer"
+                            or actor == "operator-web" and target == "candidate-planner"))
                 or len(rows) != 3
                 or value["run_id"] not in operations or value["state"] != "restored"
                 or not hash_value(value["before_sha256"])
@@ -135,7 +149,7 @@ def evaluate_rotation(check, report):
                     or index and row["started"] < rows[index - 1]["finished"]
                     or row["target"] != rows[0]["target"]):
                 return blocked
-            if actor != "operator":
+            if actor not in ("operator", "operator-web"):
                 if row.get("runtime_identity") != identities[actor]:
                     return blocked
                 if not any(e.get("source") == "application" and e.get("method") == "rotation.probe"
@@ -156,7 +170,7 @@ def evaluate_rotation(check, report):
                 return blocked
             service = gateway[0]
             if index == 1 and any(e.get("source") == "application"
-                    and e.get("method") in ("initialize", "discovery", "findings-read")
+                    and e.get("method") in ("initialize", "discovery", "findings-read", "operator-observe")
                     and e.get("request_id") == row["request_id"] for e in evidence):
                 return blocked
             if index != 1:

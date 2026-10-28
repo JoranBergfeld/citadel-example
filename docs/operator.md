@@ -427,9 +427,21 @@ Reference Data MCP through APIM; no denial or service-proof requirement is relax
 
 Only while normal runs are quiescent:
 
+Rotation/revocation acquire the same authoritative deployment-wide admission
+lease as UI and CLI execution, holding it throughout credential changes and
+controls. A CLI-local empty run list is not proof of quiescence. Concurrent UI,
+CLI and retry admissions cannot execute during maintenance. The nonexpiring
+maintenance lease and its private lifecycle intent remain blocked after ambiguous
+acquisition/release or process loss; retain diagnostics and reconcile exact
+ownership, never force-unlock or delete the admission blob.
+A matching explicit command may renew only its persisted exact maintenance lease;
+failed renewal never acquires a replacement lease or clears another owner.
+
 ```sh
 python -m citadel.operator rotate subscription --target operator --stage prepare --state-dir "$CITADEL_STATE_DIR"
 python -m citadel.operator rotate subscription --target operator --stage finalize --state-dir "$CITADEL_STATE_DIR"
+python -m citadel.operator rotate subscription --target operator-web --stage prepare --state-dir "$CITADEL_STATE_DIR"
+python -m citadel.operator rotate subscription --target operator-web --stage finalize --state-dir "$CITADEL_STATE_DIR"
 python -m citadel.operator rotate context --target candidate-planner --stage prepare --state-dir "$CITADEL_STATE_DIR"
 python -m citadel.operator rotate context --target candidate-planner --stage finalize --state-dir "$CITADEL_STATE_DIR"
 python -m citadel.operator rotate certificate --stage prepare --state-dir "$CITADEL_STATE_DIR"
@@ -439,6 +451,14 @@ python -m citadel.operator revoke --caller operator --state-dir "$CITADEL_STATE_
 
 Subscription preparation preserves the old primary as secondary while installing
 the new primary in the allocated vault, then restarts the actual workload revision.
+`operator-web` uses its separate Operator application/secret inventory, never the
+five-team workload inventory. Its exact allocated version is checked before
+rotation, and restart means confirmed stop followed by start, not a rolling
+revision restart. Administrative subscription controls use only its authorized
+Planner run-list projection, checking the deployed allocated secret and independently
+queried APIM/backend evidence. Like CLI Operator controls, these prove subscription
+authorization/retirement, not execution under the hosted managed identity; they
+grant no workload discovery/invocation or team-data authority.
 Context rotation first installs dual verification keys, restarts that backend,
 then changes APIM's active signing key. Certificate rotation deploys the dual
 allowlist before switching the versionless vault secret and issuing the actual

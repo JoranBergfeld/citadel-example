@@ -1,23 +1,21 @@
 """Planning-owned saved decisions and briefs; no private Evidence Review reads."""
 
-import math
-
 from fastapi import Request
-from starlette.responses import JSONResponse
 
 from citadel.evidence import CAVEATS
 from citadel.evidence.manifests import sha256
 from citadel.operations import OperationError, identity, operation_key
 from .evidence_observation import assessment, exact, strings
 from .observation import provenance_projection
-from .state import read_deadline
-
-
-MAX_RESPONSE_BYTES = 262144
+from .projection import respond as projection_response
 
 
 def candidate_decision(item, finding=None, *, replacement=False):
     ident = identity(item["airport_ident"])
+    if item["classification"] == "unknown":
+        return {"airport_ident": ident, "classification": "unknown", "gap_reasons": [],
+                "release": "approved", "selection": "unknown", "reason": "finding_details_unavailable",
+                "caveats": list(CAVEATS), "finding": exact(finding)}
     if item["classification"] == "release_rejected":
         return {"airport_ident": ident, "classification": "unknown", "gap_reasons": [],
                 "release": "rejected", "selection": "skipped", "reason": "release_rejected",
@@ -115,9 +113,10 @@ class PlanningObservations:
             safe = candidate_decision(
                 {**decision, "classification": "release_rejected" if rejected else decision["classification"]},
                 decision.get("finding"), replacement=decision["reason"] == "replacement_after_skipped_candidate")
-            if decision["selection"] not in ("selected", "skipped") or decision["reason"] not in (
+            if decision["selection"] not in ("selected", "skipped", "unknown") or decision["reason"] not in (
                     "complete_approved_finding", "replacement_after_skipped_candidate",
-                    "insufficient_evidence", "release_rejected", "not_selected_in_saved_plan"):
+                    "insufficient_evidence", "release_rejected", "not_selected_in_saved_plan",
+                    "finding_details_unavailable"):
                 raise OperationError("unavailable", "Invalid saved selection")
             safe.update(selection=decision["selection"], reason=decision["reason"])
             if safe.get("provenance") and safe["provenance"] != provenance_projection(provenance):
@@ -186,28 +185,7 @@ def install(app, runtime):
     owner = PlanningObservations(runtime)
 
     async def respond(request, function, run_id):
-        try:
-            if runtime.observation_reads is None:
-                raise OperationError("unavailable", "Deployment observation admission unavailable")
-            end = float(request.headers.get("x-citadel-observation-deadline", runtime.clock() + 30))
-            if not math.isfinite(end):
-                raise ValueError("Invalid deadline")
-            async with runtime.observation_reads.request(deadline=end):
-                result = await function(identity(run_id))
-                result["activity"] = runtime.activity.observe(run_id)
-                response = JSONResponse(result)
-                if runtime.clock() >= read_deadline.get():
-                    raise OperationError("deadline", "Observation deadline expired")
-                if len(response.body) > MAX_RESPONSE_BYTES:
-                    raise OperationError("result_limit", "Saved projection exceeds response bound")
-                return response
-        except OperationError as exc:
-            state = {"forbidden": "denied", "not_found": "missing", "missing": "missing",
-                     "exhausted": "exhausted"}.get(exc.code, "unavailable")
-            return JSONResponse({"state": state}, status_code={
-                "denied": 403, "missing": 404, "exhausted": 429}.get(state, 503))
-        except (TimeoutError, KeyError, TypeError, ValueError, OverflowError):
-            return JSONResponse({"state": "unavailable"}, status_code=503)
+        return await projection_response(runtime, request, function, run_id)
 
     if runtime.workload == "candidate-planner":
         @app.get("/operator/runs/{run_id}/decisions")

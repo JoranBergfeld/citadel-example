@@ -59,10 +59,27 @@ class RunIndex:
     """
 
     capacity = 256
+    execution_read_capacity = 64
 
-    def __init__(self, ledger, admission, *, clock=time.time):
+    def __init__(self, ledger, admission, *, clock=time.time, execution_store=None):
         self.ledger = ScopedLedger(ledger)
         self.admission, self.clock = admission, clock
+        self.execution_store = execution_store or getattr(ledger, "ticket_store", None)
+
+    @asynccontextmanager
+    async def execution(self, run_id):
+        if self.execution_store is None:
+            raise OperationError("unavailable", "Durable execution-index read storage is required")
+        deadline = read_deadline.get()
+        end = min(self.clock() + 30, deadline if deadline is not None else self.clock() + 30)
+        if end <= self.clock():
+            raise OperationError("deadline", "Execution-index read deadline expired")
+        pool = TicketPool(self.execution_store, "retained-index/" + identity(run_id),
+                          self.execution_read_capacity, clock=self.clock)
+        async with asyncio.timeout(max(0, end - self.clock())):
+            await self.execution_store.open_pool(pool.scope)
+            with read_scope(pool, deadline=end):
+                yield
 
     async def _read(self):
         try:
@@ -77,26 +94,50 @@ class RunIndex:
             raise OperationError("unavailable", "Retained index is invalid")
         return document, etag
 
-    async def register(self, caller, payload):
+    @staticmethod
+    def binding(caller, payload):
         run_id = identity(payload["run_id"])
-        binding = {"caller": identity(caller), "run_id": run_id,
-                   "operation_id": identity(payload["operation_id"]),
-                   "fixture": payload["fixture"], "input_hash": sha256(payload),
-                   "inputs": deepcopy(payload)}
-        async with self.admission.request():
+        return {"caller": identity(caller), "run_id": run_id,
+                "operation_id": identity(payload["operation_id"]),
+                "fixture": payload["fixture"], "input_hash": sha256(payload),
+                "inputs": deepcopy(payload)}
+
+    async def reserve(self, caller, payload, *, request_id=None):
+        binding = self.binding(caller, payload)
+        run_id = binding["run_id"]
+        async with self.execution(run_id):
             document, etag = await self._read()
             entries = document["retained_runs"]
             if run_id in entries:
-                if entries[run_id]["binding"] != binding:
+                entry = entries[run_id]
+                if (entry["binding"] != binding or request_id is not None
+                        and entry.get("submission", {}).get("request_id") != request_id):
                     raise OperationError("conflict", "Retained run inputs are immutable")
-                return
+                return deepcopy(entry), False
             self.require_resolved_dispatch(entries)
             if len(entries) >= self.capacity:
                 raise OperationError("exhausted", "Retained run index is full")
             entries[run_id] = {"binding": binding, "execution": "unknown",
                                "retained_at": self.clock(), "provenance": None, "assessed": [],
                                "assessed_complete": False, "decisions": []}
+            if request_id is not None:
+                entries[run_id]["submission"] = {
+                    "request_id": identity(request_id), "dispatch": "intent", "reason": "unknown"}
             await self.ledger.commit(document, etag, deadline=read_deadline.get())
+            return deepcopy(entries[run_id]), True
+
+    async def register(self, caller, payload):
+        await self.reserve(caller, payload)
+
+    async def record_submission(self, run_id, execution, reason):
+        async with self.execution(run_id):
+            document, etag = await self._read()
+            entry = document["retained_runs"][identity(run_id)]
+            entry["submission"].update(dispatch="recorded", reason=reason)
+            if entry["execution"] == "unknown":
+                entry["execution"] = execution
+            await self.ledger.commit(document, etag, deadline=read_deadline.get())
+            return deepcopy(entry)
 
     @staticmethod
     def require_resolved_dispatch(entries):
@@ -106,12 +147,16 @@ class RunIndex:
                     and submission.get("reason") in ("unknown", "ambiguous_dispatch")):
                 raise OperationError("conflict", "Unresolved hosted dispatch blocks new UI and CLI runs")
 
-    async def update(self, run_id, state, *, provenance=None):
-        async with self.admission.request():
+    async def update(self, run_id, state, *, provenance=None, generation=None):
+        async with self.execution(run_id):
             document, etag = await self._read()
             entry = document["retained_runs"].get(identity(run_id))
             if entry is None:
                 raise OperationError("missing", "No retained binding")
+            if generation is not None:
+                if generation < entry.get("generation", 0):
+                    return
+                entry["generation"] = generation
             entry["execution"] = state
             if provenance is not None:
                 if entry["provenance"] not in (None, provenance):
@@ -119,7 +164,7 @@ class RunIndex:
                 entry["provenance"] = deepcopy(provenance)
             await self.ledger.commit(document, etag, deadline=read_deadline.get())
 
-    async def recovered_in_scope(self, binding, outcome):
+    async def recovered_in_scope(self, binding, outcome, current):
         """Only a persisted safe owner outcome resolves an ambiguous dispatch."""
         expected = {"released_no_commit": "failed_no_commit",
                     "released_quiescent_partial": "indeterminate", "already_complete": "succeeded",
@@ -127,10 +172,17 @@ class RunIndex:
         state = expected.get(outcome["state"])
         if state is None or outcome["execution"] != state:
             return
+        generation = outcome.get("generation")
+        if (type(generation) is not int or current["generation"] != generation
+                or current["state"] != state):
+            return
         document, etag = await self._read()
         entry = document["retained_runs"].get(binding["run_id"])
         if entry is None or entry["binding"] != binding:
             raise OperationError("conflict", "Recovery differs from the original retained binding")
+        if generation < entry.get("generation", 0):
+            return
+        entry["generation"] = generation
         entry["execution"] = state
         await self.ledger.commit(document, etag, deadline=read_deadline.get())
 
@@ -141,7 +193,7 @@ class RunIndex:
     async def assessed(self, run_id, airport_ident, provenance, *, complete=False, decision=None):
         """Only Planner's completed assessment handoff can extend this context."""
         airport_ident = identity(airport_ident)
-        async with self.admission.request(deadline=read_deadline.get()):
+        async with self.execution(run_id):
             document, etag = await self._read()
             entry = document["retained_runs"].get(identity(run_id))
             if entry is None:
@@ -150,7 +202,18 @@ class RunIndex:
                     or entry["provenance"] not in (None, provenance)):
                 raise OperationError("conflict", "Assessment source differs from retained inputs")
             candidates = entry.setdefault("assessed", [])
+            if decision is not None and decision["airport_ident"] != airport_ident:
+                raise OperationError("conflict", "Decision differs from assessed candidate")
             if airport_ident in candidates:
+                decisions = entry.setdefault("decisions", [])
+                previous = next((item for item in decisions if item["airport_ident"] == airport_ident), None)
+                if (previous is not None and decision is not None
+                        and previous.get("reason") == "finding_details_unavailable"):
+                    if previous["finding"] != decision["finding"]:
+                        raise OperationError("conflict", "Assessment finding binding cannot change")
+                    decisions[decisions.index(previous)] = deepcopy(decision)
+                    entry["assessed_complete"] = complete
+                    await self.ledger.commit(document, etag, deadline=read_deadline.get())
                 return
             if entry.get("assessed_complete"):
                 raise OperationError("conflict", "Completed assessed context cannot be extended")
@@ -159,8 +222,6 @@ class RunIndex:
             entry["provenance"] = deepcopy(provenance)
             candidates.append(airport_ident)
             if decision is not None:
-                if decision["airport_ident"] != airport_ident:
-                    raise OperationError("conflict", "Decision differs from assessed candidate")
                 entry.setdefault("decisions", []).append(deepcopy(decision))
             entry["assessed_complete"] = complete
             await self.ledger.commit(document, etag, deadline=read_deadline.get())

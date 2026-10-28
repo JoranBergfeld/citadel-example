@@ -161,7 +161,9 @@ class ReferenceObservationTests(unittest.IsolatedAsyncioTestCase):
                                             data={"csrf": "forged"})
                 self.assertEqual(denied.status_code, 403)
                 self.assertEqual(len(calls), 1)
-                self.reads.capacities = {"observation": len(self.ledger.ticket_store.markers), "recovery-proof": 1}
+                spent = sum(scope == self.reads.scope("observation")
+                            for scope, _ in self.ledger.ticket_store.markers)
+                self.reads.capacities = {"observation": spent, "recovery-proof": 1}
                 stale = await browser.post(path + "/refresh", headers={"origin": config.origin},
                                            data={"csrf": csrf})
                 self.assertIn("stale", stale.text)
@@ -195,7 +197,9 @@ class ReferenceObservationTests(unittest.IsolatedAsyncioTestCase):
                         api_version="2026-10-06", retry_total=0, retry_connect=0, retry_read=0,
                         retry_status=0) as blob:
                     before = len(self.ledger.ticket_store.markers)
-                    self.reads.capacities = {"observation": before + 1, "recovery-proof": 1}
+                    spent = sum(scope == self.reads.scope("observation")
+                                for scope, _ in self.ledger.ticket_store.markers)
+                    self.reads.capacities = {"observation": spent + 1, "recovery-proof": 1}
                     owner = ReferenceObservation(AzureBlobLedger(blob, clock=lambda: 1000),
                         self.reads, {"base-source": reference(), "missing-width-replacement": data})
                     if truncated:

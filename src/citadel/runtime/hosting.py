@@ -99,7 +99,8 @@ async def application(config):
                 index_ledger = await stack.enter_async_context(managed_ledger(
                     account_url=config.blob, container=config.operations_container,
                     client_id=config.client_id, blob_name="retained-runs-v1.json"))
-                run_index = RunIndex(index_ledger, admission)
+                run_index = RunIndex(index_ledger, admission,
+                                     execution_store=AzureTicketStore(ticket_container))
             runtime = Runtime(config.target, ledger, model=model, peers=peers, gateway_url=config.gateway,
                               artifacts=artifacts, drafts=drafts, tokens_per_minute=config.tokens_per_minute,
                               ticket_store=AzureTicketStore(ticket_container), acceptance_hold=acceptance_hold,

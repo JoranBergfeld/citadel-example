@@ -113,18 +113,20 @@ class TicketSDKTests(unittest.IsolatedAsyncioTestCase):
         async with self.container(wire) as container:
             store = AzureTicketStore(container)
             admission = DeploymentReads(store, "fixture1", clock=lambda: 1000)
-            admission.capacities = {"observation": 3, "recovery-proof": 1}
+            admission.capacities = {"observation": 2, "recovery-proof": 1}
             await store.open_pool(admission.scope("observation"))
             await store.open_pool(admission.scope("recovery-proof"))
             index = RunIndex(AzureBlobLedger(container.get_blob_client("ledger-v1.json"),
-                                             clock=lambda: 1000), admission, clock=lambda: 1000)
+                                             clock=lambda: 1000), admission, clock=lambda: 1000,
+                             execution_store=store)
             await index.register("operator", {
                 "run_id": "run1", "operation_id": "run1", "fixture": "base-source"})
             self.assertEqual((await index.page())["runs"][0]["run_id"], "run1")
             restarted = DeploymentReads(AzureTicketStore(container), "fixture1", clock=lambda: 1000)
             restarted.capacities = admission.capacities
             other = RunIndex(AzureBlobLedger(container.get_blob_client("ledger-v1.json"),
-                                             clock=lambda: 1000), restarted, clock=lambda: 1000)
+                                             clock=lambda: 1000), restarted, clock=lambda: 1000,
+                             execution_store=restarted.store)
             self.assertEqual((await other.resolve("run1"))["fixture"], "base-source")
             before = len(wire.requests)
             with self.assertRaises(OperationError) as caught:
@@ -144,7 +146,8 @@ class TicketSDKTests(unittest.IsolatedAsyncioTestCase):
             admission = DeploymentReads(store, "fixture1", clock=lambda: 1000)
             await store.open_pool(admission.scope("observation"))
             index = RunIndex(AzureBlobLedger(container.get_blob_client("index.json"),
-                                             clock=lambda: 1000), admission, clock=lambda: 1000)
+                                             clock=lambda: 1000), admission, clock=lambda: 1000,
+                             execution_store=store)
             await index.register("operator", {
                 "run_id": "run1", "operation_id": "run1", "fixture": "base-source"})
             runtime = Runtime("candidate-planner",

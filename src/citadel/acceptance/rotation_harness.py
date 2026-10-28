@@ -2,6 +2,7 @@
 
 import asyncio
 import hashlib
+import re
 import time
 from types import SimpleNamespace
 from uuid import UUID, uuid4
@@ -41,6 +42,34 @@ def capture_retired_secret(lifecycle, kind, target, credentials):
                 or len(newest["id"].removeprefix(prefix)) != 32):
             raise Blocked("owned_retired_certificate_version_binding_conflict")
         return newest["id"]
+    elif target == "operator-web":
+        from citadel.operator.web_admin import app_id
+        resource = app_id(lifecycle)
+        if not resource:
+            raise Blocked("operator_web_inventory_required")
+        deployed = lifecycle.native.rest("get", resource, "2025-01-01")
+        secrets = deployed["properties"]["configuration"]["secrets"]
+        matches = [item["keyVaultUrl"] for item in secrets if item["name"] == "operator-subscription"]
+        if len(matches) != 1:
+            raise Blocked("exact_allocated_rotation_caller_required")
+        parsed = urlsplit(matches[0])
+        parts = parsed.path.split("/")
+        if (parsed.scheme != "https" or not parsed.hostname or parsed.query or parsed.fragment
+                or parsed.username or parsed.port or len(parts) != 4 or parts[1] != "secrets"
+                or parts[2] != "subscription-operator-web" or re.fullmatch("[a-f0-9]{32}", parts[3]) is None):
+            raise Blocked("owned_retired_secret_version_binding_conflict")
+        allocations = lifecycle.value["outputs"]["operatorInventory"]["foundation"]["secrets"]
+        allocated = [item for item in allocations if item.endswith("/secrets/" + parts[2])
+                     and item in lifecycle.value["inventory"]]
+        if (len(allocated) != 1
+                or parsed.hostname != allocated[0].split("/vaults/")[1].split("/")[0] + ".vault.azure.net"):
+            raise Blocked("owned_retired_secret_version_binding_conflict")
+        vault, name = parsed.hostname.removesuffix(".vault.azure.net"), parts[2]
+        secret = lifecycle.native.az("keyvault", "secret", "show", "--vault-name", vault,
+                                    "--name", name, "--version", parts[3])
+        if secret.get("id") != matches[0] or secret.get("value") != credentials["callerKeys"][target]["primary"]:
+            raise Blocked("owned_retired_secret_version_binding_conflict")
+        return secret["id"]
     else:
         apps = [app for app in lifecycle.value["outputs"]["appInventory"]
                 if app["app"].endswith("/" + lifecycle.id + "-" + target)]
@@ -78,7 +107,8 @@ def allowed_control(row, report, backend):
         and e.get("run_id") == row["run_id"] and e.get("operation_id") == row["operation_id"]
         and e.get("facts", {}).get("sha256") == sha256(row)]
     return (row.get("status_code") == 200 and row.get("actual") == "read_only_control"
-            and len(gateway) == len(backend_rows) == 1 and (actor == "operator" or len(probes) == 1))
+            and len(gateway) == len(backend_rows) == 1
+            and (actor in ("operator", "operator-web") or len(probes) == 1))
 
 
 class RotationAcceptance:
@@ -97,6 +127,14 @@ class RotationAcceptance:
         from citadel.operator.quiescence import runs_quiescent
         if not runs_quiescent(lifecycle, exclude=run_id):
             raise Blocked("rotation_controls_require_quiescent_runs")
+        from citadel.operator.quiescence import maintenance
+        with maintenance(lifecycle, exclude=run_id, owner={
+                "command": "rotation-control", "run_id": run_id, "stage": stage}) as held:
+            return self._control(stage, run_id, pending, held, fingerprints=fingerprints, directory=directory)
+
+    def _control(self, stage, run_id, pending, held, *, fingerprints, directory):
+        lifecycle = self.lifecycle
+        path = lifecycle.state.directory / "rotation.json"
         kind, target = pending["kind"], pending["target"]
         backend = TARGETS.get(target) if kind == "subscription" else target if kind == "context" else "evidence-assessor"
         actor = target if kind == "subscription" else next(iter(sorted(INVOCATION_CALLERS.get(backend, ()))))
@@ -135,6 +173,8 @@ class RotationAcceptance:
         native.deadline = min(previous or float("inf"), time.monotonic() + max(0, record["deadline"] - time.time()))
         try:
             if stage not in record:
+                previous_change = held["changed"]
+                held["changed"] = True
                 record[stage] = {"state": "dispatching"}
                 lifecycle.state.save()
                 if stage == "new":
@@ -173,6 +213,8 @@ class RotationAcceptance:
                     record["operation_ids"].extend(row["operation_id"] for row in record["after"])
                     record["state"] = "restored"
                     record[stage]["state"] = "observed"
+                held["changed"] = previous_change
+                lifecycle.state.save()
             elif record[stage]["state"] not in ("observed", "verified"):
                 raise Blocked("rotation_control_intent_requires_reconciliation")
             record["finished"] = time.time()
@@ -206,11 +248,15 @@ class RotationAcceptance:
         control = {"kind": kind, "target": backend, "credential_sha256": hashlib.sha256(key.encode()).hexdigest(),
             "secret_version": pending["old_secret_id"].rsplit("/", 1)[-1]
                 if retired and kind == "subscription" and actor != "operator" else None}
+        if actor == "operator-web":
+            control["projection"] = "run-list"
+            if not retired:
+                capture_retired_secret(lifecycle, kind, actor, credentials)
         if actor == "briefing-author":
             control.update(record["finding_control"])
         record["operation_ids"].append(operation)
         lifecycle.state.save()
-        if actor == "operator":
+        if actor in ("operator", "operator-web"):
             async def execute():
                 async def admitted():
                     admit()
