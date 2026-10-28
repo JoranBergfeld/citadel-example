@@ -78,14 +78,15 @@ async def application(config):
             peers = GatewayPeers(config.target, config.gateway, secret.value)
             stack.push_async_callback(model.close)
             stack.push_async_callback(peers.close)
-            run_index = None
-            if config.target == "candidate-planner":
+            run_index = admission = None
+            if config.target in ("candidate-planner", "evidence-assessor", "release-reviewer"):
                 accounting = await stack.enter_async_context(ContainerClient(
                     config.observation_blob,
                     "read-accounting", credential=credential, api_version="2026-10-06",
                     retry_total=0, retry_connect=0, retry_read=0, retry_status=0,
                     connection_timeout=5, read_timeout=30))
                 admission = DeploymentReads(AzureTicketStore(accounting), config.deployment_id)
+            if config.target == "candidate-planner":
                 index_ledger = await stack.enter_async_context(managed_ledger(
                     account_url=config.blob, container=config.operations_container,
                     client_id=config.client_id, blob_name="retained-runs-v1.json"))
@@ -93,7 +94,8 @@ async def application(config):
             runtime = Runtime(config.target, ledger, model=model, peers=peers, gateway_url=config.gateway,
                               artifacts=artifacts, drafts=drafts, tokens_per_minute=config.tokens_per_minute,
                               ticket_store=AzureTicketStore(ticket_container), acceptance_hold=acceptance_hold,
-                              workflow_hold=workflow_hold, run_index=run_index)
+                              workflow_hold=workflow_hold, run_index=run_index,
+                              observation_reads=admission)
             stack.push_async_callback(runtime.shutdown)
             app = agent_application(runtime, config.trust)
         await stack.enter_async_context(app.app.router.lifespan_context(app.app))

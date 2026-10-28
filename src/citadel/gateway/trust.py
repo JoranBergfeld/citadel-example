@@ -181,6 +181,16 @@ class GatewayTrust:
     def _authorize(self, caller, method, path, body):
         target = self.configuration.target
         allowed = caller in INVOCATION_CALLERS[target]
+        if target == "evidence-assessor" and caller == "operator-web" and method == "GET":
+            if re.fullmatch(r"/operator/runs/[A-Za-z0-9_-]{1,64}/drafts(?:/page/[A-Za-z0-9_-]{1,64})?", path):
+                return "operator-drafts"
+            if re.fullmatch(r"/operator/runs/[A-Za-z0-9_-]{1,64}/drafts/[A-Za-z0-9_-]{1,64}/versions/[0-9]{1,9}", path):
+                return "operator-draft"
+        if target == "release-reviewer" and caller == "operator-web" and method == "GET":
+            if re.fullmatch(r"/operator/runs/[A-Za-z0-9_-]{1,64}/releases(?:/page/[A-Za-z0-9_-]{1,64})?", path):
+                return "operator-releases"
+            if re.fullmatch(r"/operator/runs/[A-Za-z0-9_-]{1,64}/findings/[A-Za-z0-9_-]{1,64}/versions/[0-9]{1,9}", path):
+                return "operator-finding"
         if target == "candidate-planner" and caller == "operator-web" and method == "GET":
             if re.fullmatch(r"/operator/runs(?:/(?:page/)?[A-Za-z0-9_-]{1,64})?", path):
                 return "operator-observe"
