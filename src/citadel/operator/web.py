@@ -25,6 +25,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, RedirectResponse, Response
 from starlette.routing import Route
+from .flow_view import STYLE as FLOW_STYLE
 
 
 LOG = logging.getLogger("citadel.operator.auth")
@@ -154,7 +155,7 @@ button,input{font:inherit;padding:.6rem}button:disabled{opacity:.7}label{display
 input{max-width:90%;display:block}footer{border-top:1px solid #536478;margin-top:2rem}
 input[type=radio]{display:inline}fieldset{border:0;padding:0}
 :focus-visible{outline:3px solid #ffd47c;outline-offset:3px}
-"""
+""" + FLOW_STYLE
 
 
 def page(title, content):
@@ -254,62 +255,46 @@ def create_app(config, *, clock=time.monotonic, observation=None, submission=Non
                     return Response("Request denied", status_code=403)
             observer = observation or getattr(request.app.state, "observation", None)
             automatic = request.headers.get("x-citadel-refresh") == "automatic"
-            detail = None
-            active = observer and getattr(observer, "selected_active", lambda _: False)(run)
-            compose = observer and (active or request.headers.get("x-citadel-refresh") in ("automatic", "manual"))
-            if selected == "reference":
-                from .reference_observation import reference_content
-                reference = reference_observation or getattr(request.app.state, "reference_observation", None)
-                if not compose:
-                    observed = await reference.observe(run, refresh=request.method == "POST") if reference else None
-                    return page("Reference Data", header + reference_content(observed, csrf, run))
-                try:
-                    async with asyncio.timeout(30):
-                        if reference:
-                            observed, reference_result = await asyncio.gather(
-                                observer.observe(run, refresh=request.method == "POST", automatic=automatic),
-                                reference.observe(run, refresh=request.method == "POST", automatic=automatic))
-                        else:
-                            observed = await observer.observe(run, refresh=request.method == "POST", automatic=automatic)
-                            reference_result = None
-                    detail = reference_content(reference_result, csrf, run)
-                except TimeoutError:
-                    return Response("Observation unavailable; execution outcome remains unknown", status_code=503)
-            elif selected == "evidence":
-                from .evidence_view import render
-                try:
-                    if not compose:
-                        return page("Evidence Review", header + await render(request, observer, run, csrf))
-                    async with asyncio.timeout(30):
-                        observed, detail = await asyncio.gather(
-                            observer.observe(run, refresh=request.method == "POST", automatic=automatic),
-                            render(request, observer, run, csrf))
-                except OperationError:
-                    return Response("Invalid Evidence Review selection", status_code=400)
-                except TimeoutError:
-                    return Response("Observation unavailable; execution outcome remains unknown", status_code=503)
-            elif selected == "planning":
-                from .planning_view import render
-                try:
-                    async with asyncio.timeout(30):
-                        if observer:
-                            observed, detail = await asyncio.gather(
-                                observer.observe(run, refresh=request.method == "POST", automatic=automatic),
-                                render(request, observer, run, csrf))
-                        else:
-                            observed, detail = None, await render(request, None, run, csrf)
-                except OperationError:
-                    return Response("Invalid Exercise Planning selection", status_code=400)
-                except TimeoutError:
-                    return Response("Observation unavailable; execution outcome remains unknown", status_code=503)
-            else:
-                observed = (await observer.observe(run, cursor=cursor, refresh=request.method == "POST",
-                                                  **({"automatic": True} if automatic else {}))
-                            if observer else None)
             current = bool(run and not request.url.path.startswith("/history"))
+            detail = None
+
+            async def summary():
+                return (await observer.observe(run, cursor=cursor, refresh=request.method == "POST",
+                                               **({"automatic": True} if automatic else {}))
+                        if observer else None)
+
+            async def team_detail():
+                if selected == "reference":
+                    from .reference_observation import reference_content
+                    reference = reference_observation or getattr(request.app.state, "reference_observation", None)
+                    result = (await reference.observe(run, refresh=request.method == "POST", automatic=automatic)
+                              if reference else None)
+                    return reference_content(result, csrf, run)
+                if selected in ("evidence", "planning"):
+                    from . import evidence_view, planning_view
+                    view = evidence_view if selected == "evidence" else planning_view
+                    return await view.render(request, observer, run, csrf)
+                return None
+
+            from .flow_view import observations as flow_observations, render as flow_content
+            try:
+                async with asyncio.timeout(30):
+                    if current:
+                        observed, detail, owners = await asyncio.gather(
+                            summary(), team_detail(),
+                            flow_observations(observer, run, refresh=request.method == "POST", automatic=automatic))
+                    else:
+                        observed = await summary()
+            except OperationError:
+                return Response("Invalid team observation selection", status_code=400)
+            except TimeoutError:
+                return Response("Observation unavailable; execution outcome remains unknown", status_code=503)
             content = history_content(observed, csrf, run, cursor, current=current,
                                       refresh_target=request.url.path.removesuffix("/refresh") if current else None,
-                                      scenario_summary=selected != "planning")
+                                      scenario_summary=selected != "planning",
+                                      flow=(flow_content(run, {"candidate-planner": observed, **owners},
+                                                        now=getattr(observer, "clock", time.time)())
+                                            if current else ""))
             if detail:
                 content += detail
             elif selected:
@@ -461,7 +446,8 @@ this page never plays back fixtures.</p></main>""")
     return app
 
 
-def history_content(observed, csrf, run_id, cursor, *, current=False, refresh_target=None, scenario_summary=True):
+def history_content(observed, csrf, run_id, cursor, *, current=False, refresh_target=None, scenario_summary=True,
+                    flow=""):
     state = observed.state if observed else "unavailable"
     descriptions = {
         "denied": "Observation denied; no execution outcome is established.",
@@ -482,6 +468,7 @@ def history_content(observed, csrf, run_id, cursor, *, current=False, refresh_ta
     attributes = (f' data-current-run="{escape(run_id)}" data-execution="{escape(data.get("execution", "unknown"))}"'
                   f' data-state="{escape(state)}"' if current else "")
     content = f"""<main{attributes}><h2>{'Current run' if current else 'Retained run' if run_id else 'Earlier runs'}</h2>
+{f'<p class="run-identity">{escape(run_id)}</p>' if current else ''}{flow}
 <p>Planner projection: {escape(state)}. {descriptions.get(state, descriptions['unknown'])}</p>
 <p>Last successful observation (UTC): {timestamp}. Not an atomic cross-team snapshot.</p>"""
     if observed and observed.stale:

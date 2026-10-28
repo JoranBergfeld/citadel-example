@@ -17,6 +17,52 @@ from tests.unit.gateway_fixtures import signed, trust
 
 
 class ObservationTests(unittest.IsolatedAsyncioTestCase):
+    async def test_owner_reports_actual_inflight_model_request_not_persisted_running_label(self):
+        entered, release = asyncio.Event(), asyncio.Event()
+
+        class Model:
+            async def explain(self, *args):
+                entered.set()
+                await release.wait()
+                raise OperationError("unavailable", "Labelled controlled model failure")
+
+        workload = MemoryLedger(clock=lambda: 1000)
+        runtime = Runtime("candidate-planner", workload,
+            model=Model(), peers=None, gateway_url="https://gateway.test",
+            clock=lambda: 1000, run_index=self.index)
+        await runtime.accept("operator", {
+            "run_id": "active1", "operation_id": "active1", "fixture": "base-source"})
+        await entered.wait()
+        path = "/operator/runs/active1"
+        try:
+            async with httpx.AsyncClient(transport=httpx.ASGITransport(
+                    app=agent_application(runtime, trust("candidate-planner")))) as client:
+                before = len(self.store.markers)
+                response = await client.get("https://gateway.test" + path,
+                    headers=signed(b"", "candidate-planner", path, "operator-web", "GET"))
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(response.json()["activity"], {
+                    "owner": "candidate-planner", "run_id": "active1", "target": "model",
+                    "kind": "inflight", "observed_at": 1000, "expires_at": 1015})
+                self.assertEqual(len(self.store.markers) - before, 2)
+                self.assertNotIn("worker", response.text)
+                restarted = Runtime("candidate-planner", workload, model=None, peers=None,
+                    gateway_url="https://gateway.test", clock=lambda: 1000, run_index=self.index)
+                async with httpx.AsyncClient(transport=httpx.ASGITransport(
+                        app=agent_application(restarted, trust("candidate-planner")))) as other:
+                    saved_running = await other.get("https://gateway.test" + path,
+                        headers=signed(b"", "candidate-planner", path, "operator-web", "GET"))
+                    self.assertEqual(saved_running.json()["execution"], "running")
+                    self.assertIsNone(saved_running.json()["activity"])
+                release.set()
+                await asyncio.gather(*runtime.tasks)
+                finished = await client.get("https://gateway.test" + path,
+                    headers=signed(b"", "candidate-planner", path, "operator-web", "GET"))
+                self.assertIsNone(finished.json()["activity"])
+        finally:
+            release.set()
+            await runtime.shutdown()
+
     async def test_auto_refresh_across_tabs_shares_recent_manual_work_and_stops_at_exhaustion(self):
         now, calls = [1000], []
 

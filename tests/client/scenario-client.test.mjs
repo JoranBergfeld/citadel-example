@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createRefresh } from "../../src/citadel/operator/scenario-client.mjs";
+import { createRefresh, activityState, inspectionPath } from "../../src/citadel/operator/scenario-client.mjs";
 
 function fixture() {
   let visible = true;
@@ -77,4 +77,44 @@ test("returning through browser history resumes observation, never submission", 
   f.loop.resume();
   assert.equal(f.scheduled(), true);
   assert.deepEqual(f.calls, []);
+});
+
+test("activity requires fresh run-bound owner evidence, never running or authored order", () => {
+  const view = { run: "run1", owner: "candidate-planner", state: "ok", now: 1000,
+    activity: { owner: "candidate-planner", run_id: "run1", kind: "inflight",
+      target: "evidence-assessor", observed_at: 995, expires_at: 1010 } };
+  assert.deepEqual(activityState(view), { live: true, pulse: true, target: "evidence-assessor", until: 1010 });
+  for (const change of [
+    { activity: null, execution: "running" }, { state: "denied" }, { state: "unavailable" },
+    { stale: true }, { now: 1010 }, { run: "other" }, { owner: "release-reviewer" },
+    { now: 990 }, { activity: { ...view.activity, expires_at: 1100 } },
+    { activity: { ...view.activity, target: "arbitrary-service" } },
+  ]) assert.equal(activityState({ ...view, ...change }).pulse, false);
+});
+
+test("reduced motion and animation pause remove pulses, not observed activity or refresh", () => {
+  const view = { run: "run1", owner: "evidence-assessor", state: "partial", now: 1000,
+    activity: { owner: "evidence-assessor", run_id: "run1", kind: "inflight",
+      target: "reference", observed_at: 1000, expires_at: 1015 } };
+  for (const change of [{ reducedMotion: true }, { paused: true }]) {
+    assert.deepEqual(activityState({ ...view, ...change }),
+      { live: true, pulse: false, target: "reference", until: 1015 });
+    const f = fixture();
+    f.loop.changed();
+    assert.equal(f.scheduled(), true);
+    assert.deepEqual(f.calls, []);
+  }
+});
+
+test("node inspection preserves run and exact citations without creating execution URLs", () => {
+  assert.equal(inspectionPath("run1", "drafts"), "/teams/evidence/runs/run1");
+  assert.equal(inspectionPath("run1", "reference"), "/teams/reference/runs/run1");
+  assert.equal(inspectionPath("run1", "briefing-author"), "/teams/planning/runs/run1");
+  assert.equal(inspectionPath("run1", "findings", { artifact_id: "finding1", version: 2 }),
+    "/teams/evidence/runs/run1/findings/finding1/versions/2");
+  for (const node of ["ui", "backend", "apim", "gateway", "model", "reference-storage"]) {
+    assert.match(inspectionPath("run1", node), /^#architecture-/);
+  }
+  assert.throws(() => inspectionPath("../run", "drafts"));
+  assert.throws(() => inspectionPath("run1", "findings", { artifact_id: "finding1", version: 0 }));
 });

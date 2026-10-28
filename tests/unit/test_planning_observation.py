@@ -126,7 +126,7 @@ class PlanningObservationTests(AgentCase, unittest.IsolatedAsyncioTestCase):
         async def service(request):
             calls.append(request)
             role, tail = request.url.path.lstrip("/").split("/", 1)
-            if role in failed:
+            if role in failed or role not in owners:
                 return httpx.Response(503)
             path = "/" + tail
             return await owners[role].get("https://gateway.test" + path, headers={
@@ -147,8 +147,8 @@ class PlanningObservationTests(AgentCase, unittest.IsolatedAsyncioTestCase):
             before = len(self.reads.store.markers)
             pages = await asyncio.gather(browser.get(path), browser.get(path))
             page = pages[0]
-            self.assertEqual(len(calls), 3)
-            self.assertEqual(len(self.reads.store.markers) - before, 8)
+            self.assertEqual(len(calls), 5)
+            self.assertEqual(len(self.reads.store.markers) - before, 10)
             self.assertIn("replacement_after_skipped_candidate", page.text)
             self.assertIn("synthetic_missing_width", page.text)
             self.assertIn("Fictional unit-fixture prose", page.text)
@@ -175,10 +175,10 @@ class PlanningObservationTests(AgentCase, unittest.IsolatedAsyncioTestCase):
             self.assertIn("1970-01-01T00:17:40", refreshed.text)
             self.assertIn(citation, refreshed.text)
             self.assertIn("Fictional unit-fixture prose", refreshed.text)
-            self.assertEqual(len(calls), 6)
+            self.assertEqual(len(calls), 10)
             await browser.post(path + "/refresh", data={"csrf": csrf},
                 headers={"origin": config.origin, "x-citadel-refresh": "automatic"})
-            self.assertEqual(len(calls), 6)
+            self.assertEqual(len(calls), 10)
 
     async def test_legacy_completed_plan_uses_saved_product_not_current_reference_or_index_backfill(self):
         runtime = await self.planner("missing-width-replacement")

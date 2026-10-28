@@ -193,7 +193,9 @@ def install(app, runtime):
             if not math.isfinite(end):
                 raise ValueError("Invalid deadline")
             async with runtime.observation_reads.request(deadline=end):
-                response = JSONResponse(await function(identity(run_id)))
+                result = await function(identity(run_id))
+                result["activity"] = runtime.activity.observe(run_id)
+                response = JSONResponse(result)
                 if runtime.clock() >= read_deadline.get():
                     raise OperationError("deadline", "Observation deadline expired")
                 if len(response.body) > MAX_RESPONSE_BYTES:

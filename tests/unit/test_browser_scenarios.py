@@ -15,6 +15,57 @@ from citadel.runtime.submission import submission_run
 
 
 class BrowserScenarioTests(unittest.IsolatedAsyncioTestCase):
+    async def test_current_flow_uses_owner_evidence_and_run_bound_read_only_inspection(self):
+        requests, now, failed = [], [1000], set()
+        owners = {"candidate-planner": "evidence-assessor", "evidence-assessor": "model",
+                  "release-reviewer": "reference", "briefing-author": "findings"}
+
+        async def service(request):
+            requests.append(request)
+            owner = request.url.path.split("/")[1]
+            if owner in failed:
+                return httpx.Response(503)
+            return httpx.Response(200, json={"state": "ok", "run_id": "run1",
+                "execution": "running", "fixture": "base-source", "bindings": {},
+                "activity": {"owner": owner, "run_id": "run1", "target": owners[owner],
+                    "kind": "inflight", "observed_at": now[0], "expires_at": now[0] + 15}})
+
+        ledger = MemoryLedger(clock=lambda: now[0])
+        reads = DeploymentReads(ledger.ticket_store, "fixture1", clock=lambda: now[0])
+        await ledger.ticket_store.open_pool(reads.scope("observation"))
+        async with httpx.AsyncClient(transport=httpx.MockTransport(service)) as downstream:
+            observer = ObservationClient("https://gateway.test", "fixture-key", reads,
+                                         client=downstream, clock=lambda: now[0])
+            config = AuthConfig("operator", hash_passphrase("fixture only passphrase"), "https://operator.test")
+            async with httpx.AsyncClient(transport=httpx.ASGITransport(
+                    app=create_app(config, observation=observer)), base_url=config.origin) as browser:
+                await browser.post("/login", headers={"origin": config.origin},
+                    data={"username": "operator", "password": "fixture only passphrase"})
+                current = await browser.get("/runs/run1")
+                self.assertIn('data-flow-run="run1"', current.text)
+                self.assertIn("Authored architecture", current.text)
+                self.assertIn("not proof that the destination is executing", current.text)
+                self.assertIn("Awaiting Evidence Assessor", current.text)
+                self.assertIn('href="/teams/evidence/runs/run1"', current.text)
+                self.assertIn('href="/teams/planning/runs/run1"', current.text)
+                self.assertEqual(len(requests), 4)
+                self.assertEqual(len(reads.store.markers), 4)
+                self.assertTrue(all("/observation" in scope for scope, _ in reads.store.markers))
+                csrf = re.search(r'name="csrf" value="([^"]+)"', current.text)[1]
+                failed.add("evidence-assessor")
+                now[0] += 15
+                stale = await browser.post("/runs/run1/refresh", data={"csrf": csrf},
+                    headers={"origin": config.origin, "x-citadel-refresh": "automatic"})
+                self.assertIn('data-owner-activity="evidence-assessor" data-state="unavailable" data-stale="true"', stale.text)
+                self.assertIn("Current activity unknown", stale.text)
+                detail = await browser.get("/teams/evidence/runs/run1/findings/finding1/versions/2")
+                self.assertIn('data-current-run="run1"', detail.text)
+                self.assertIn("Exact approved finding", detail.text)
+                self.assertIn("Private Operator inspection", detail.text)
+                self.assertEqual(requests[-1].url.path,
+                    "/release-reviewer/operator/runs/run1/findings/finding1/versions/2")
+                self.assertTrue(all(request.method == "GET" for request in requests))
+
     async def current_team(self, team):
         requests, now, terminal = [], [1000], [False]
 
@@ -43,7 +94,7 @@ class BrowserScenarioTests(unittest.IsolatedAsyncioTestCase):
                 await browser.get("/runs/run1")
                 path = f"/teams/{team}/runs/run1"
                 expected = "Private Operator inspection" if team == "evidence" else "Original source values are unchanged"
-                reads_per_refresh = 3 if team == "evidence" else 2
+                reads_per_refresh = 4 if team == "evidence" else 5
                 current = await browser.get(path)
                 self.assertIn('data-run-observation="run1"', current.text)
                 self.assertIn(expected, current.text)
@@ -57,7 +108,8 @@ class BrowserScenarioTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIn(expected, completed.text)
                 self.assertEqual(len(requests), 2 * reads_per_refresh)
                 reopened = await browser.get(path)
-                self.assertNotIn('src="/scenario-client.mjs"', reopened.text)
+                self.assertIn('data-execution="succeeded"', reopened.text)
+                self.assertIn('src="/scenario-client.mjs"', reopened.text)
                 self.assertEqual(len(requests), 2 * reads_per_refresh)
 
     async def test_current_run_refresh_composes_evidence_review_but_reopened_terminal_detail_is_manual(self):

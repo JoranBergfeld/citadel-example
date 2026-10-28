@@ -27,8 +27,9 @@ from citadel.gateway import GatewayTrust
 from citadel.gateway.trust import INVOCATION_CALLERS
 from citadel.acceptance.telemetry import correlate, emit
 from .model import INSTRUCTIONS
-from .state import ScopedLedger, read_scope, snapshots
+from .state import ScopedLedger, read_scope, snapshots, read_deadline
 from .tickets import CAPACITY, TicketPool
+from .activity import OwnerActivity
 
 
 class Runtime:
@@ -51,6 +52,7 @@ class Runtime:
                              if artifacts is not None else None)
         self.draft_reader = DraftReader(ScopedLedger(drafts)) if drafts is not None else None
         self.tasks = set()
+        self.activity = OwnerActivity(workload, clock)
         self.renew_at = {}
         self.events = {}
         self.ticket_store = ticket_store or getattr(ledger, "ticket_store", None)
@@ -227,14 +229,27 @@ class Runtime:
             self.renew_at[ownership.key] = self.clock() + 90
 
     async def _explain(self, payload, evidence):
-        return await self.model.explain(self.accounting, payload["operation_id"],
-                                        payload["operation_id"], evidence)
+        with self.activity.calling(payload["run_id"], "model", read_deadline.get() or self.clock()):
+            return await self.model.explain(self.accounting, payload["operation_id"],
+                                            payload["operation_id"], evidence)
+
+    async def _reference(self, payload, deadline, ident=None):
+        with self.activity.calling(payload["run_id"], "reference", deadline):
+            return await self.peers.reference(payload["fixture"], deadline, *([ident] if ident else []))
+
+    async def _child(self, owner, payload, target, inputs, allowance, deadline):
+        with self.activity.calling(payload["run_id"], target, deadline):
+            return await self.peers.child(self, owner, payload, target, inputs, allowance)
+
+    async def _finding(self, payload, ref, deadline, scope):
+        with self.activity.calling(payload["run_id"], "findings", deadline):
+            return await self.peers.finding(ref, deadline, read_scope=scope)
 
     async def _plan(self, payload, owner, deadline):
         if self.workflow_hold is not None:
             await self.workflow_hold.wait(self, payload, owner, deadline)
         commentary = await self._explain(payload, {"fixture": payload["fixture"], "target": 3, "pool_limit": 20})
-        pool = await self.peers.reference(payload["fixture"], deadline)
+        pool = await self._reference(payload, deadline)
         selected, assessed, references, read_scopes = [], [], [], []
         context_available = self.run_index is not None
 
@@ -257,8 +272,8 @@ class Runtime:
             ident = airport["ident"]["parsed"]
             await self.renew_if_needed(owner)
             await self.accounting.candidate(payload["operation_id"], ident)
-            result = await self.peers.child(self, owner, payload, "evidence-assessor", {"airport_ident": ident},
-                {"agents": 2, "models": 2, "tokens": 36000, "reads": CAPACITY["evidence-assessor"]})
+            result = await self._child(owner, payload, "evidence-assessor", {"airport_ident": ident},
+                {"agents": 2, "models": 2, "tokens": 36000, "reads": CAPACITY["evidence-assessor"]}, deadline)
             if result["kind"] == "rejected":
                 assessed.append({"airport_ident": ident, "classification": "release_rejected"})
                 await save_assessed(ident, number + 1 == len(pool["airports"]))
@@ -266,7 +281,7 @@ class Runtime:
             ref = result["finding"]
             if result["read_scope"]["run_id"] != payload["run_id"]:
                 raise OperationError("conflict", "Finding read pool differs from admitted run")
-            finding = await self.peers.finding(ref, deadline, read_scope=result["read_scope"])
+            finding = await self._finding(payload, ref, deadline, result["read_scope"])
             if finding["airport_ident"] != ident or finding["provenance"] != pool["provenance"]:
                 raise OperationError("conflict", "Finding does not belong to this candidate/source/fixture")
             assessed.append(finding)
@@ -283,14 +298,14 @@ class Runtime:
             "provenance": pool["provenance"], "caveats": list(CAVEATS), "planner_commentary": commentary,
         }
         if len(selected) == 3:
-            product["brief"] = await self.peers.child(self, owner, payload, "briefing-author",
+            product["brief"] = await self._child(owner, payload, "briefing-author",
                 {"findings": references, "read_scopes": read_scopes},
-                {"agents": 1, "models": 1, "tokens": 18000, "reads": 16})
+                {"agents": 1, "models": 1, "tokens": 18000, "reads": 16}, deadline)
         return product
 
     async def _assess(self, payload, owner, deadline):
         ident = identity(payload["airport_ident"])
-        reference = await self.peers.reference(payload["fixture"], deadline, ident)
+        reference = await self._reference(payload, deadline, ident)
         assessment = reference.assess_airport(ident)
         notes = await self._explain(payload, self._summary(ident, assessment))
         operation_id = uuid4().hex
@@ -309,13 +324,13 @@ class Runtime:
         status = await self.artifact_ops.submit_draft(draft_owner, draft, expected_version=0, reference=reference)
         await self.ops.reconcile_external(owner, operation_id, status)
         ref = {key: status["result"][key] for key in ("artifact_id", "version", "sha256")}
-        return await self.peers.child(self, owner, payload, "release-reviewer", {"draft": ref},
-                                      {"agents": 1, "models": 1, "tokens": 18000, "reads": 11})
+        return await self._child(owner, payload, "release-reviewer", {"draft": ref},
+                                {"agents": 1, "models": 1, "tokens": 18000, "reads": 11}, deadline)
 
     async def _review(self, payload, owner, deadline):
         ref = payload["draft"]
         draft = await self.draft_reader.get_draft(ref["artifact_id"], ref["version"], ref["sha256"])
-        reference = await self.peers.reference(payload["fixture"], deadline, draft["airport_ident"])
+        reference = await self._reference(payload, deadline, draft["airport_ident"])
         try:
             projection = reference.shareable_projection(draft)
         except EvidenceError as exc:
@@ -355,7 +370,7 @@ class Runtime:
         scopes = payload["read_scopes"]
         if len(scopes) != len(refs) or any(scope["run_id"] != payload["run_id"] for scope in scopes):
             raise OperationError("invalid_input", "Finding reads require this run's funded reviewer pools")
-        findings = [await self.peers.finding(ref, deadline, read_scope=scope)
+        findings = [await self._finding(payload, ref, deadline, scope)
                     for ref, scope in zip(refs, scopes)]
         provenance = findings[0]["provenance"]
         if any(item["classification"] != "complete" or item["provenance"] != provenance
@@ -532,6 +547,8 @@ def agent_application(runtime, trust):
                 async with runtime.run_index.admission.request(deadline=end):
                     result = (await runtime.run_index.observe(run_id, runtime.ledger) if run_id is not None
                               else await runtime.run_index.page_in_scope(cursor))
+                    if run_id is not None:
+                        result["activity"] = runtime.activity.observe(run_id)
                     return JSONResponse(result)
             except OperationError as exc:
                 state = {"forbidden": "denied", "missing": "missing", "exhausted": "exhausted"}.get(

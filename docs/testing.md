@@ -61,7 +61,9 @@ node --test tests/client/*.test.mjs
 
 The same workflow runs it after the Python gate. Tests use controlled visibility
 and timers to cover selected-active-only scheduling, coalesced manual/automatic
-requests, hidden/history/terminal/unknown/exhausted stopping. Server-side tests
+requests, hidden/history/terminal/unknown/exhausted stopping, evidence-bound
+activity expiry, reduced-motion/paused presentation and run-preserving node/exact
+citation navigation. Server-side tests
 own cross-tab physical-read coalescing, timestamps and stale projections.
 
 ## Boundaries and focused areas
@@ -82,7 +84,7 @@ own cross-tab physical-read coalescing, timestamps and stale projections.
 | `gateway`, `startup` | Local ASGI authorization/signature/path denials and explicit workload configuration/capability validation. |
 | `operator_checkout` | Relocated-package CLI uses invocation-checkout deployment resources and still denies unconfirmed paid actions. |
 | `operator_web*` | Actual protected HTTP handlers/server-rendered chooser, fake-time sessions/throttling, private login configuration and controlled deployment contracts; see [operator-web.md](operator-web.md). |
-| `submission`, `browser_scenarios`, `scenario_summary`, `observation` | Actual hosted Planner/HTTP dispatch, immutable intent before execution, duplicate/ambiguous refusal, shared CLI admission, fixed scenario bindings, saved summary privacy and shared observation/cache behavior. |
+| `submission`, `browser_scenarios`, `scenario_summary`, `observation` | Actual hosted Planner/HTTP dispatch, immutable intent before execution, duplicate/ambiguous refusal, shared CLI admission, fixed scenario bindings, saved summary privacy, composed team diagram, actual in-flight owner evidence versus saved running state, stale/run-bound read-only inspection and shared observation/cache behavior. |
 
 Agent behavior tests execute **one runtime per independently exercised agent**.
 Observation HTTP cases may compose independently seeded owner services; peer
