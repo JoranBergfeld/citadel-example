@@ -146,6 +146,19 @@ durable publication remain the operation/release module's responsibility.
 
 ## Verification
 
+The development/merge gate is the flat offline unit suite in
+[testing.md](testing.md), run in the installed pinned project environment:
+
+```sh
+python -m unittest discover -s tests/unit -v
+python -m unittest discover -s tests/unit -p 'test_evidence.py' -v
+```
+
+The focused command is for iteration. The broader evidence suite and retained
+external-data checks below are **opt-in diagnostics**, not an additional gate.
+They do not require new downloads when the pinned snapshot is already retained;
+`acquire` remains a separate explicit network action.
+
 ```bash
 PYTHONPATH=src python -m unittest discover -s tests/evidence -v
 CITADEL_EVIDENCE_DATA="$DATA" PYTHONPATH=src \

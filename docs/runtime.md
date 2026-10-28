@@ -229,12 +229,34 @@ The existing owner-bound `SendMessage` accepts metadata
 input-bound operation. It never schedules persisted work and cannot recover a
 different caller's operation or escape exhausted tickets.
 
-## Validation and cloud gates
+## Development and merge gate
 
-Local tests use real A2A/MCP/Framework/OpenAI/Blob SDK serialization and ASGI
-hosts with bounded external transport adapters. Only tests provide model
-fixtures and in-memory ledgers. Set `CITADEL_EVIDENCE_DATA` to the retained
-approved snapshot to run both real-data workflow and Blob-bundle tests:
+Use the installed project's pinned environment from the repository root:
+
+```sh
+python -m unittest discover -s tests/unit -v
+python -m unittest discover -s tests/unit -p 'test_candidate_planner.py' -v
+```
+
+The full command is the development/merge gate; the second is a focused example
+for iteration. The flat unit suite exercises agents independently and selected
+shared boundaries without cloud, Docker, real models, external data or network.
+See [testing.md](testing.md) for all focused areas and discovery/claim limits.
+
+## Optional diagnostics
+
+The broader suites below are **opt-in diagnostics**, not development/merge gates.
+Neither all nested suites nor the legacy 278-check catalogue, two cloud passes,
+fresh-deployment proof or human narrative signoff is required for development/
+merge. Real deployment readiness and operational safeguards still apply to
+explicitly running or managing the demo.
+
+The broader local runtime suite uses real A2A/MCP/Framework/OpenAI/Blob SDK
+serialization and ASGI hosts with controlled external transport adapters,
+including in-process multi-agent scenarios and polling. Only tests provide
+model fixtures and in-memory ledgers. With live opt-ins unset, the command
+below stays local; set `CITADEL_EVIDENCE_DATA` to the already retained approved
+snapshot to include both real-data workflow and Blob-bundle checks:
 
 ```sh
 python -m unittest discover -s tests/runtime -v
@@ -244,13 +266,14 @@ python -m unittest discover -s tests/runtime -v
 `CITADEL_RUNTIME_LIVE=1`, `CITADEL_LIVE_GATEWAY`, and `CITADEL_OPERATOR_KEY`.
 It performs paid real workflow calls when enabled; ordinary validation never
 enables it. It checks real acceptance, polling, exact caveated products and an
-allowed/denied route control. These probes supplement—not replace—the four
-existing live storage probes and downstream comprehensive task20/21 acceptance.
+allowed/denied route control. The live runtime and storage probes and legacy
+task20/21 reporting are optional investigations with distinct claim limits;
+none replaces the offline development/merge gate.
 
-Unverified: effective Azure authority/certificate/HMAC/policy behavior, actual
-model inference/quota, storage fencing in the deployed topology, identity
+Offline tests do not verify effective Azure authority/certificate/HMAC/policy
+behavior, actual model inference/quota, storage fencing in the deployed topology, identity
 rotation, deployed latency, telemetry export/collection, two full cloud passes,
 operator narrative signoff, fresh deployment and teardown. SDK tracing and
 sanitized local incomplete-work logs alone do not establish unsampled deployed
-telemetry. No deployment, secret access or paid inference was performed for
-local implementation.
+telemetry. Historical cloud evidence/status is unchanged; no outstanding
+real-cloud verification is marked passed.

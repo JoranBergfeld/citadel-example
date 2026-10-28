@@ -1,11 +1,24 @@
-# Pinned execution-stack gate
+# Pinned execution stack and optional diagnostics
 
-This is the local gate for [issue 17](https://github.com/JoranBergfeld/citadel-example/issues/17),
+This records the original local stack verification for [issue 17](https://github.com/JoranBergfeld/citadel-example/issues/17),
 not a working Citadel deployment. The [provisioning decision](https://github.com/JoranBergfeld/citadel-example/issues/7#issuecomment-6173968755)
 owns the pins. An unavailable version, hash mismatch or incompatible required
 interface blocks affected work; do not select an alternative automatically.
 
-## Reproduce locally
+The contributor development/merge gate is now the explicit offline unit suite
+in [testing.md](testing.md), not the broader stack suite or a Docker build:
+
+```sh
+python -m unittest discover -s tests/unit -v
+python -m unittest discover -s tests/unit -p 'test_startup.py' -v
+```
+
+Run these in the installed pinned project environment from the repository root;
+the second command is focused iteration, not the full gate. SDK/protocol smoke,
+build and Docker commands below are **opt-in diagnostics**. Install dependencies
+when missing or after a manifest change, not as a prerequisite to each test run.
+
+## Optional reproduction and installation
 
 Use Linux amd64, **CPython 3.12.15** and **uv 0.12.21**. `stack.toml`
 records the approved base image, protocols, model and tool artifact hashes.
@@ -165,7 +178,7 @@ For provisioning, explicitly select the pinned Bicep executable actually used
 by azd. Do not permit an implicit Bicep download/upgrade or CLI extension install.
 No infrastructure templates, extension selection or deployment are supplied here.
 
-## Lock maintenance and remaining gates
+## Lock maintenance and live claim limits
 
 After an approved dependency change only:
 
@@ -183,8 +196,11 @@ The official regional model table currently lists `gpt-4.1-mini` version
 Zone. This is documentation, not live quota, deployment or inference proof.
 The retirement page's fine-tuning dates do not establish a base-model lifetime.
 Actual provider/API behavior, model lifecycle/capacity, resource API inventory,
-Bicep deployment compilation, gateway paths, authorization and two complete
-cloud acceptance passes remain mandatory future gates.
+Bicep deployment compilation, gateway paths and effective authorization require
+their own evidence before making real-operation claims. Two complete cloud
+acceptance passes, the 278-check catalogue, fresh-deployment proof and human
+narrative signoff are not development/merge gates. Historical missing live
+verification is not marked passed by local stack or unit tests.
 
 Commands, primary response metadata, downloaded-artifact checksums and test
 outputs are retained outside Git in the operator's session evidence bundle.

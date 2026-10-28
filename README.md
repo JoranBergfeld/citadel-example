@@ -133,8 +133,9 @@ Combined denied-bypass acceptance remains incomplete. One run's evidence had an
 invalid timestamp; another stopped during review with three drafts, two findings
 and no brief. The latter failure remains unexplained.
 
-Human review, remaining controls and two full acceptance passes are outstanding
-in #21. These results describe previous runs.
+Human review, remaining controls and two full acceptance passes were outstanding
+in #21. These historical results remain unverified where recorded; they are not
+development/merge prerequisites and are not marked passed by offline tests.
 
 ## Running it
 
@@ -164,7 +165,7 @@ For further detail, see [data and fixtures](docs/evidence.md),
 [original specification](https://github.com/JoranBergfeld/citadel-example/issues/13)
 records the intended scope.
 
-## Offline unit tests
+## Development and merge gate
 
 In the installed project environment, from the repository root:
 
@@ -177,3 +178,14 @@ See [testing commands and boundaries](docs/testing.md) for other focused areas,
 fixtures, migration scope and claim limits. These tests need no cloud resources,
 credentials, real model, Docker or external network; passing them does not prove
 deployed enforcement or real-demo success.
+
+The full command is the contributor development/merge test gate; the focused
+command is for iteration, not a substitute for the full gate before merging.
+The `Offline units` workflow runs that full command on pushes, pull requests and
+merge queues. Broader SDK/protocol/integration suites, external-data checks,
+live probes and [legacy acceptance reports](docs/acceptance.md) are **opt-in
+diagnostics**, not additional signoff. The 278-check catalogue, two cloud passes,
+fresh-deployment proof and human narrative signoff are retired as development/
+merge obligations. Deployment readiness, authorization, explicit paid-action
+confirmation, ownership checks and manual teardown still apply when running or
+managing the real demo.

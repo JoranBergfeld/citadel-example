@@ -313,7 +313,22 @@ three deployment-owned accounts, not subscription policy or external services.
 
 ## Local versus live validation
 
-Use the exact verified Bicep executable (`--version` must be **0.48.1**):
+The development/merge gate is the explicit offline suite in
+[testing.md](testing.md), in the installed pinned project environment:
+
+```sh
+python -m unittest discover -s tests/unit -v
+python -m unittest discover -s tests/unit -p 'test_gateway.py' -v
+```
+
+The focused command is for iteration. The broader gateway/infrastructure suites
+and template compilation below are **opt-in diagnostics**, not contributor test
+gate prerequisites. The unit gate needs neither Bicep nor Azure access.
+Deployment readiness and effective authorization still require their actual
+operational checks.
+
+For optional compilation diagnostics, use the exact verified Bicep executable
+(`--version` must be **0.48.1**):
 
 ```sh
 BICEP_EXECUTABLE=/absolute/path/to/verified/bicep-linux-x64
