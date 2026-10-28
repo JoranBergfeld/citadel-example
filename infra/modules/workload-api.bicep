@@ -60,6 +60,15 @@ var recoveryOperations = target == 'candidate-planner' ? [{
     { name: 'requestId', required: true, type: 'string' }
   ]
 }]
+var retryOperations = [{
+  name: 'operator-retry'
+  method: 'POST'
+  path: '/operator/runs/{runId}/retry/{requestId}'
+  parameters: [
+    { name: 'runId', required: true, type: 'string' }
+    { name: 'requestId', required: true, type: 'string' }
+  ]
+}]
 var draftObservationOperations = [
   { name: 'operator-drafts', method: 'GET', path: '/operator/runs/{runId}/drafts', parameters: [{ name: 'runId', required: true, type: 'string' }] }
   { name: 'operator-draft-page', method: 'GET', path: '/operator/runs/{runId}/drafts/page/{cursor}', parameters: [{ name: 'runId', required: true, type: 'string' }, { name: 'cursor', required: true, type: 'string' }] }
@@ -80,7 +89,8 @@ var operations = target == 'reference-data' ? concat(mcpOperations, referenceObs
   target == 'release-reviewer' ? concat(findingOperations, releaseObservationOperations) : [],
   target == 'evidence-assessor' ? draftObservationOperations : [],
   target == 'briefing-author' ? briefObservationOperations : [],
-  target == 'candidate-planner' ? observationOperations : [], recoveryOperations)
+  target == 'candidate-planner' ? observationOperations : [], recoveryOperations,
+  target == 'candidate-planner' ? retryOperations : [])
 resource routes 'Microsoft.ApiManagement/service/apis/operations@2024-05-01' = [for operation in operations: {
   parent: api
   name: operation.name

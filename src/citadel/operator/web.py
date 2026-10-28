@@ -399,7 +399,9 @@ this page never plays back fixtures.</p></main>""")
         return Response(Path(__file__).with_name("scenario-client.mjs").read_text(),
                         media_type="text/javascript")
 
-    app = Starlette(lifespan=lifespan, routes=[Route("/", shell), Route("/teams/{team}", shell),
+    from .retry import retry_routes
+    app = Starlette(lifespan=lifespan, routes=[*retry_routes(auth, same_origin, form, page, recovery, COOKIE),
+                           Route("/", shell), Route("/teams/{team}", shell),
                            Route("/run", run_scenario, methods=["POST"]),
                            Route("/runs/{run_id}", shell),
                            Route("/runs/{run_id}/refresh", shell, methods=["POST"]),
@@ -497,6 +499,9 @@ def history_content(observed, csrf, run_id, cursor, *, current=False, refresh_ta
         content += "</details>"
         from .recovery import recovery_content
         content += recovery_content(run_id, csrf, data.get("recovery"))
+        from .retry import retry_content
+        content += retry_content(run_id, csrf, data.get("retryable") is True
+                                 and not observed.stale and state in ("ok", "partial"))
     else:
         content += "<ul>" + "".join(
             f'<li><a href="/history/{escape(item["run_id"])}">{escape(item["run_id"])}</a>'
