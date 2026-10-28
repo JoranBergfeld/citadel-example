@@ -253,13 +253,31 @@ def create_app(config, *, clock=time.monotonic, observation=None, submission=Non
                     return Response("Request denied", status_code=403)
             observer = observation or getattr(request.app.state, "observation", None)
             automatic = request.headers.get("x-citadel-refresh") == "automatic"
-            observed = (await observer.observe(run, cursor=cursor, refresh=request.method == "POST",
-                                              **({"automatic": True} if automatic else {}))
-                        if observer else None)
+            detail = None
+            if selected == "evidence":
+                from .evidence_view import render
+                try:
+                    active = observer and getattr(observer, "selected_active", lambda _: False)(run)
+                    if not active and request.headers.get("x-citadel-refresh") not in ("automatic", "manual"):
+                        return page("Evidence Review", header + await render(request, observer, run, csrf))
+                    async with asyncio.timeout(30):
+                        observed, detail = await asyncio.gather(
+                            observer.observe(run, refresh=request.method == "POST", automatic=automatic),
+                            render(request, observer, run, csrf))
+                except OperationError:
+                    return Response("Invalid Evidence Review selection", status_code=400)
+                except TimeoutError:
+                    return Response("Observation unavailable; execution outcome remains unknown", status_code=503)
+            else:
+                observed = (await observer.observe(run, cursor=cursor, refresh=request.method == "POST",
+                                                  **({"automatic": True} if automatic else {}))
+                            if observer else None)
             current = bool(run and not request.url.path.startswith("/history"))
             content = history_content(observed, csrf, run, cursor, current=current,
                                       refresh_target=request.url.path.removesuffix("/refresh") if current else None)
-            if selected:
+            if detail:
+                content += detail
+            elif selected:
                 content += f"<aside>{perspectives[selected]} detail is not yet available. Run selection is preserved.</aside>"
             if current:
                 content = (f'<section data-run-observation="{escape(run)}">{content}</section>'
@@ -346,6 +364,16 @@ this page never plays back fixtures.</p></main>""")
                            Route("/scenario-client.mjs", scenario_client),
                            Route("/teams/{team}/runs/{run_id}", shell),
                            Route("/teams/{team}/runs/{run_id}/refresh", shell, methods=["POST"]),
+                           Route("/teams/{team}/runs/{run_id}/{projection}/page/{detail_cursor}", shell),
+                           Route("/teams/{team}/runs/{run_id}/{projection}/page/{detail_cursor}/refresh",
+                                 shell, methods=["POST"]),
+                           Route("/teams/{team}/runs/{run_id}/findings/{artifact_id}/versions/{version}", shell),
+                           Route("/teams/{team}/runs/{run_id}/findings/{artifact_id}/versions/{version}/refresh",
+                                 shell, methods=["POST"]),
+                           Route("/teams/{team}/runs/{run_id}/{collection}/" +
+                                 "{artifact_id}/versions/{version}", shell),
+                           Route("/teams/{team}/runs/{run_id}/{collection}/" +
+                                 "{artifact_id}/versions/{version}/refresh", shell, methods=["POST"]),
                            Route("/history", shell), Route("/history/refresh", shell, methods=["POST"]),
                            Route("/history/page/{cursor}", shell),
                            Route("/history/page/{cursor}/refresh", shell, methods=["POST"]),
