@@ -27,9 +27,9 @@ The explicit start directory matters: root `tests` discovery can report a
 misleading zero-test success for the older nested suites. Unit test modules are
 flat; `fixtures/` holds labelled, fictional reference rows and a canned model
 response, not downloaded source data or actual inference.
-The suite currently discovers 94 tests (75 migrated units plus 19 Operator
-landing-page units), including four in the `candidate_planner` focused example;
-later feature slices may add units. A zero-test result is not a successful gate.
+The gate began with 75 migrated units; subsequent feature slices add tests.
+Focused commands select matching flat test modules. Use the runner's reported
+count for the current total; a zero-test result is not a successful gate.
 
 These commands require only the already-installed project dependencies. No Azure
 deployment, credentials, Docker, real model, network, retained dataset,
@@ -43,6 +43,13 @@ the test step needs no network, Docker, credentials or Azure resource. No
 numerical timing benchmark or coverage target is required. Hosted workflow
 execution and branch-protection configuration are not established by local
 validation.
+
+Validate packaging changes with a non-editable wheel installation and
+`PYTHONPATH` unset, then run these same commands from the checkout root.
+Source-path overrides or editable installs alone can mask installation-layout
+failures. The Operator CLI resolves deployment assets and source fingerprints
+from that invocation checkout, not from `site-packages`; deployment still needs
+the checkout's infrastructure/image inputs, which are not wheel resources.
 
 ## Boundaries and focused areas
 
@@ -58,6 +65,7 @@ validation.
 | `peer_reads` | Actual gateway-client exact-version/hash checks through controlled HTTP; a failed finding read spends its allowance and cannot dispatch again after exhaustion. |
 | `recovery`, `operator_quiescence` | Fencing, no replay/refund, restricted explicit retry, immutable deadlines and quiescent partial work staying incomplete. |
 | `gateway`, `startup` | Local ASGI authorization/signature/path denials and explicit workload configuration/capability validation. |
+| `operator_checkout` | Relocated-package CLI uses invocation-checkout deployment resources and still denies unconfirmed paid actions. |
 | `operator_web*` | Actual protected HTTP handlers/server-rendered chooser, fake-time sessions/throttling, private login configuration and controlled deployment contracts; see [operator-web.md](operator-web.md). |
 
 Agent tests create **one runtime per case**. `agent_fixtures.py` supplies controlled
