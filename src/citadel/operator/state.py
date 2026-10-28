@@ -13,7 +13,8 @@ from uuid import UUID, uuid4
 from citadel.evidence.manifests import canonical_bytes
 
 
-ROOT = Path(__file__).resolve().parents[3]
+# Deployment assets belong to the invocation checkout, not the installed wheel.
+ROOT = Path.cwd().resolve()
 
 
 class Blocked(Exception):

@@ -1,6 +1,9 @@
 # Operator lifecycle — issue 19
 
 Run all commands from this checkout with the exact environment in [stack.md](stack.md).
+The invocation working directory is the checkout root, including for a
+non-editable installed package: deployment inputs, native-tool working
+directory and source fingerprints come from that checkout, not the wheel.
 Public entrypoint: **`python -m citadel.operator`**. Deployment uses native CLI/Bicep;
 one approved human Azure portal observation verifies the actual API Center plan.
 The [protected Operator application](operator-web.md) is the explicit hosted-UI
