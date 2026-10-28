@@ -513,6 +513,9 @@ def agent_application(runtime, trust):
             return JSONResponse({"error": "unavailable"}, status_code=504)
 
     if runtime.workload == "candidate-planner":
+        from .submission import attach_submission
+        attach_submission(app, runtime)
+
         async def observation(request, *, run_id=None, cursor=None):
             try:
                 if runtime.run_index is None:

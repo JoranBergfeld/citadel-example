@@ -187,6 +187,9 @@ class GatewayTrust:
         if target == "candidate-planner" and caller == "operator-web" and method == "POST":
             if re.fullmatch(r"/operator/runs/[A-Za-z0-9_-]{1,64}/recover/[A-Za-z0-9_-]{1,64}", path):
                 return "operator-recover"
+        if (target == "candidate-planner" and caller == "operator-web"
+                and method == "POST" and path == "/operator/scenarios"):
+            return "operator-submit"
         if target == "evidence-assessor" and caller == "operator-web" and method == "GET":
             if re.fullmatch(r"/operator/runs/[A-Za-z0-9_-]{1,64}/drafts(?:/page/[A-Za-z0-9_-]{1,64})?", path):
                 return "operator-drafts"

@@ -34,6 +34,7 @@ var findingOperations = [{
   ]
 }]
 var observationOperations = [
+  { name: 'operator-scenario-submit', method: 'POST', path: '/operator/scenarios', parameters: [] }
   { name: 'operator-runs', method: 'GET', path: '/operator/runs', parameters: [] }
   { name: 'operator-run-page', method: 'GET', path: '/operator/runs/page/{cursor}', parameters: [{ name: 'cursor', required: true, type: 'string' }] }
   { name: 'operator-run', method: 'GET', path: '/operator/runs/{runId}', parameters: [{ name: 'runId', required: true, type: 'string' }] }

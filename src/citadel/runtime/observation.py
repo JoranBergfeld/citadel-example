@@ -90,12 +90,21 @@ class RunIndex:
                 if entries[run_id]["binding"] != binding:
                     raise OperationError("conflict", "Retained run inputs are immutable")
                 return
+            self.require_resolved_dispatch(entries)
             if len(entries) >= self.capacity:
                 raise OperationError("exhausted", "Retained run index is full")
             entries[run_id] = {"binding": binding, "execution": "unknown",
                                "retained_at": self.clock(), "provenance": None, "assessed": [],
                                "assessed_complete": False}
             await self.ledger.commit(document, etag, deadline=read_deadline.get())
+
+    @staticmethod
+    def require_resolved_dispatch(entries):
+        for entry in entries.values():
+            submission = entry.get("submission", {})
+            if (entry["execution"] == "unknown" and submission
+                    and submission.get("reason") in ("unknown", "ambiguous_dispatch")):
+                raise OperationError("conflict", "Unresolved hosted dispatch blocks new UI and CLI runs")
 
     async def update(self, run_id, state, *, provenance=None):
         async with self.admission.request():
@@ -109,6 +118,20 @@ class RunIndex:
                     raise OperationError("conflict", "Original source binding cannot change")
                 entry["provenance"] = deepcopy(provenance)
             await self.ledger.commit(document, etag, deadline=read_deadline.get())
+
+    async def recovered_in_scope(self, binding, outcome):
+        """Only a persisted safe owner outcome resolves an ambiguous dispatch."""
+        expected = {"released_no_commit": "failed_no_commit",
+                    "released_quiescent_partial": "indeterminate", "already_complete": "succeeded"}
+        state = expected.get(outcome["state"])
+        if state is None or outcome["execution"] != state:
+            return
+        document, etag = await self._read()
+        entry = document["retained_runs"].get(binding["run_id"])
+        if entry is None or entry["binding"] != binding:
+            raise OperationError("conflict", "Recovery differs from the original retained binding")
+        entry["execution"] = state
+        await self.ledger.commit(document, etag, deadline=read_deadline.get())
 
     async def assessed(self, run_id, airport_ident, provenance, *, complete=False):
         """Only Planner's completed assessment handoff can extend this context."""
@@ -174,6 +197,10 @@ class RunIndex:
         result = {"run_id": binding["run_id"], "fixture": binding["fixture"],
                   "input_hash": binding["input_hash"], "execution": "unknown",
                   "state": "partial", "bindings": {"inputs": binding["input_hash"], "source": None}}
+        document, _ = await self._read()
+        submission = document["retained_runs"][run_id].get("submission")
+        if submission:
+            result["submission_reason"] = submission["reason"]
         try:
             document, _ = await operation_ledger.read()
         except OperationError as exc:
@@ -206,6 +233,16 @@ class RunIndex:
         product = record.get("product") or {}
         if product and (record.get("result") or {}).get("sha256") != sha256(product):
             raise OperationError("conflict", "Saved product differs from its exact immutable binding")
+        if product:
+            from .scenario_summary import scenario_summary
+            result["summary"] = scenario_summary(product)
+            if product.get("status") == "complete" and not product.get("brief"):
+                result["state"] = "partial"
+        elif record["state"] in ("indeterminate", "failed_no_commit"):
+            result["outcome"] = "incomplete_execution"
+            code = (record.get("result") or {}).get("code")
+            result["technical_failure"] = code if code in (
+                "unavailable", "deadline", "conflict", "exhausted", "forbidden") else "unknown"
         if product.get("provenance") is not None:
             result["bindings"]["source"] = provenance_projection(product["provenance"])
         else:

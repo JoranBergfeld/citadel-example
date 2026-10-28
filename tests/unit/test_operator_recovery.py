@@ -269,6 +269,21 @@ class RecoveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(observed["execution"], "unknown")
         self.assertEqual(self.ledger.ticket_store.active, "operator/invoke/run1")
 
+    async def test_safe_recovery_reconciles_hosted_dispatch_blocker_without_resubmitting_it(self):
+        index_ledger = self.index.ledger.ledger
+        index_ledger.document["retained_runs"]["run1"]["submission"] = {
+            "request_id": "original", "dispatch": "intent", "reason": "ambiguous_dispatch"}
+        new = {"run_id": "separate", "operation_id": "separate", "fixture": "base-source"}
+        from citadel.operations import OperationError
+        with self.assertRaises(OperationError):
+            await self.index.register("operator", new)
+        self.clock.now = 1181
+        recovered = await self.check()
+        self.assertEqual(recovered.json()["state"], "released_no_commit")
+        await self.index.register("operator", new)
+        self.assertEqual((await self.index.page())["runs"][0]["execution"], "failed_no_commit")
+        self.assertEqual(self.runtime.tasks, set())
+
     async def test_hosted_client_charges_protocol_index_audit_reads_and_failed_storage_without_retries(self):
         self.clock.now = 1181
         dispatched = []

@@ -20,6 +20,7 @@ class Observed:
     last_success: float | None = None
     state: str = "unknown"
     stale: bool = False
+    last_attempt: float | None = None
 
 
 class ObservationClient:
@@ -29,7 +30,7 @@ class ObservationClient:
         self.client = client or httpx.AsyncClient(
             transport=httpx.AsyncHTTPTransport(retries=0), follow_redirects=False)
         self.cache, self.inflight, self.aliases = OrderedDict(), {}, {}
-        self.control_epoch = 0
+        self.epoch = 0
 
     def key(self, run_id, cursor):
         if run_id is not None:
@@ -38,21 +39,33 @@ class ObservationClient:
             identity(cursor)
         return (self.admission.deployment, run_id, "planner-summary" if run_id else "run-list", cursor)
 
-    async def observe(self, run_id=None, *, cursor=None, refresh=False):
+    async def observe(self, run_id=None, *, cursor=None, refresh=False, automatic=False):
         key = self.key(run_id, cursor)
-        return await self._observe_path(key, self.path(run_id, cursor), refresh)
+        return await self._observe_path(key, self.path(run_id, cursor), refresh, automatic=automatic)
 
-    async def evidence(self, run_id, projection, *, cursor=None, artifact_id=None, version=None, refresh=False):
+    async def evidence(self, run_id, projection, *, cursor=None, artifact_id=None, version=None,
+                       refresh=False, automatic=False):
         from .evidence_view import observation_path
         path = observation_path(run_id, projection, cursor, artifact_id, version)
         key = (self.admission.deployment, run_id, "evidence-" + projection, cursor, artifact_id, version)
-        return await self._observe_path(key, path, refresh)
+        return await self._observe_path(key, path, refresh, automatic=automatic)
 
-    async def _observe_path(self, key, path, refresh):
+    def selected_active(self, run_id):
+        observed = self.cache.get(self.aliases.get(self.key(run_id, None)))
+        return bool(observed and observed.state != "exhausted"
+                    and (observed.data or {}).get("execution") in ("pending", "running"))
+
+    async def _observe_path(self, key, path, refresh, *, automatic=False):
         if key in self.inflight:
             return deepcopy(await asyncio.shield(self.inflight[key]))
         exact_key = self.aliases.get(key)
         previous = self.cache.get(exact_key, Observed())
+        if previous.state == "exhausted":
+            return deepcopy(previous)
+        if automatic and previous.last_attempt is not None and self.clock() - previous.last_attempt < 15:
+            return deepcopy(previous)
+        if automatic and key[2] in ("planner-summary", "run-list") and (previous.data or {}).get("execution") not in ("pending", "running"):
+            return deepcopy(previous)
         if exact_key in self.cache and not refresh:
             return deepcopy(previous)
         if len(self.inflight) >= 32:
@@ -69,7 +82,7 @@ class ObservationClient:
             "/operator/runs/page/" + cursor if cursor else "/operator/runs")
 
     async def _fetch(self, key, path, previous):
-        epoch = self.control_epoch
+        epoch = self.epoch
         try:
             async with self.admission.request():
                 await self.admission.charge()
@@ -91,8 +104,10 @@ class ObservationClient:
             observed = Observed(previous.data, previous.last_success, state, previous.data is not None)
         except (httpx.HTTPError, TimeoutError, ValueError, TypeError):
             observed = Observed(previous.data, previous.last_success, "unavailable", previous.data is not None)
-        if epoch != self.control_epoch:
-            return Observed(previous.data, previous.last_success, "unknown", previous.data is not None)
+        observed.last_attempt = self.clock()
+        if epoch != self.epoch:
+            return Observed(observed.data, observed.last_success, "unknown", observed.data is not None,
+                            observed.last_attempt)
         exact = key + (sha256((observed.data or {}).get("bindings", {})),)
         old = self.aliases.get(key)
         if old is not None and old != exact:
@@ -107,7 +122,7 @@ class ObservationClient:
 
     def invalidate(self, run_id):
         """A pre-control refresh may not repopulate invalidated mutable state."""
-        self.control_epoch += 1
+        self.epoch += 1
         for key in list(self.aliases):
             if key[1] == run_id or key[2] == "run-list":
                 self.cache.pop(self.aliases.pop(key), None)

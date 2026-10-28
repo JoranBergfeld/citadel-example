@@ -38,8 +38,10 @@ class Recovery:
                 or binding["inputs"]["run_id"] != run_id
                 or binding["inputs"]["operation_id"] != binding["operation_id"]):
             raise OperationError("conflict", "Original retained ownership or inputs are unavailable")
-        return await self.check(binding["caller"], binding["operation_id"], run_id,
-                                request_id, inputs=binding["inputs"])
+        outcome = await self.check(binding["caller"], binding["operation_id"], run_id,
+                                   request_id, inputs=binding["inputs"])
+        await self.runtime.run_index.recovered_in_scope(binding, outcome)
+        return outcome
 
     async def check(self, caller, operation_id, run_id, request_id, *, inputs=None,
                     input_hash=None, grant_hash=None):

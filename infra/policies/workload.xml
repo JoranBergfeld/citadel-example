@@ -20,7 +20,7 @@
       if (op == &quot;operator-reference&quot;) {
         return &quot;__TARGET__&quot; == &quot;reference-data&quot; &amp;&amp; caller == &quot;operator-web&quot;;
       }
-      if (new [] { &quot;operator-runs&quot;, &quot;operator-run-page&quot;, &quot;operator-run&quot; }.Contains(op)) {
+      if (new [] { &quot;operator-runs&quot;, &quot;operator-run-page&quot;, &quot;operator-run&quot;, &quot;operator-scenario-submit&quot; }.Contains(op)) {
         return &quot;__TARGET__&quot; == &quot;candidate-planner&quot; &amp;&amp; caller == &quot;operator-web&quot;;
       }
       if (op == &quot;findings-read&quot;) {
@@ -68,6 +68,7 @@
       var op = context.Operation.Id;
       if (op == &quot;operator-recover&quot;) { return &quot;/operator/runs/&quot; + context.Request.MatchedParameters[&quot;runId&quot;] + &quot;/recover/&quot; + context.Request.MatchedParameters[&quot;requestId&quot;]; }
       if (op == &quot;operator-recover-child&quot;) { return &quot;/operator/recovery/&quot; + context.Request.MatchedParameters[&quot;operationId&quot;] + &quot;/&quot; + context.Request.MatchedParameters[&quot;requestId&quot;]; }
+      if (op == &quot;operator-scenario-submit&quot;) { return &quot;/operator/scenarios&quot;; }
       if (op == &quot;operator-draft&quot;) {
         return &quot;/operator/runs/&quot; + context.Request.MatchedParameters[&quot;runId&quot;] + &quot;/drafts/&quot; + context.Request.MatchedParameters[&quot;draftId&quot;] + &quot;/versions/&quot; + context.Request.MatchedParameters[&quot;version&quot;];
       }

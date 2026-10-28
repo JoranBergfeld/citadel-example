@@ -7,9 +7,9 @@ directory and source fingerprints come from that checkout, not the wheel.
 Public entrypoint: **`python -m citadel.operator`**. Deployment uses native CLI/Bicep;
 one approved human Azure portal observation verifies the actual API Center plan.
 The [protected Operator application](operator-web.md) is the explicit hosted-UI
-exception: it reopens retained run summaries, including CLI-created and partial
-submissions and explicitly Check and recover incomplete runs, but cannot yet run browser scenarios. Infrastructure
-administration stays CLI/manual. No human-user creation, silent region/model
+exception: it submits browser scenarios, reopens retained run summaries (including
+CLI-created and partial submissions), and explicitly checks and recovers incomplete
+runs. Infrastructure administration stays CLI/manual. No human-user creation, silent region/model
 replacement, or automatic cleanup.
 Certificate generation declares `cryptography==50.0.2` directly; that exact version
 and all its artifacts were already in the accepted lock. No resolved version,

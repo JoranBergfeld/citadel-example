@@ -25,3 +25,5 @@ jobs:
           python -m pip install --no-deps --no-build-isolation .
       - name: Run offline unit gate
         run: python -m unittest discover -s tests/unit -v
+      - name: Run dependency-free client units
+        run: node --test tests/client/*.test.mjs
