@@ -7,7 +7,7 @@ import time
 from .state import Blocked, digest, read_private
 
 
-def runs_quiescent(lifecycle, *, exclude=None):
+def runs_quiescent(lifecycle, *, exclude=None, clock=time.time):
     for run_id, run in lifecycle.value["runs"].items():
         if run_id == exclude or run["state"] in ("succeeded", "failed_no_commit"):
             continue
@@ -26,7 +26,7 @@ def runs_quiescent(lifecycle, *, exclude=None):
                 or proof.get("configuration") != digest(lifecycle.config)
                 or proof.get("run_id") != run_id or proof.get("original_run") != original
                 or type(verified) not in (int, float) or not math.isfinite(verified)
-                or not run["deadline"] + 16 <= verified <= time.time()
+                or not run["deadline"] + 16 <= verified <= clock()
                 or not isinstance(proof.get("approval"), str) or not proof["approval"]
                 or len(snapshots) != 2
                 or any(not isinstance(row, dict) or not re.fullmatch(r"[a-f0-9]{64}", row.get("sha256", ""))

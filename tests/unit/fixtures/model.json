@@ -1,0 +1,12 @@
+{
+  "id": "unit-fixture-not-real-inference",
+  "object": "chat.completion",
+  "created": 0,
+  "model": "unit-fixture",
+  "choices": [{
+    "index": 0,
+    "message": {"role": "assistant", "content": "Fictional unit-fixture prose; source accuracy unverified."},
+    "finish_reason": "stop"
+  }],
+  "usage": {"prompt_tokens": 100, "completion_tokens": 20, "total_tokens": 120}
+}

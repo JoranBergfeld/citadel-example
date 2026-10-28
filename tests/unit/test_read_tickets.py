@@ -7,9 +7,12 @@ import httpx2
 from agent_framework_a2a import A2AAgent
 
 from citadel.operations.testing import MemoryLedger
+from citadel.operations import OperationError
 from citadel.runtime.agents import Runtime, agent_application
 from citadel.runtime.model import GovernedModel
-from test_reference import signed, trust
+from citadel.runtime.state import ScopedLedger, read_scope
+from citadel.runtime.tickets import TicketPool
+from tests.unit.gateway_fixtures import signed, trust
 
 
 class CountingLedger(MemoryLedger):
@@ -20,6 +23,53 @@ class CountingLedger(MemoryLedger):
     async def read(self):
         self.read_attempts += 1
         return await super().read()
+
+
+class SharedReadTicketTests(unittest.IsolatedAsyncioTestCase):
+    async def test_reconstructed_concurrent_pools_cannot_spend_conditional_markers_twice(self):
+        ledger = CountingLedger(clock=lambda: 1000)
+        store = ledger.ticket_store
+        await store.open_pool("operator/invoke/run1")
+
+        async def spend():
+            store.cursors.clear()
+            pool = TicketPool(store, "operator/invoke/run1", 8, clock=lambda: 1000)
+            with read_scope(pool, deadline=1900):
+                try:
+                    await ScopedLedger(ledger).read()
+                    return True
+                except OperationError as exc:
+                    self.assertEqual(exc.code, "exhausted")
+                    return False
+
+        results = await asyncio.gather(*(spend() for _ in range(16)))
+        self.assertEqual(sum(results), 8)
+        self.assertEqual(ledger.read_attempts, 8)
+
+    async def test_lost_marker_response_never_dispatches_a_read_or_refunds_its_slot(self):
+        ledger = CountingLedger(clock=lambda: 1000)
+        store = ledger.ticket_store
+        await store.open_pool("operator/invoke/run1")
+        create = store.create_marker
+
+        async def lost_marker(*args):
+            await create(*args)
+            raise OperationError("indeterminate", "Unit-fixture committed response loss")
+
+        store.create_marker = lost_marker
+        pool = TicketPool(store, "operator/invoke/run1", 1, clock=lambda: 1000)
+        with read_scope(pool, deadline=1900):
+            with self.assertRaises(OperationError) as caught:
+                await ScopedLedger(ledger).read()
+        self.assertEqual(caught.exception.code, "indeterminate")
+        store.create_marker = create
+        store.cursors.clear()
+        restarted = TicketPool(store, "operator/invoke/run1", 1, clock=lambda: 1000)
+        with read_scope(restarted, deadline=1900):
+            with self.assertRaises(OperationError) as caught:
+                await ScopedLedger(ledger).read()
+        self.assertEqual(caught.exception.code, "exhausted")
+        self.assertEqual(ledger.read_attempts, 0)
 
 
 class ExternalReadBudgetTests(unittest.IsolatedAsyncioTestCase):
