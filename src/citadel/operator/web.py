@@ -198,7 +198,7 @@ async def form(request):
         return {}
 
 
-def create_app(config, *, clock=time.monotonic, observation=None, lifespan=None):
+def create_app(config, *, clock=time.monotonic, observation=None, recovery=None, lifespan=None):
     auth = Authentication(config, clock)
 
     def same_origin(request):
@@ -292,6 +292,28 @@ this page never plays back fixtures.</p></main>""")
         response.delete_cookie(COOKIE, path="/", secure=True, httponly=True, samesite="strict")
         return response
 
+    async def recover(request):
+        csrf = auth.context(request.cookies.get(COOKIE))
+        if not csrf:
+            return login_page(401)
+        values = await form(request)
+        if (not same_origin(request) or not hmac.compare_digest(
+                values.get("csrf", "").encode(), csrf.encode())):
+            return Response("Request denied", status_code=403)
+        from citadel.operations import OperationError, identity
+        from .recovery import recovery_content
+        try:
+            run_id = identity(request.path_params["run_id"])
+            request_id = identity(values.get("request_id"))
+        except OperationError:
+            return Response("Invalid control identity", status_code=400)
+        controller = recovery or getattr(request.app.state, "recovery", None)
+        if controller is None:
+            return Response("Recovery unavailable; no work dispatched", status_code=503)
+        outcome = await controller.check(run_id, request_id)
+        return page("Recovery outcome", recovery_content(run_id, csrf, outcome)
+                    + f'<a href="/history/{escape(run_id)}">Reopen retained run</a>')
+
     async def style(request):
         return Response(STYLE, media_type="text/css")
 
@@ -302,6 +324,7 @@ this page never plays back fixtures.</p></main>""")
                            Route("/history/page/{cursor}/refresh", shell, methods=["POST"]),
                            Route("/history/{run_id}", shell),
                            Route("/history/{run_id}/refresh", shell, methods=["POST"]),
+                           Route("/history/{run_id}/recover", recover, methods=["POST"]),
                            Route("/login", login, methods=["GET", "POST"]),
                            Route("/logout", logout, methods=["POST"]), Route("/style.css", style)])
 
@@ -365,6 +388,8 @@ def history_content(observed, csrf, run_id, cursor):
             product = bindings["product"]
             content += f'<p>Product {escape(product["artifact_id"])} · version {escape(str(product["version"]))} · {escape(product["sha256"])}</p>'
         content += "</details>"
+        from .recovery import recovery_content
+        content += recovery_content(run_id, csrf, data.get("recovery"))
     else:
         content += "<ul>" + "".join(
             f'<li><a href="/history/{escape(item["run_id"])}">{escape(item["run_id"])}</a>'
@@ -393,6 +418,7 @@ async def production_observation(app):
     from citadel.runtime.observation import DeploymentReads
     from citadel.runtime.tickets import AzureTicketStore
     from .observation import ObservationClient
+    from .recovery import RecoveryClient
     from uuid import UUID
 
     client_id = str(UUID(os.environ["AZURE_CLIENT_ID"]))
@@ -408,6 +434,7 @@ async def production_observation(app):
             reads = DeploymentReads(AzureTicketStore(container), os.environ["CITADEL_DEPLOYMENT_ID"])
             observer = ObservationClient(gateway, credential_value, reads)
             app.state.observation = observer
+            app.state.recovery = RecoveryClient(observer)
             try:
                 yield
             finally:

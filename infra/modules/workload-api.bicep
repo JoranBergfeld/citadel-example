@@ -38,8 +38,26 @@ var observationOperations = [
   { name: 'operator-run-page', method: 'GET', path: '/operator/runs/page/{cursor}', parameters: [{ name: 'cursor', required: true, type: 'string' }] }
   { name: 'operator-run', method: 'GET', path: '/operator/runs/{runId}', parameters: [{ name: 'runId', required: true, type: 'string' }] }
 ]
+var recoveryOperations = target == 'candidate-planner' ? [{
+  name: 'operator-recover'
+  method: 'POST'
+  path: '/operator/runs/{runId}/recover/{requestId}'
+  parameters: [
+    { name: 'runId', required: true, type: 'string' }
+    { name: 'requestId', required: true, type: 'string' }
+  ]
+}] : [{
+  name: 'operator-recover-child'
+  method: 'POST'
+  path: '/operator/recovery/{operationId}/{requestId}'
+  parameters: [
+    { name: 'operationId', required: true, type: 'string' }
+    { name: 'requestId', required: true, type: 'string' }
+  ]
+}]
 var operations = target == 'reference-data' ? mcpOperations : concat(agentOperations,
-  target == 'release-reviewer' ? findingOperations : [], target == 'candidate-planner' ? observationOperations : [])
+  target == 'release-reviewer' ? findingOperations : [], target == 'candidate-planner' ? observationOperations : [],
+  recoveryOperations)
 resource routes 'Microsoft.ApiManagement/service/apis/operations@2024-05-01' = [for operation in operations: {
   parent: api
   name: operation.name

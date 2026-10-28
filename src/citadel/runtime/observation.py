@@ -158,6 +158,17 @@ class RunIndex:
                 return result
             raise
         record = document["operations"].get(operation_key(binding["caller"], "invoke", binding["operation_id"]))
+        controls = [control for control in document.get("operator_controls", {}).values()
+                    if control["binding"]["run_id"] == binding["run_id"]
+                    and control["binding"]["operation"] == operation_key(
+                        binding["caller"], "invoke", binding["operation_id"])
+                    and control["binding"]["input_hash"] == binding["input_hash"]]
+        if controls:
+            latest = max(reversed(controls), key=lambda control: control["requested_at"])
+            outcome = latest.get("outcome")
+            result["recovery"] = ({key: outcome[key] for key in (
+                "run_id", "request_id", "state", "execution", "reason", "recorded_at", "retryable")}
+                if outcome else {"state": "unknown", "reason": "Control intent retained; outcome unknown."})
         if record is None:
             return result
         payload = binding["inputs"]

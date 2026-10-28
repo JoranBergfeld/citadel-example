@@ -263,12 +263,24 @@ infrastructure, rejection and insufficient evidence are distinct. Ambiguous
 external effects stay incomplete; missing state is not proof of non-execution.
 `mark_incomplete` fences local ownership without claiming `failed_no_commit`.
 If no storage deadline/ticket remains, durable running state remains incomplete.
-Existing explicit operations fencing/reconciliation/retry APIs are retained;
-this host adds no privileged HTTP recovery endpoint.
+Existing explicit operations fencing/reconciliation/retry APIs are retained.
+The hosted Operator now has a distinct, narrowly authorized recovery endpoint;
+it is not a workload ownership bypass. See [hosted recovery](operator-web.md#explicit-check-and-recover).
 The existing owner-bound `SendMessage` accepts metadata
 `{"citadel_recovery": true}` to invoke explicit fencing of that same
 input-bound operation. It never schedules persisted work and cannot recover a
 different caller's operation or escape exhausted tickets.
+
+Hosted `POST /operator/runs/{run_id}/recover/{request_id}` instead resolves the
+original retained Planner binding and uses the deployment recovery-proof pool.
+Parent services follow only exact recorded grants through separately authorized
+`POST /operator/recovery/{operation_id}/{request_id}` control actions. Those
+handlers never invoke `accept`, retry or workflow execution. Intent/proof/outcome
+records share each owner's existing operation ledger; no UI team-data role or new
+content store is introduced. Every physical ledger/protocol read is charged at
+dispatch, including audit and supporting bindings, with a single 30-second total
+deadline and no read retries. Quiescent partial work remains indeterminate and
+retained; unresolved model admissions remain blocked.
 
 ## Development and merge gate
 

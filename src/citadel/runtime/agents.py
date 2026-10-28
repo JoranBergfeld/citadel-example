@@ -34,12 +34,14 @@ from .tickets import CAPACITY, TicketPool
 class Runtime:
     def __init__(self, workload, ledger, *, model, peers, gateway_url,
                  artifacts=None, drafts=None, tokens_per_minute=120000, clock=time.time,
-                 ticket_store=None, acceptance_hold=None, workflow_hold=None, run_index=None):
+                 ticket_store=None, acceptance_hold=None, workflow_hold=None, run_index=None,
+                 recovery_admission=None):
         self.workload, self.model, self.peers, self.clock = workload, model, peers, clock
         self.ledger = ScopedLedger(ledger)
         self.acceptance_hold = acceptance_hold
         self.workflow_hold = workflow_hold
         self.run_index = run_index
+        self.recovery_admission = recovery_admission or (run_index.admission if run_index else None)
         self.ops = Operations(self.ledger, workload=workload, clock=clock)
         self.accounting = Accounting(self.ledger, workload=workload, clock=clock,
                                      tokens_per_minute=tokens_per_minute)
@@ -473,6 +475,8 @@ def agent_application(runtime, trust):
         await runtime.shutdown()
 
     app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
+    from .recovery import install_recovery_routes
+    install_recovery_routes(app, runtime)
     add_a2a_routes_to_fastapi(app, jsonrpc_routes=create_jsonrpc_routes(
         DurableHandler(runtime), "/a2a", context_builder=TrustedContext(), enable_v0_3_compat=False))
 

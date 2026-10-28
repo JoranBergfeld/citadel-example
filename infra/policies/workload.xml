@@ -5,6 +5,12 @@
       var caller = (string)context.Variables[&quot;caller&quot;];
       var invocation = new [] { __CALLERS__ };
       var op = context.Operation.Id;
+      if (op == &quot;operator-recover&quot;) {
+        return &quot;__TARGET__&quot; == &quot;candidate-planner&quot; &amp;&amp; caller == &quot;operator-web&quot;;
+      }
+      if (op == &quot;operator-recover-child&quot;) {
+        return &quot;__TARGET__&quot; != &quot;candidate-planner&quot; &amp;&amp; &quot;__TARGET__&quot; != &quot;reference-data&quot; &amp;&amp; invocation.Contains(caller);
+      }
       if (new [] { &quot;operator-runs&quot;, &quot;operator-run-page&quot;, &quot;operator-run&quot; }.Contains(op)) {
         return &quot;__TARGET__&quot; == &quot;candidate-planner&quot; &amp;&amp; caller == &quot;operator-web&quot;;
       }
@@ -51,6 +57,8 @@
     </choose>
     <set-variable name="originPath" value="@{
       var op = context.Operation.Id;
+      if (op == &quot;operator-recover&quot;) { return &quot;/operator/runs/&quot; + context.Request.MatchedParameters[&quot;runId&quot;] + &quot;/recover/&quot; + context.Request.MatchedParameters[&quot;requestId&quot;]; }
+      if (op == &quot;operator-recover-child&quot;) { return &quot;/operator/recovery/&quot; + context.Request.MatchedParameters[&quot;operationId&quot;] + &quot;/&quot; + context.Request.MatchedParameters[&quot;requestId&quot;]; }
       if (op == &quot;operator-runs&quot;) { return &quot;/operator/runs&quot;; }
       if (op == &quot;operator-run-page&quot;) { return &quot;/operator/runs/page/&quot; + context.Request.MatchedParameters[&quot;cursor&quot;]; }
       if (op == &quot;operator-run&quot;) { return &quot;/operator/runs/&quot; + context.Request.MatchedParameters[&quot;runId&quot;]; }

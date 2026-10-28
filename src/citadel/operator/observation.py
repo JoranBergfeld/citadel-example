@@ -29,6 +29,7 @@ class ObservationClient:
         self.client = client or httpx.AsyncClient(
             transport=httpx.AsyncHTTPTransport(retries=0), follow_redirects=False)
         self.cache, self.inflight, self.aliases = OrderedDict(), {}, {}
+        self.control_epoch = 0
 
     def key(self, run_id, cursor):
         if run_id is not None:
@@ -54,6 +55,7 @@ class ObservationClient:
         return deepcopy(await asyncio.shield(task))
 
     async def _fetch(self, key, run_id, cursor, previous):
+        epoch = self.control_epoch
         try:
             async with self.admission.request():
                 path = ("/operator/runs/" + run_id if run_id is not None else
@@ -77,6 +79,8 @@ class ObservationClient:
             observed = Observed(previous.data, previous.last_success, state, previous.data is not None)
         except (httpx.HTTPError, TimeoutError, ValueError, TypeError):
             observed = Observed(previous.data, previous.last_success, "unavailable", previous.data is not None)
+        if epoch != self.control_epoch:
+            return Observed(previous.data, previous.last_success, "unknown", previous.data is not None)
         exact = key + (sha256((observed.data or {}).get("bindings", {})),)
         old = self.aliases.get(key)
         if old is not None and old != exact:
@@ -90,7 +94,8 @@ class ObservationClient:
         return observed
 
     def invalidate(self, run_id):
-        """Explicit future control actions invalidate mutable projections only."""
+        """A pre-control refresh may not repopulate invalidated mutable state."""
+        self.control_epoch += 1
         for key in list(self.aliases):
             if key[1] == run_id or key[2] == "run-list":
                 self.cache.pop(self.aliases.pop(key), None)
