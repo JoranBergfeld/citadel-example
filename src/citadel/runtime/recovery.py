@@ -30,6 +30,13 @@ class Recovery:
         self.ops = Operations(ProofLedger(self.ledger), workload=runtime.workload, clock=self.clock)
 
     async def check_run(self, run_id, request_id):
+        binding = await self.resolve_run(run_id)
+        outcome = await self.check(binding["caller"], binding["operation_id"], run_id,
+                                   request_id, inputs=binding["inputs"])
+        await self.runtime.run_index.recovered_in_scope(binding, outcome)
+        return outcome
+
+    async def resolve_run(self, run_id):
         binding = await self.runtime.run_index.resolve_in_scope(identity(run_id))
         if (binding["caller"] != "operator" or binding["inputs"].keys() != {
                 "run_id", "operation_id", "fixture"}
@@ -38,10 +45,7 @@ class Recovery:
                 or binding["inputs"]["run_id"] != run_id
                 or binding["inputs"]["operation_id"] != binding["operation_id"]):
             raise OperationError("conflict", "Original retained ownership or inputs are unavailable")
-        outcome = await self.check(binding["caller"], binding["operation_id"], run_id,
-                                   request_id, inputs=binding["inputs"])
-        await self.runtime.run_index.recovered_in_scope(binding, outcome)
-        return outcome
+        return binding
 
     async def check(self, caller, operation_id, run_id, request_id, *, inputs=None,
                     input_hash=None, grant_hash=None):
@@ -59,7 +63,7 @@ class Recovery:
                    "grant_hash": grant_hash}
         control = controls.get(request_id)
         if control is not None:
-            if control["binding"] != binding:
+            if control["binding"] != binding or control["action"] != "check-and-recover":
                 raise OperationError("conflict", "Control request is bound to another run")
             if control.get("outcome") is not None and control["outcome"]["state"] != "unknown":
                 return deepcopy(control["outcome"])
@@ -122,9 +126,18 @@ class Recovery:
             document["operator_controls"][request_id]["proof"] = proof
             await self.ledger.commit(document, etag, deadline=read_deadline.get())
             if self.runtime.workload == "candidate-planner":
-                await self.runtime.ticket_store.release_run(
-                    self.runtime.pool(caller, operation_id).scope,
+                scope = self.runtime.pool(caller, operation_id).scope
+                await self.runtime.ticket_store.release_run(scope,
                     generation=state.get("admission_generation", 0))
+                # Retry records the exact proposed generation before acquiring
+                # its lease. A lost acquisition may precede Operations.retry.
+                proposed = {"operation_generation": state["generation"],
+                            "generation": state["generation"] + 1}
+                if state["state"] == "failed_no_commit" and any(
+                        intent["action"] == "retry" and intent["binding"] == binding
+                        and intent.get("admission") == proposed
+                        for intent in document["operator_controls"].values()):
+                    await self.runtime.ticket_store.release_run(scope, generation=proposed["generation"])
             label = ("released_quiescent_partial" if partial else
                      "already_complete" if state["state"] == "succeeded" else "released_no_commit")
             child = self.runtime.workload != "candidate-planner"

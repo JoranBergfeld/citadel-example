@@ -149,12 +149,15 @@ class Runtime:
                 with read_scope(pool, deadline=deadline, cache=snapshots.get()):
                     ownership = await self.ops.claim(caller, "invoke", operation_id,
                                                      worker=uuid4().hex, lease_seconds=180)
-                    self.renew_at[ownership.key] = self.clock() + 90
-                    self.events[operation_id] = asyncio.Event()
-                    task = asyncio.create_task(self._execute(caller, payload, ownership, deadline))
-                    self.tasks.add(task)
-                    task.add_done_callback(self.tasks.discard)
+                    self.schedule(caller, payload, ownership, deadline)
             return accepted
+
+    def schedule(self, caller, payload, ownership, deadline):
+        self.renew_at[ownership.key] = self.clock() + 90
+        self.events[payload["operation_id"]] = asyncio.Event()
+        task = asyncio.create_task(self._execute(caller, payload, ownership, deadline))
+        self.tasks.add(task)
+        task.add_done_callback(self.tasks.discard)
 
     async def _execute(self, caller, payload, ownership, deadline):
         with correlate(payload["run_id"], payload["operation_id"], self.workload):
@@ -498,6 +501,8 @@ def agent_application(runtime, trust):
     app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
     from .recovery import install_recovery_routes
     install_recovery_routes(app, runtime)
+    from .retry import install_retry_routes
+    install_retry_routes(app, runtime)
     if runtime.workload in ("evidence-assessor", "release-reviewer"):
         from .evidence_observation import install
         install(app, runtime)
