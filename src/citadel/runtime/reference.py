@@ -15,7 +15,7 @@ from citadel.gateway import GatewayTrust
 from citadel.acceptance.telemetry import correlate, emit
 
 
-def reference_application(reference, trust):
+def reference_application(reference, trust, *, observation=None):
     server = Server("ReferenceData", version="1.0.0")
     schemas = {
         "search_airports": {
@@ -77,7 +77,7 @@ def reference_application(reference, trust):
 
     return GatewayTrust(Starlette(routes=[
         Route("/mcp", endpoint=manager.asgi_app, methods=["POST", "GET", "DELETE"]),
-    ], lifespan=lifespan), trust)
+    ] + (observation.routes() if observation is not None else []), lifespan=lifespan), trust)
 
 
 class RetrievedReference(EvidenceAssessment):

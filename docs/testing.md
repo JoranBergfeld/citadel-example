@@ -28,8 +28,8 @@ misleading zero-test success for the older nested suites. Unit test modules are
 flat; `fixtures/` holds labelled, fictional reference rows and a canned model
 response, not downloaded source data or actual inference.
 The gate began with 75 migrated units; subsequent feature slices add tests.
-The `candidate_planner` focused example discovers four tests. Use the runner's
-reported count for the current total; a zero-test result is not a successful gate.
+Focused commands select matching flat test modules. Use the runner's reported
+count for the current total; a zero-test result is not a successful gate.
 
 These commands require only the already-installed project dependencies. No Azure
 deployment, credentials, Docker, real model, network, retained dataset,
