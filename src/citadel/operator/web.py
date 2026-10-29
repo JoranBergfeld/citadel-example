@@ -441,7 +441,7 @@ this page never plays back fixtures.</p></main>""")
             "Pragma": "no-cache",
             "Content-Security-Policy": "default-src 'none'; style-src 'self'; script-src 'self'; connect-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'",
             "X-Content-Type-Options": "nosniff",
-            "Referrer-Policy": "no-referrer",
+            "Referrer-Policy": "same-origin",
             "Strict-Transport-Security": "max-age=31536000",
         })
         return response

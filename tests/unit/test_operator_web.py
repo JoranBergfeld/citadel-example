@@ -69,6 +69,24 @@ class OperatorWebTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status_code, 303)
         self.assertEqual((await self.client.get("/")).status_code, 401)
 
+    async def test_browser_form_policy_preserves_login_and_csrf_protected_logout(self):
+        response = await self.client.get("/login")
+        # Fetch suppresses navigation POST Origin under the no-referrer policy.
+        origin = "null" if response.headers.get("referrer-policy") == "no-referrer" else ORIGIN
+        response = await self.client.post("/login", headers={"origin": origin},
+            data={"username": "test-operator", "password": PASSWORD})
+        self.assertEqual(response.status_code, 303)
+        response = await self.client.get("/")
+        self.assertEqual(response.status_code, 200)
+        csrf = re.search(r'name="csrf" value="([^"]+)"', response.text)[1]
+        origin = "null" if response.headers.get("referrer-policy") == "no-referrer" else ORIGIN
+        response = await self.client.post("/logout", headers={"origin": origin}, data={"csrf": csrf})
+        self.assertEqual(response.status_code, 303)
+        self.assertEqual((await self.client.get("/")).status_code, 401)
+        response = await self.client.post("/login", headers={"origin": "null"},
+            data={"username": "test-operator", "password": PASSWORD})
+        self.assertEqual(response.status_code, 403)
+
     async def test_login_replaces_session_and_absolute_expiry_never_slides(self):
         await self.login()
         first_cookie = self.client.cookies.get("__Host-citadel-session")
