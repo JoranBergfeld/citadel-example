@@ -13,7 +13,7 @@ from citadel.operator.lifecycle import Lifecycle
 from citadel.operator.native import Native
 from citadel.operator.state import Blocked, State, read_private, write_private
 from citadel.operator.web import hash_passphrase
-from citadel.operator.web_admin import verify
+from citadel.operator.web_admin import stop, verify
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -150,6 +150,27 @@ class AdministrationTests(unittest.TestCase):
                     lifecycle.arm("create")
         self.assertFalse(any(call[:2] == ("deployment", "sub") for call in self.management.calls))
         self.assertFalse((self.state / "operator-web-auth.json").exists())
+
+    def test_failed_initial_creation_without_any_revision_does_not_require_stop(self):
+        self.management.status = None
+        self.management.app_document["properties"] = {"provisioningState": "Failed"}
+        with State(self.state).locked() as state:
+            lifecycle = Lifecycle(state, self.management)
+            with patch.object(self.management, "collection", return_value=[], create=True) as revisions:
+                stop(lifecycle)
+        revisions.assert_called_once_with(APP + "/revisions", "2025-01-01")
+        self.assertNotIn(("post", APP + "/stop", "2025-01-01"), self.management.calls)
+
+    def test_failed_app_with_revision_still_requires_confirmed_stop(self):
+        self.management.status = None
+        self.management.app_document["properties"] = {"provisioningState": "Failed"}
+        with State(self.state).locked() as state:
+            lifecycle = Lifecycle(state, self.management)
+            with patch.object(self.management, "collection", return_value=[{"id": APP + "/revisions/old"}],
+                              create=True):
+                stop(lifecycle)
+        self.assertIn(("post", APP + "/stop", "2025-01-01"), self.management.calls)
+        self.assertEqual(self.management.status, "Stopped")
 
     def test_deployed_operator_rejects_scaling_and_extra_authority(self):
         identity = GROUP + "/providers/Microsoft.ManagedIdentity/userAssignedIdentities/webtest-operator-web"

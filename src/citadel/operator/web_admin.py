@@ -40,6 +40,14 @@ def stop(lifecycle):
     observed = lifecycle.native.rest("get", resource, "2025-01-01")
     if (observed.get("tags") or {}).get("citadel-deployment") != lifecycle.id:
         raise Blocked("operator_web_ownership_required")
+    properties = observed["properties"]
+    if (properties.get("provisioningState") == "Failed"
+            and properties.get("runningStatus") is None
+            and not properties.get("latestRevisionName")
+            and not properties.get("latestReadyRevisionName")
+            and not lifecycle.native.collection(resource + "/revisions", "2025-01-01")):
+        lifecycle.state.event("operator-web", "never_started_no_revisions")
+        return
     lifecycle.native.rest("post", resource + "/stop", "2025-01-01")
     deadline = time.monotonic() + 120
     for _ in range(60):
