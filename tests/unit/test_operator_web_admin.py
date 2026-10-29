@@ -212,6 +212,12 @@ class AdministrationTests(unittest.TestCase):
         with State(self.state).locked() as state:
             lifecycle = Lifecycle(state, self.management)
             verify(lifecycle)
+            self.management.app_document["identity"]["userAssignedIdentities"] = {identity.upper(): {}}
+            verify(lifecycle)
+            self.management.app_document["identity"]["userAssignedIdentities"] = {identity + "-foreign": {}}
+            with self.assertRaises(Blocked):
+                verify(lifecycle)
+            self.management.app_document["identity"]["userAssignedIdentities"] = {identity: {}}
             template = self.management.app_document["properties"]["template"]
             template["scale"]["maxReplicas"] = 2
             with self.assertRaises(Blocked):

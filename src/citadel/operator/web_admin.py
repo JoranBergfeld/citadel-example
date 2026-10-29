@@ -74,7 +74,7 @@ def verify(lifecycle):
         raise Blocked("operator_web_inventory_required")
     inventory = lifecycle.value["outputs"]["operatorInventory"]
     identity = inventory["foundation"]["identity"]
-    if identity in {a["identity"] for a in lifecycle.value["outputs"]["appInventory"]}:
+    if identity.lower() in {a["identity"].lower() for a in lifecycle.value["outputs"]["appInventory"]}:
         raise Blocked("operator_web_distinct_identity_required")
     document = lifecycle.native.rest("get", resource, "2025-01-01")
     properties = document["properties"]
@@ -97,7 +97,7 @@ def verify(lifecycle):
         ]
     if (properties.get("provisioningState") != "Succeeded"
             or (document.get("tags") or {}).get("citadel-deployment") != lifecycle.id
-            or set(document["identity"]["userAssignedIdentities"]) != {identity}
+            or {resource.lower() for resource in document["identity"]["userAssignedIdentities"]} != {identity.lower()}
             or configuration.get("activeRevisionsMode") != "Single"
             or ingress.get("allowInsecure") is not False or ingress.get("external") is not True
             or ingress.get("targetPort") != 8000
