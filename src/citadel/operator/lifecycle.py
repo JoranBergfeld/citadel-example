@@ -688,7 +688,7 @@ class Lifecycle:
         plan = observation_summary(self)
         telemetry = []
         workspaces = [r for r in self.value["inventory"] if "/Microsoft.OperationalInsights/workspaces/" in r
-                      and "/tables/" not in r]
+                      and r.count("/") == 8]
         for workspace in workspaces:
             if not any(workspace.lower().startswith(r.lower() + "/") for r in self.value["active"]
                        if "/providers/" not in r):
@@ -791,7 +791,7 @@ class Lifecycle:
         recoverable = [{"kind": "vault", "name": v["name"]} for v in vaults
                        if v["name"] in owned_names and v.get("properties", {}).get("vaultId", "").lower() in owned_vaults]
         workspaces = [r for r in self.value["inventory"] if "/Microsoft.OperationalInsights/workspaces/" in r
-                      and "/tables/" not in r]
+                      and r.count("/") == 8]
         deleted_workspaces = self.native.az("monitor", "log-analytics", "workspace", "list-deleted-workspaces",
                                             "--subscription", self.config["subscriptionId"])
         recoverable += [{"kind": "workspace", "name": w["name"]}

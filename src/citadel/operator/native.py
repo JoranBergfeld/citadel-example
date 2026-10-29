@@ -160,10 +160,10 @@ class Native:
 
     def telemetry(self, workspace_id, *, since, timeout):
         query = (
-            "union withsource=Source AppRequests, AppDependencies, AppTraces, "
+            "union withsource=CitadelTelemetryTable AppRequests, AppDependencies, AppTraces, "
             "ApiManagementGatewayLogs, StorageBlobLogs, AZKVAuditLogs "
             f"| where TimeGenerated >= datetime({since}) "
-            "| project TimeGenerated, Source, "
+            "| project TimeGenerated, Source=CitadelTelemetryTable, "
             "OperationId=tostring(column_ifexists('OperationId','')), "
             "RequestId=tostring(column_ifexists('RequestId','')), "
             "OperationName=tostring(column_ifexists('OperationName','')), "
